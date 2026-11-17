@@ -1,0 +1,48 @@
+# The image needs only the app's code, pyproject.toml and uv.lock: keep it small (1 GiB micro EC2).
+
+# Secrets: settings come from the environment, never from a file in the image
+.env
+.env.*
+*.pem
+*.key
+
+# Git, CI, hooks and docs
+.git
+.github
+.gitignore
+.dockerignore
+.pre-commit-config.yaml
+README.md
+compose.yaml
+Dockerfile
+
+# Tests are run in CI, not shipped
+tests
+
+# Python environment, caches and test output
+.venv
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.cache
+.coverage
+.coverage.*
+htmlcov
+coverage.xml
+build
+dist
+*.egg-info
+
+# Local files
+*.sqlite3
+media
+staticfiles
+*.log
+.vscode
+.idea
+.DS_Store
+.claude
+CLAUDE.md
+AGENTS.md

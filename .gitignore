@@ -1,0 +1,45 @@
+# Only source, tests, settings templates and build files are committed. Everything below is made
+# on each machine, holds secrets, or is a local working file.
+
+# Secrets: every real setting lives in .env.backend and .env.frontend (copy the .example files)
+.env
+.env.*
+!.env.*.example
+*.pem
+*.key
+
+# Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# Test and coverage output
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Builds
+build/
+dist/
+*.egg-info/
+
+# Local files Django may write
+*.sqlite3
+media/
+staticfiles/
+*.log
+
+# Editors, OS and local AI-agent notes
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+.claude/
+CLAUDE.md
+AGENTS.md

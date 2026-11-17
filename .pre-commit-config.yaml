@@ -1,0 +1,29 @@
+# Hooks run the tool versions pinned in uv.lock, so local and CI results match.
+# Install both kinds once after cloning: uv run pre-commit install
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: uv run mypy .
+        language: system
+        types: [python]
+        pass_filenames: false
+      # Conventional Commits, and no AI credited as co-author (scripts/check_commit_message.py).
+      - id: commit-message
+        name: commit message
+        entry: python3 scripts/check_commit_message.py
+        language: system
+        stages: [commit-msg]

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  # Every commit pushed or proposed must follow Conventional Commits and credit no AI as
+  # co-author. The same check runs locally as the commit-msg hook; this one cannot be skipped.
+  commit-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check every new commit message
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$AFTER"
+          else
+            range="$AFTER"  # first push of a branch, or history rewritten: check all of it
+          fi
+          status=0
+          for commit in $(git rev-list "$range"); do
+            git log -1 --format=%B "$commit" > "$RUNNER_TEMP/message"
+            python3 scripts/check_commit_message.py "$RUNNER_TEMP/message" || { echo "::error::Commit $commit breaks the rules above"; status=1; }
+          done
+          exit $status
+
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - name: Format
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy .
+      # Every model change ships with its migration file.
+      - name: Check for missing migrations
+        run: uv run python manage.py makemigrations --check --dry-run
+      # Apply every migration to a real database, as a deploy does: public schema first, then
+      # each Consultancy's. Throwaway keys: migrations never sign or seal anything.
+      - name: Run shared migrations
+        run: uv run python manage.py migrate_schemas --shared
+        env:
+          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
+          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
+          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
+      - name: Run tenant migrations
+        run: uv run python manage.py migrate_schemas --tenant
+        env:
+          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
+          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
+          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
+      - name: Tests
+        run: uv run pytest
+
+  # After the checks pass on main: build the slim image and push it to ECR, tagged with the
+  # commit. Deploy it on the server with deploy/deploy.sh <commit>. Needs the repository
+  # variables AWS_REGION and AWS_ROLE_ARN (an IAM role GitHub may assume through OIDC, allowed to
+  # push to the consultancy-crm-backend ECR repository). No AWS keys are stored in GitHub.
+  image:
+    needs: [commit-messages, checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/consultancy-crm-backend:${{ github.sha }}
+          # Unchanged layers (the dependencies) are reused, so most builds take a minute or two.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
