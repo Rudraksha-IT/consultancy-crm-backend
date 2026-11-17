@@ -45,6 +45,9 @@ CONSOLE_LINE = re.compile(
     r"\[unit/test_logging_config\.py: test_console_format_matches_ai_backend, line \d+\] "
     r"\[Tenant: N/A, MainThread: \d+, Correlation ID: N/A\] hello$"
 )
+# Fixed, not uuid4(): parameter values are part of test names, which must be the same in every
+# pytest-xdist worker.
+FIXED_UUID = "3f2b8c1e-6d4a-4f0e-9b7c-2a5d8e1f4c90"
 SECRET = "hunter2-Secret!"  # noqa: S105  # test-only value that must never be logged
 
 
@@ -128,11 +131,11 @@ class TestCorrelationId:
             None,
             "",
             "not-a-uuid",
-            f"{uuid.uuid4()}\nINFO forged line",
-            f"{uuid.uuid4()} ",
+            f"{FIXED_UUID}\nINFO forged line",
+            f"{FIXED_UUID} ",
             "<script>alert(1)</script>",
             "'; DROP TABLE staff_staff; --",
-            uuid.uuid4().hex,
+            uuid.UUID(FIXED_UUID).hex,
             "x" * 10_000,
         ],
     )

@@ -1,6 +1,6 @@
 # Hooks run the tool versions pinned in uv.lock, so local and CI results match.
-# Install both kinds once after cloning: uv run pre-commit install
-default_install_hook_types: [pre-commit, commit-msg]
+# Install all three kinds once after cloning: uv run pre-commit install
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 repos:
   - repo: local
@@ -27,3 +27,11 @@ repos:
         entry: python3 scripts/check_commit_message.py
         language: system
         stages: [commit-msg]
+      # Before every push: format, lint, types and missing migrations (scripts/check-all.sh).
+      - id: check-all
+        name: format, lint, types and migrations
+        entry: sh scripts/check-all.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
