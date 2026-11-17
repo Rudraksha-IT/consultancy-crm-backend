@@ -36,7 +36,65 @@ jobs:
           done
           exit $status
 
-  checks:
+  # Format, lint and types: no database needed, so it runs beside the tests.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Format
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      # mypy reuses what it learned on the last run; a new lock file starts it fresh.
+      - uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: mypy-${{ hashFiles('uv.lock') }}-
+      - name: Type check
+        run: uv run mypy .
+
+  # Every model change ships with its migration file, and every migration applies to a real
+  # database as a deploy does: public schema first, then each Consultancy's. Throwaway keys:
+  # migrations never sign or seal anything.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
+      JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
+      PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Check for missing migrations
+        run: uv run python manage.py makemigrations --check --dry-run
+      - name: Run shared migrations
+        run: uv run python manage.py migrate_schemas --shared
+      - name: Run tenant migrations
+        run: uv run python manage.py migrate_schemas --tenant
+
+  # Every test, spread over all the runner's CPUs (pytest-xdist): each worker has its own test
+  # database. A test file stays on one worker. The slowest 25 tests are listed at the end.
+  tests:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -54,32 +112,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
       - run: uv sync --locked
-      - name: Format
-        run: uv run ruff format --check .
-      - name: Lint
-        run: uv run ruff check .
-      - name: Type check
-        run: uv run mypy .
-      # Every model change ships with its migration file.
-      - name: Check for missing migrations
-        run: uv run python manage.py makemigrations --check --dry-run
-      # Apply every migration to a real database, as a deploy does: public schema first, then
-      # each Consultancy's. Throwaway keys: migrations never sign or seal anything.
-      - name: Run shared migrations
-        run: uv run python manage.py migrate_schemas --shared
-        env:
-          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
-          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
-          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
-      - name: Run tenant migrations
-        run: uv run python manage.py migrate_schemas --tenant
-        env:
-          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
-          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
-          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest -n auto --dist loadfile --durations=25
+
+  # The one check the branch ruleset requires: passes only when every job above passed, so a
+  # failed, cancelled or skipped job can never count as green.
+  checks:
+    if: always()
+    needs: [lint, migrations, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All checks passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "lint, migrations, tests: $RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
 
   # After the checks pass on main: build the slim image and push it to ECR, tagged with the
   # commit. Deploy it on the server with deploy/deploy.sh <commit>. Needs the repository
