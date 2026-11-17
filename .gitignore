@@ -1,10 +1,10 @@
 # Only source, tests, settings templates and build files are committed. Everything below is made
 # on each machine, holds secrets, or is a local working file.
 
-# Secrets: every real setting lives in .env.backend and .env.frontend (copy the .example files)
+# Secrets: your own overrides in .env.backend and .env.frontend (defaults: sample.env.*)
 .env
 .env.*
-!.env.*.example
+!sample.env.*
 *.pem
 *.key
 
