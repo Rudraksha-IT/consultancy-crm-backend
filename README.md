@@ -1,5 +1,7 @@
 # Consultancy CRM — backend
 
+The rules and decisions this repository follows (ADRs, logging, design system, glossary) are in [`docs/`](docs/README.md).
+
 Django + Django REST Framework. One PostgreSQL schema per Consultancy via `django-tenants`,
 resolved from the request's subdomain (ADR 0001: one schema per Consultancy).
 

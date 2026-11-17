@@ -11,6 +11,7 @@
 .github
 .gitignore
 .dockerignore
+docs
 .pre-commit-config.yaml
 README.md
 compose.yaml
