@@ -98,7 +98,7 @@ generated from it, so only active Staff can log in or use a token. Services are 
 Every Staff member, any Role, and only about themselves:
 
 - `GET /api/me/` -> `{name, mobile, email, job_title, role, joined_on, colour_mode, notifications:
-  {task_given, task_due_tomorrow, morning_summary}}`.
+{task_given, task_due_tomorrow, morning_summary}}`.
 - `PATCH /api/me/` with any of `name` (capitalised on save), `mobile` (may be empty),
   `colour_mode` (`device` | `light` | `dark`) and `notifications` (any of its three booleans).
   Role, email, job title and joining date are unknown fields here (400).
@@ -141,7 +141,7 @@ Intakes a Course already has may stay. Each Course answer carries `applications`
   `include_archived=true`, archived Universities and Courses are left out (what pickers use).
 - `GET /api/catalogue/universities/<id>/` -> one University with every Course (archived too).
 - `PUT /api/catalogue/universities/<id>/` (the edit page, issue 92) `{name, country, archived,
-  courses: [{id?, name, level, intakes, archived, documents: [type ids]}], deleted_courses: [ids]}`
+courses: [{id?, name, level, intakes, archived, documents: [type ids]}], deleted_courses: [ids]}`
   saves everything in one transaction or nothing. Courses left out stay as they are; a row without
   an id is a new Course; an active Course needs an Intake; a deleted Course must already be saved
   as archived and unused. Row errors come back keyed by the row's place: `{courses: {"1": {...}}}`.
@@ -153,7 +153,7 @@ Intakes a Course already has may stay. Each Course answer carries `applications`
 - `POST /api/catalogue/universities/` `{name, country}`; `PATCH /api/catalogue/universities/<id>/`
   `{name?, country?, archived?}`.
 - `POST /api/catalogue/universities/<id>/courses/` `{name, level, intakes: ["2027-02", ...],
-  documents?: [type ids]}`;
+documents?: [type ids]}`;
   `PATCH /api/catalogue/courses/<id>/` `{name?, level?, intakes?, archived?}`. 1 to 24 Intakes,
   stored once each, oldest first.
 
@@ -213,13 +213,13 @@ same entries; the screen shows them once, as dots.
 Recorded from 2026-11-15 on; nothing is filled in for the past. The services add History entries
 (who, when, name as it was; a Platform Admin as themselves, never as Staff), shown in Activity:
 
-| Kind | Written by | before / after / detail |
-| --- | --- | --- |
-| `application_status_changed` | `change_application_status` (by hand) | Statuses / University |
-| `visa_status_changed` | `change_visa_status` (by hand or a visa letter) | Statuses / University |
-| `document_verified`, `document_rejected` | `check_document` | after: type; detail: reason |
-| `visa_date_changed` | `change_visa_dates`, one per appointment that really changed | UTC ISO moments, empty for none / `biometrics`, `medical` or `interview` |
-| `task_done` | `set_task_done`, only for a Task about a Student | after: title |
+| Kind                                     | Written by                                                   | before / after / detail                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `application_status_changed`             | `change_application_status` (by hand)                        | Statuses / University                                                    |
+| `visa_status_changed`                    | `change_visa_status` (by hand or a visa letter)              | Statuses / University                                                    |
+| `document_verified`, `document_rejected` | `check_document`                                             | after: type; detail: reason                                              |
+| `visa_date_changed`                      | `change_visa_dates`, one per appointment that really changed | UTC ISO moments, empty for none / `biometrics`, `medical` or `interview` |
+| `task_done`                              | `set_task_done`, only for a Task about a Student             | after: title                                                             |
 
 A Task also keeps `done_by` (None for a Platform Admin) and `done_by_name` (marked "(Platform
 Admin)"); opening it again clears them and `done_at`, and the History entry stays. An Offer
@@ -239,14 +239,14 @@ cards each Role gets, "Counted from", the one-year rule, Stage moves) and
 `staff_progress.services.count_progress(staff_ids, start, end)` (grouped queries, one per
 source). Only records linked to a Staff member count, so a Platform Admin's count for nobody.
 
-| Card | Counted from |
-| --- | --- |
-| `moved_forward`, `students_lost` | their `stage_changed` History (forward along the journey / to Lost) |
-| `applications_made`, `visas_applied_for` | Applications and Visas they added (`created_by`) |
-| `tasks_done` | Tasks they marked done (`done_by`); "Counted from" 2026-11-15 (issue 83) |
-| `visitors_registered`, `new_leads` | Visits they logged / those of kind New |
-| `payments_taken` | Payments they recorded (`recorded_at`), with the amount |
-| `classes_taken`, `attendance_marked` | class days they marked / the marks (Batches on only) |
+| Card                                     | Counted from                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| `moved_forward`, `students_lost`         | their `stage_changed` History (forward along the journey / to Lost)      |
+| `applications_made`, `visas_applied_for` | Applications and Visas they added (`created_by`)                         |
+| `tasks_done`                             | Tasks they marked done (`done_by`); "Counted from" 2026-11-15 (issue 83) |
+| `visitors_registered`, `new_leads`       | Visits they logged / those of kind New                                   |
+| `payments_taken`                         | Payments they recorded (`recorded_at`), with the amount                  |
+| `classes_taken`, `attendance_marked`     | class days they marked / the marks (Batches on only)                     |
 
 Cards: Counsellor 5, Front Desk 3, Teacher 2 (none while Batches is off); an Admin gets the
 Counsellor and Front Desk cards, plus the Teacher cards when they teach a class. The day-by-day
@@ -328,7 +328,7 @@ permission check. An upload is checked from its bytes (PDF, JPG or PNG; 1 byte t
 shown name loses folders and unsafe characters and always ends in the real extension.
 
 - `GET /api/students/<id>/documents/` -> the checklist `{done, total, can_change, items: [{
-  document_type: {id, name}, reason, is_required, state, document}]}`. `state` is
+document_type: {id, name}, reason, is_required, state, document}]}`. `state` is
   `not_received`, `waiting`, `verified` or `rejected` from the newest Document of that type;
   `done` counts required types whose newest Document isn't Rejected. Every Role but Teacher.
   Each `document` has `files: [{id, file_name, content_type, size, uploaded_at, uploaded_by}]`
@@ -347,7 +347,7 @@ shown name loses folders and unsafe characters and always ends in the real exten
   the whole list. Counsellors and Admins only.
 - `GET|POST /api/configuration/document-types/` `{name, needed_by_everyone, usual_group?}`
   (`usual_group`: `applying` (default), `visa` or `statements`), `PATCH
-  /api/configuration/document-types/<id>/` `{needed_by_everyone}` and `DELETE` (only a type not
+/api/configuration/document-types/<id>/` `{needed_by_everyone}` and `DELETE` (only a type not
   needed by everyone, asked for nowhere and with no files; else 400): Admins only. Answers carry
   `usual_group` and `used_by: {countries, courses, students, documents}`.
 
@@ -368,14 +368,14 @@ null` ("Other documents"). Items carry `group`. The profile, Documents page and 
 (`checklist_of` / `checklists_of`, a fixed number of queries).
 
 - `GET /api/configuration/document-lists/` -> `{results: [{country, documents: [{document_type:
-  {id, name}, group}]}]}` for every Country but Other (empty lists too), oldest type first.
+{id, name}, group}]}]}` for every Country but Other (empty lists too), oldest type first.
 - `PUT /api/configuration/document-lists/<country>/` `{documents: [{document_type, group}]}` ->
   that Country's list. Rows of types already there are kept (moved to the new group). An unknown
   Country or `other` is 404. Admins only.
 - `PUT /api/catalogue/courses/<id>/documents/` `{document_types: [ids]}` -> the Course. Admins
   only. Course answers carry `documents: [{id, name}]`; University answers no longer do.
 - `PUT /api/students/<id>/documents/asked/` `{document_types: [ids]}` and `DELETE
-  .../asked/<type id>/` ("Not needed") -> the checklist, which now has `asked: [ids]`. The
+.../asked/<type id>/` ("Not needed") -> the checklist, which now has `asked: [ids]`. The
   Student's counsellor or an Admin; taking off a type that has a file is refused (400), a type not
   asked for this Student is 404.
 - Each list: whole-number ids of this office's types, each once, at most 100, none needed by
@@ -449,18 +449,18 @@ the Platform host; their refresh tokens are recorded in the public schema.
   `POST /api/platform/auth/refresh/` and `POST /api/platform/auth/logout/` as on Consultancy hosts;
   `GET /api/platform/me/` -> `{platform_admin: {id, name, email}}`.
 - `GET /api/platform/consultancies/` -> `[{id, name, subdomain, host, status, status_reason,
-  evaluation_ends_at, paid_until, modules, theme}]`.
+evaluation_ends_at, paid_until, modules, theme}]`.
 - `POST /api/platform/consultancies/` `{name, subdomain, admin_name, admin_email, admin_password,
-  theme?, status?: "evaluation"|"active", paid_until?}` creates the schema, the domain and the first
+theme?, status?: "evaluation"|"active", paid_until?}` creates the schema, the domain and the first
   Admin Staff member (201) in Evaluation for 14 days, or Active when `paid_until` is given; 400
   with field errors otherwise. Unknown fields are refused.
 - `POST /api/platform/consultancies/<id>/status/` `{status, reason?, paid_until?,
-  evaluation_ends_at?}` (dates `YYYY-MM-DD`; `evaluation` extends it to the end of that day, in
+evaluation_ends_at?}` (dates `YYYY-MM-DD`; `evaluation` extends it to the end of that day, in
   Asia/Kathmandu) -> the updated Consultancy, or 400 `{"detail": ...}` for a refused move.
 
 - `GET /api/platform/me/` -> `{platform_admin: {id, name, email}}`.
 - `PATCH /api/platform/me/` `{name?, email?, current_password}` -> `{access, refresh,
-  platform_admin}` (the Next.js server keeps the tokens). A new email signs every other session
+platform_admin}` (the Next.js server keeps the tokens). A new email signs every other session
   out. 400 with field errors, or 429 after 5 wrong current passwords in 15 minutes.
 - `POST /api/platform/me/password/` `{current_password, new_password}` -> `{access, refresh}`;
   every other session is signed out. 400 `{detail, unmet_rules}` for a weak password,
@@ -511,7 +511,8 @@ cd consultancy-crm-backend   # or consultancy-crm-frontend
 docker compose up -d --build
 ```
 
-Then open <http://admin.localhost:8080/platform>.
+Then open <http://acme.localhost:8080> (the demo office, ready after about a minute; see
+"Demo office" below) or the Platform at <http://admin.localhost:8080/platform>.
 
 ### How a request flows
 
@@ -553,6 +554,32 @@ Consultancies live at `<subdomain>.localhost`. Browsers (Chrome, Firefox) and
 systemd-resolved send every `*.localhost` name to `127.0.0.1`, so no `/etc/hosts` edits are
 needed. With other resolvers (e.g. macOS + `curl`), add a line per subdomain to `/etc/hosts`:
 `127.0.0.1 acme.localhost`.
+
+### Demo office (ready on the first start)
+
+Nothing to create by hand: on a fresh stack the one-off `seed` service runs
+`python manage.py seed_demo`, which creates the **Acme Education Consultancy** office through the
+Platform's own setup (the worker builds its schema), then fills it with Staff, Students,
+Applications, Visas, Documents, payments, tasks and two weeks of Clock-in, dated relative to today.
+It takes about a minute after the app is up; `docker compose logs -f seed` shows it working. Once
+the office is there the service exits at once, so later starts keep your changes. For a fresh
+demo again: `docker compose down -v && docker compose up -d`.
+
+Log in at <http://acme.localhost:8080> with password `Demo-Acme-2026!` as any of:
+
+| Email                  | Role                       |
+| ---------------------- | -------------------------- |
+| `admin@acme.com`       | Admin (Ramesh Bhandari)    |
+| `counsellor@acme.com`  | Counsellor (Sita Karki)    |
+| `counsellor2@acme.com` | Counsellor (Bikash Thapa)  |
+| `frontdesk@acme.com`   | Front Desk (Anita Gurung)  |
+| `teacher@acme.com`     | Teacher (Prakash Shrestha) |
+
+It only runs when `SEED_DEMO_DATA=true` (set in `sample.env.backend`; put
+`SEED_DEMO_DATA=false` in `.env.backend` to start empty). Production never sets it and has no
+`seed` service. Clock-in works in the demo because `DEMO_OFFICE_NETWORK` (backend) and
+`DEV_CLIENT_IP` (frontend) hold the same public address. The demo itself is `demo/acme_seed.py`
+in the backend repo: a plain script kept outside ruff and mypy; the command around it is tested.
 
 ### Platform and dev Consultancies
 
