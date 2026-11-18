@@ -51,7 +51,7 @@ max-complexity = 5
 "**/migrations/**" = ["D", "E501", "RUF012"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["access", "applications", "auth_tokens", "batches", "catalogue", "codes", "commission", "communication", "config", "configuration", "documents", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "students", "tasks", "tenancy", "tests", "two_factor"]
+known-first-party = ["access", "applications", "auth_tokens", "batches", "catalogue", "codes", "commission", "communication", "config", "configuration", "documents", "emails", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "students", "tasks", "tenancy", "tests", "two_factor"]
 
 [tool.mypy]
 strict = true
@@ -78,5 +78,5 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["access", "applications", "auth_tokens", "batches", "catalogue", "central_login", "codes", "commission", "communication", "config", "configuration", "documents", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "notifications", "students", "tasks", "tenancy", "home", "visits", "reports", "office_networks", "clock_in", "transfer_requests", "jobs", "two_factor"]
+source = ["access", "applications", "auth_tokens", "batches", "catalogue", "central_login", "codes", "commission", "communication", "config", "configuration", "documents", "emails", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "notifications", "students", "tasks", "tenancy", "home", "visits", "reports", "office_networks", "clock_in", "transfer_requests", "jobs", "two_factor"]
 omit = ["*/migrations/*", "config/wsgi.py", "config/asgi.py", "manage.py"]

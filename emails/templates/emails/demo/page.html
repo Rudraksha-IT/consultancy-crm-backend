@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email preview</title>
+<style>
+  :root { --canvas: #f5f5f4; --paper: #ffffff; --fill: #f0efee; --rule: #e2e1df; --ink: #1c1917; --ink-2: #57534e; --accent: #047857; --accent-ink: #ffffff; --tint: #e7f5ef; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --canvas: #161616; --paper: #1f1f1f; --fill: #262626; --rule: #333333; --ink: #ededed; --ink-2: #b5b5b5; --accent: #34d399; --accent-ink: #0b0b0b; --tint: #12332a; }
+  }
+  :root[data-theme="dark"] { --canvas: #161616; --paper: #1f1f1f; --fill: #262626; --rule: #333333; --ink: #ededed; --ink-2: #b5b5b5; --accent: #34d399; --accent-ink: #0b0b0b; --tint: #12332a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1240px; margin: 0 auto; }
+  h1 { font-size: 24px; line-height: 1.3; margin: 0 0 4px; }
+  .lead { color: var(--ink-2); margin: 0; max-width: 72ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 16px; max-width: 1240px; margin: 0 auto; }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); padding: 2px; }
+  .seg button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 15px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  main { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 20px; padding: 8px 16px 32px; max-width: 1240px; margin: 0 auto; }
+  nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  nav button { width: 100%; min-height: 44px; text-align: left; padding: 10px 12px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--ink); font: inherit; font-size: 15px; cursor: pointer; }
+  nav button:hover { background: var(--fill); }
+  nav button[aria-current="true"] { background: var(--tint); border-color: var(--accent); font-weight: 600; }
+  .panel { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; min-width: 0; }
+  .meta { padding: 16px 20px; border-bottom: 1px solid var(--rule); display: grid; gap: 2px; font-size: 15px; overflow-wrap: anywhere; }
+  .meta h2 { font-size: 20px; margin: 0 0 6px; }
+  .meta .k { color: var(--ink-2); display: inline-block; min-width: 72px; }
+  .stage { padding: 16px; background: var(--fill); display: flex; justify-content: center; }
+  .stage iframe { border: 0; background: #eef0f3; width: 100%; max-width: 760px; height: 900px; border-radius: 10px; }
+  .phone .stage iframe { width: 390px; max-width: 100%; }
+  pre { margin: 0; padding: 20px; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, Menlo, Consolas, monospace; }
+  [hidden], .meta-block { display: none !important; }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); } .stage { padding: 8px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Email preview</h1>
+  <p class="lead">Every email the CRM sends, made by the same builder production uses. "{{ office }}" and every person here are made up.</p>
+</header>
+<div class="controls">
+  <div class="seg" role="group" aria-label="Which emails">
+    <button type="button" data-group="{{ office_group }}" aria-pressed="true">{{ office_group }}</button>
+    <button type="button" data-group="{{ platform_group }}" aria-pressed="false">{{ platform_group }}</button>
+  </div>
+  <div class="seg" role="group" aria-label="Width">
+    <button type="button" data-width="computer" aria-pressed="true">Computer</button>
+    <button type="button" data-width="phone" aria-pressed="false">Phone</button>
+  </div>
+  <div class="seg" role="group" aria-label="Show">
+    <button type="button" data-show="html" aria-pressed="true">Email</button>
+    <button type="button" data-show="text" aria-pressed="false">Plain-text copy</button>
+  </div>
+</div>
+<main>
+  <nav aria-label="Emails">
+    <ul>
+      {% for item in items %}<li data-in="{{ item.group }}"><button type="button" data-email="{{ item.index }}" aria-current="{% if forloop.first %}true{% else %}false{% endif %}">{{ item.title }}</button></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div>
+    {% for item in items %}<section class="meta-block" id="email-{{ item.index }}" aria-label="{{ item.title }}"{% if not forloop.first %} hidden{% endif %}>
+      <div class="meta">
+        <h2>{{ item.subject|default:"(no subject line)" }}</h2>
+        <div><span class="k">From</span> {{ item.from_name }} &lt;{{ from_address }}&gt;</div>
+        {% if item.reply_to %}<div><span class="k">Reply-To</span> {{ item.reply_to }}</div>{% endif %}
+        <div><span class="k">To</span> {{ item.to }}</div>
+      </div>
+      <textarea class="src-html" hidden aria-hidden="true" tabindex="-1">{{ item.html }}</textarea>
+      <textarea class="src-text" hidden aria-hidden="true" tabindex="-1">{{ item.text }}</textarea>
+    </section>
+    {% endfor %}<div class="panel">
+      <div id="meta-slot"></div>
+      <div class="stage" id="view-html"><iframe id="viewer" title="The email" sandbox></iframe></div>
+      <pre id="view-text" hidden></pre>
+    </div>
+  </div>
+</main>
+<script>
+  "use strict";
+  const state = { group: "{{ office_group|escapejs }}", email: 0, show: "html" };
+  const press = (group, attr, value) => document.querySelectorAll(`[${attr}]`).forEach((b) => { if (b.closest(".seg") === group) b.setAttribute("aria-pressed", String(b.getAttribute(attr) === value)); });
+  function draw() {
+    document.querySelectorAll("nav li").forEach((li) => { li.hidden = li.dataset.in !== state.group; });
+    document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", String(Number(b.dataset.email) === state.email)));
+    const chosen = document.getElementById(`email-${state.email}`);
+    document.getElementById("meta-slot").replaceChildren(chosen.querySelector(".meta").cloneNode(true));
+    const viewer = document.getElementById("viewer"), html = chosen.querySelector(".src-html").value;
+    if (viewer.dataset.shown !== String(state.email)) { viewer.srcdoc = html; viewer.dataset.shown = String(state.email); }
+    viewer.title = chosen.getAttribute("aria-label");
+    document.getElementById("view-text").textContent = chosen.querySelector(".src-text").value;
+    document.getElementById("view-html").hidden = state.show !== "html";
+    document.getElementById("view-text").hidden = state.show !== "text";
+  }
+  document.addEventListener("click", (event) => {
+    const b = event.target.closest("button"); if (!b) return;
+    if (b.dataset.group) { state.group = b.dataset.group; press(b.closest(".seg"), "data-group", state.group);
+      const first = [...document.querySelectorAll("nav li")].find((li) => li.dataset.in === state.group).querySelector("button"); state.email = Number(first.dataset.email); }
+    if (b.dataset.width) { document.body.classList.toggle("phone", b.dataset.width === "phone"); press(b.closest(".seg"), "data-width", b.dataset.width); }
+    if (b.dataset.show) { state.show = b.dataset.show; press(b.closest(".seg"), "data-show", state.show); }
+    if (b.dataset.email) state.email = Number(b.dataset.email);
+    draw();
+  });
+  draw();
+</script>
+</body>
+</html>

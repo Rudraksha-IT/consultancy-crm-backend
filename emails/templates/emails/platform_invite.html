@@ -1,0 +1,6 @@
+<p style="margin:0 0 14px;">Hello {{ name }},</p>
+<p style="margin:0 0 14px;">You've been added to the Platform as a Platform Admin. Open the Join page, enter your email and this code, then choose your password:</p>
+{% include "emails/parts/code.html" %}
+{% if link %}{% include "emails/parts/button.html" with href=link label="Open the Join page" %}{% endif %}
+<p style="margin:0 0 14px;">It works for {{ minutes }} minutes, once. After that, ask for a new one.</p>
+<p class="em-muted" style="margin:0 0 14px;color:#5f6b7a;">If you weren't expecting it, you can ignore this email.</p>

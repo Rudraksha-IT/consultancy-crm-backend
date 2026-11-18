@@ -78,6 +78,8 @@ SHARED_APPS = [
     "central_login",
     # The job queue (issue 60): a table in public, run by the `worker` container.
     "jobs",
+    # The email builder, its templates and the demo command (ADR 0023). No models.
+    "emails",
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "rest_framework",
