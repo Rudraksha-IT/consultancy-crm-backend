@@ -1,5 +1,5 @@
 #!/bin/sh
-# Format, lint, types and missing migrations: the fast checks, before every push (pre-commit).
+# Format, lint, types and missing migrations over the whole repo, run by hand when wanted (commits check the same; CI runs it all).
 # Tests run on CI for every pull request; run them here with: uv run pytest -n auto
 set -eu
 echo "== format";      uv run ruff format --check .
