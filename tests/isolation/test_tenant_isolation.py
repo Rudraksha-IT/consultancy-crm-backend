@@ -441,6 +441,49 @@ class TestOfficeLogoIsolation:
         assert xyz.new_client().get("/api/consultancy/logo/1/").content == LOGO_PNG
 
 
+OFFICE_DETAILS_URL = "/api/configuration/office-details/"
+ABC_DETAILS = {
+    "contact_email": "info@abc.com",
+    "phone": "01-4412345",
+    "address_line1": "Putalisadak, Kathmandu",
+    "address_line2": "",
+    "website": "https://abc.com",
+}
+
+
+class TestOfficeDetailsIsolation:
+    def test_each_office_reads_only_its_own_details(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.COUNSELLOR)
+
+        abc.client.put(OFFICE_DETAILS_URL, ABC_DETAILS, format="json")
+
+        assert abc.client.get("/api/context/").json()["consultancy"]["office_details"] == (
+            ABC_DETAILS
+        )
+        theirs = xyz.client.get("/api/context/").json()["consultancy"]
+        assert theirs["has_contact_email"] is False
+        assert "info@abc.com" not in str(theirs)
+
+    def test_an_admins_token_cannot_change_another_offices_details(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz.log_in_as(Role.ADMIN)  # Same primary key as ABC's Admin, so only the schema differs.
+        intruder = xyz.new_client()
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        response = intruder.put(OFFICE_DETAILS_URL, ABC_DETAILS, format="json")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert xyz.client.get("/api/context/").json()["consultancy"]["has_contact_email"] is False
+
+
 class TestModuleIsolation:
     def test_switching_one_consultancys_modules_leaves_another_alone(
         self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
