@@ -44,7 +44,7 @@ EXPORTED_APPS = (
     "visits",
 )
 # Secrets never leave the server, not even in the office's own download.
-SECRET_FIELDS = frozenset({"password", "sms_token_sealed", "email_password_sealed"})
+SECRET_FIELDS = frozenset({"password"})
 # A cell starting with one of these could run as a formula in a spreadsheet.
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 

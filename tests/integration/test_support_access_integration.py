@@ -640,8 +640,7 @@ class TestPlatformOnlyActions:
         assert len(staff_rows) == 2
         students = list(csv.DictReader(io.StringIO(archive.read("students_student.csv").decode())))
         assert students[0]["note"] == "'=HYPERLINK(1)"
-        settings_csv = archive.read("communication_providersettings.csv").decode()
-        assert "sealed" not in settings_csv
+        assert "communication_providersettings.csv" not in names
 
     @pytest.mark.parametrize("role", STAFF_ROLES)
     def test_refused_for_every_staff_role(self, abc: ConsultancyContext, role: Role) -> None:

@@ -28,8 +28,9 @@ from clock_in.models import (
     WorkSessionChange,
 )
 from commission.models import Commission
-from communication.models import Message, ProviderSettings
+from communication.models import Message
 from documents.models import Document, DocumentFile, DocumentRequirement, DocumentType
+from emails.types import OfficeDetails
 from expenses.models import Expense
 from exports.models import ExportRecord
 from fees.models import Fee
@@ -46,6 +47,7 @@ from students.models import Student, WorkExperience
 from tasks.models import Task
 from tenancy.context import activate_public_schema
 from tenancy.models import Consultancy
+from tenancy.services import set_office_details
 from tests.conftest import (
     PLATFORM_TEST_PASSWORD,
     TEST_PASSWORD,
@@ -57,7 +59,7 @@ from tests.conftest import (
     run_queued_jobs,
     use_access_token,
 )
-from tests.fakes import FakeDocumentStorage, FakeSmsGateway
+from tests.fakes import FakeDocumentStorage
 from tests.support_access import open_as_platform_admin
 from tests.support_access import start as start_visit
 from transfer_requests.models import TransferRequest, TransferRequestStatus
@@ -67,7 +69,6 @@ LOGIN_URL = "/api/auth/login/"
 REFRESH_URL = "/api/auth/refresh/"
 LOGOUT_URL = "/api/auth/logout/"
 CONTEXT_URL = "/api/context/"
-COMMS_SETTINGS_URL = "/api/communication/settings/"
 
 
 class TestTenantIsolation:
@@ -3022,71 +3023,67 @@ class TestAttendanceIsolation:
 
 
 class TestCommunicationIsolation:
-    """Issue 25: provider settings and messages never cross Consultancies."""
+    """Issue 04: emails never cross Consultancies, and each goes out under its own office."""
 
-    def _office_with_a_message(
+    def _office_with_an_email(
         self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, label: str
     ) -> tuple[ConsultancyContext, Student]:
-        """An office with SMS set up, its Admin in, and one SMS sent to its Student."""
+        """An office with a contact email, its Admin in, and one email sent to its Student."""
         office = make_consultancy(name, subdomain)
         switch_modules(office.consultancy, {Module.COMMUNICATION})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
         office.log_in_as(Role.ADMIN)
-        settings = {
-            "sms_provider": "sparrow",
-            "sms_sender": label,
-            "sms_token": f"{label}-sms-token-secret",
-            "email_host": "",
-            "email_port": 587,
-            "email_username": "",
-            "email_from": "",
-        }
-        assert office.client.put(COMMS_SETTINGS_URL, settings, format="json").status_code == 200
         with tenant_context(office.consultancy):
             student = Student.objects.create(
-                name=f"{label} Student", phone="9841000001", country="australia", source="walk_in"
+                name=f"{label} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
             )
         sent = office.client.post(
             f"/api/students/{student.pk}/messages/",
-            {"channel": "sms", "body": f"{label} message"},
+            {"subject": f"{label} subject", "body": f"{label} message"},
             format="json",
         )
         assert sent.status_code == 201
         activate_public_schema()  # The request left the connection on this office's schema.
         return office, student
 
-    def test_each_office_sees_only_its_own_settings_and_messages(
+    def test_each_office_sees_only_its_own_emails_sent_under_its_own_name(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, abc_student = self._office_with_a_message(
+        abc, abc_student = self._office_with_an_email(
             make_consultancy, "ABC Education", "abcedu", "ABC"
         )
-        xyz, _ = self._office_with_a_message(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
+        xyz, _ = self._office_with_an_email(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
 
-        assert xyz.client.get(COMMS_SETTINGS_URL).json()["sms_sender"] == "XYZ"
         listed = xyz.client.get("/api/messages/").json()["results"]
-        assert [m["body"] for m in listed] == ["XYZ message"]
-        # The same Student id is XYZ's own Student: XYZ's messages, never ABC's.
+        assert [m["subject"] for m in listed] == ["XYZ subject"]
+        # The same Student id is XYZ's own Student: XYZ's emails, never ABC's.
         same_id = xyz.client.get(f"/api/students/{abc_student.pk}/messages/").json()["results"]
-        assert [m["body"] for m in same_id] == ["XYZ message"]
+        assert [m["subject"] for m in same_id] == ["XYZ subject"]
         other = xyz.client.post(
             f"/api/students/{abc_student.pk + 1000}/messages/",
-            {"channel": "sms", "body": "Hi"},
+            {"subject": "Hi", "body": "Hi"},
             format="json",
         )
         assert other.status_code == status.HTTP_404_NOT_FOUND
-        # XYZ's message went out on XYZ's own account.
-        assert [sms.account.token for sms in FakeSmsGateway.sent] == [
-            "ABC-sms-token-secret",
-            "XYZ-sms-token-secret",
+        # Each email went under its own office's name, with its own contact email.
+        assert [(m.to, m.reply_to, m.from_email.split(" <")[0]) for m in mail.outbox] == [
+            (["student@abcedu.test"], ["info@abcedu.test"], "ABC Education"),
+            (["student@xyzoverseas.test"], ["info@xyzoverseas.test"], "XYZ Overseas"),
         ]
         with tenant_context(abc.consultancy):
-            assert [m.body for m in Message.objects.all()] == ["ABC message"]
+            assert [m.subject for m in Message.objects.all()] == ["ABC subject"]
 
-    def test_a_token_from_one_consultancy_is_refused_on_every_communication_endpoint(
+    def test_a_token_from_one_consultancy_is_refused_on_every_email_endpoint(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, _ = self._office_with_a_message(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_student = self._office_with_a_message(
+        abc, _ = self._office_with_an_email(make_consultancy, "ABC Education", "abcedu", "ABC")
+        xyz, xyz_student = self._office_with_an_email(
             make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
         intruder = api_client(xyz.host)
@@ -3095,51 +3092,41 @@ class TestCommunicationIsolation:
         one_student = f"/api/students/{xyz_student.pk}/messages/"
 
         responses = [
-            intruder.get(COMMS_SETTINGS_URL),
-            intruder.put(COMMS_SETTINGS_URL, {}, format="json"),
-            intruder.post("/api/communication/settings/test-sms/", {}, format="json"),
             intruder.get("/api/messages/"),
             intruder.get(one_student),
-            intruder.post(one_student, {"channel": "sms", "body": "Hi"}, format="json"),
+            intruder.post(one_student, {"subject": "Hi", "body": "Hi"}, format="json"),
         ]
 
-        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 6
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
         with tenant_context(xyz.consultancy):
             assert Message.objects.count() == 1
-            assert ProviderSettings.objects.get().sms_sender == "XYZ"
 
 
 class TestBulkMessageIsolation:
-    """Issue 26: one message to many Students reaches only this Consultancy's Students."""
+    """Issue 04: an email to many Students reaches only this Consultancy's Students."""
 
     def _office(
         self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, label: str
-    ) -> tuple[ConsultancyContext, Batch]:
-        """An office with SMS set up, its Admin in, two Students and a class holding one."""
+    ) -> tuple[ConsultancyContext, Batch, list[Student]]:
+        """An office with a contact email, its Admin in, two Students and a class holding one."""
         office = make_consultancy(name, subdomain)
         switch_modules(office.consultancy, {Module.COMMUNICATION, Module.BATCHES})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
         office.log_in_as(Role.ADMIN)
-        settings = {
-            "sms_provider": "aakash",
-            "sms_sender": "",
-            "sms_token": f"{label}-sms-token-secret",
-            "email_host": "",
-            "email_port": 587,
-            "email_username": "",
-            "email_from": "",
-        }
-        assert office.client.put(COMMS_SETTINGS_URL, settings, format="json").status_code == 200
         teacher = office.add_staff(Role.TEACHER)
         with tenant_context(office.consultancy):
-            first, _ = (
+            people = [
                 Student.objects.create(
                     name=f"{label} Student {n}",
                     phone=f"984100000{n}",
+                    email=f"student{n}@{subdomain}.test",
                     country="australia",
                     source="walk_in",
                 )
                 for n in (1, 2)
-            )
+            ]
             batch = Batch.objects.create(
                 name=f"{label} class",
                 test_type="ielts",
@@ -3148,58 +3135,65 @@ class TestBulkMessageIsolation:
                 starts_on=timezone.localdate(),
                 ends_on=timezone.localdate(),
             )
-            BatchMembership.objects.create(batch=batch, student=first)
+            BatchMembership.objects.create(batch=batch, student=people[0])
         activate_public_schema()
-        return office, batch
+        return office, batch, people
 
-    def test_a_list_or_a_class_goes_only_to_this_offices_students(
+    def test_only_this_offices_students_can_be_chosen_or_pre_ticked(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, abc_batch = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_batch = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
-        body = {"channel": "sms", "body": "Hi"}
-
-        everyone = xyz.client.post("/api/messages/bulk/", {**body, "students": {}}, format="json")
-        in_class = xyz.client.post(
-            "/api/messages/bulk/", {**body, "batch": xyz_batch.pk}, format="json"
+        abc, abc_batch, abc_people = self._office(
+            make_consultancy, "ABC Education", "abcedu", "ABC"
         )
-        other_class = xyz.client.post(
-            "/api/messages/bulk/", {**body, "batch": abc_batch.pk + 1000}, format="json"
+        xyz, xyz_batch, xyz_people = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
+        body = {"subject": "Hi", "body": "Hi"}
 
-        assert (everyone.json()["sent"], in_class.json()["sent"]) == (2, 1)
+        mine = xyz.client.post(
+            "/api/messages/bulk/", {**body, "students": [s.pk for s in xyz_people]}, format="json"
+        )
+        foreign = xyz.client.post(
+            "/api/messages/bulk/",
+            {**body, "students": [max(s.pk for s in abc_people + xyz_people) + 1000]},
+            format="json",
+        )
+        other_class = xyz.client.get("/api/messages/bulk/", {"batch": abc_batch.pk + 1000})
+        pre_ticked = xyz.client.get("/api/messages/bulk/", {"batch": xyz_batch.pk}).json()
+
+        assert mine.json()["sent"] == 2
+        assert foreign.status_code == status.HTTP_400_BAD_REQUEST
         assert other_class.status_code == status.HTTP_404_NOT_FOUND
-        assert xyz.client.get("/api/messages/bulk/").json()["count"] == 2
-        assert {sms.account.token for sms in FakeSmsGateway.sent} == {"XYZ-sms-token-secret"}
-        with tenant_context(xyz.consultancy):
-            assert {m.student.name for m in Message.objects.select_related("student")} == {
-                "XYZ Student 1",
-                "XYZ Student 2",
-            }
+        assert [s["name"] for s in pre_ticked["students"]] == ["XYZ Student 1"]
+        everyone = xyz.client.get("/api/messages/bulk/").json()["students"]
+        assert {s["name"] for s in everyone} == {"XYZ Student 1", "XYZ Student 2"}
+        assert {m.to[0] for m in mail.outbox} == {
+            "student1@xyzoverseas.test",
+            "student2@xyzoverseas.test",
+        }
         with tenant_context(abc.consultancy):
             assert Message.objects.count() == 0
 
     def test_a_token_from_one_consultancy_is_refused_on_bulk_send(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, _ = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_batch = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
+        abc, _, _ = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
+        xyz, xyz_batch, xyz_people = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
+        )
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        body = {"channel": "sms", "body": "Hi"}
+        body = {"subject": "Hi", "body": "Hi", "students": [s.pk for s in xyz_people]}
 
         responses = [
             intruder.get("/api/messages/bulk/"),
             intruder.get("/api/messages/bulk/", {"batch": xyz_batch.pk}),
-            intruder.post("/api/messages/bulk/", {**body, "students": {}}, format="json"),
-            intruder.post("/api/messages/bulk/", {**body, "batch": xyz_batch.pk}, format="json"),
+            intruder.post("/api/messages/bulk/", body, format="json"),
         ]
 
-        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
-        assert FakeSmsGateway.sent == []
-        with tenant_context(xyz.consultancy):
-            assert Message.objects.count() == 0
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
+        assert mail.outbox == []
 
 
 class TestHomeIsolation:

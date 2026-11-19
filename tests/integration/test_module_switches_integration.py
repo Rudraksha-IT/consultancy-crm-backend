@@ -39,7 +39,7 @@ ALL_ON = dict.fromkeys(SWITCHABLE, True)
 # test_fees_integration, test_reports_integration and test_office_networks_integration).
 MODULE_URLS = {
     "batches": "/api/batches/",
-    "communication": "/api/communication/settings/",
+    "communication": "/api/messages/",
     "accounts": "/api/accounts/student-fees/",
     "reports": "/api/reports/students/?months=6",
     "clock_in": "/api/office-networks/",

@@ -31,13 +31,14 @@ from batches.models import Attendance, Batch, BatchMembership, Mark, TestType
 from catalogue.models import Course, CourseLevel, Intake, University
 from commission.services import add_commission
 from commission.types import NewCommission
-from communication.models import Message, ProviderSettings
+from communication.models import Message
 from documents.files import PDF
 from documents.models import Document, DocumentFile, DocumentType
 from documents.services import add_document_type, check_document, upload_document
 from documents.types import NewDocument, NewDocumentType, NewFile
 from documents.verification import Verification
 from documents.visa_letters import NewVisaLetter, add_visa_letter
+from emails.types import OfficeDetails
 from expenses.models import ExpenseCategory, ExpenseMethod
 from expenses.services import add_expense
 from expenses.types import NewExpense
@@ -59,6 +60,7 @@ from staff.types import NewStaff, Office
 from students.journey import set_stage_by_hand, transfer_student
 from students.models import Source, Stage, Student
 from tasks.models import Task
+from tenancy.services import set_office_details
 from tests.conftest import ConsultancyContext, ConsultancyFactory, PlatformContext
 from tests.support_access import Visit, open_as_platform_admin
 from visits.models import Visit as OfficeVisit
@@ -68,16 +70,6 @@ from visits.services import log_follow_up
 NAME = "Platform Ops"
 MARKED_NAME = "Platform Ops (Platform Admin)"
 PDF_BYTES = b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n"
-SMS_SETTINGS = {
-    "sms_provider": "sparrow",
-    "sms_sender": "ABCEDU",
-    "sms_token": "v2_sparrow-secret-token-7Kq",
-    "email_host": "",
-    "email_port": 587,
-    "email_username": "",
-    "email_password": "",
-    "email_from": "",
-}
 
 
 @pytest.fixture
@@ -483,15 +475,12 @@ class TestDocuments:
 
 
 class TestCommunication:
-    def test_settings_and_a_message(self, abc: ConsultancyContext, visit: Visit) -> None:
-        saved = visit.client.put("/api/communication/settings/", SMS_SETTINGS, format="json")
-        assert saved.status_code == 200, saved.content
-        with tenant_context(abc.consultancy):
-            assert ProviderSettings.objects.get().updated_by_id is None
+    def test_an_email(self, abc: ConsultancyContext, visit: Visit) -> None:
+        set_office_details(abc.consultancy, OfficeDetails(contact_email="info@abcedu.test"))
         student = make_student(abc)
         sent = visit.client.post(
             f"/api/students/{student.pk}/messages/",
-            {"channel": "sms", "body": "Your class starts tomorrow."},
+            {"subject": "Your class", "body": "Your class starts tomorrow."},
             format="json",
         )
         assert sent.status_code == 201, sent.content

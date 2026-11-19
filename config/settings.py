@@ -178,8 +178,10 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "config.exceptions.handle_exception",
 }
 
-# Email (Codes for joining and password resets). Locally the console or a catch-all SMTP server
-# (MailHog in Compose); tests replace it with Django's in-memory outbox.
+# Every email the product sends (ADR 0023): Codes, the Central login list and emails to Students,
+# all through this one SMTP account, set only here. Offices never set up an account of their own.
+# Locally the console or a catch-all SMTP server (MailHog in Compose); tests replace it with
+# Django's in-memory outbox.
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
@@ -202,12 +204,7 @@ DOCUMENTS_S3_PUBLIC_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_PUBLIC_ENDPOINT_
 # to a temporary file, not memory.
 DATA_UPLOAD_MAX_NUMBER_FILES = 11
 
-# SMS and email to Students (issue 25) go out on each office's own accounts. Their secrets are
-# sealed with this key (at least 32 characters; see communication.sealing), never SECRET_KEY.
-PROVIDER_SECRETS_KEY = os.environ.get("PROVIDER_SECRETS_KEY", "")
-SMS_GATEWAY = os.environ.get("SMS_GATEWAY", "communication.providers.HttpSmsGateway")
-EMAIL_GATEWAY = os.environ.get("EMAIL_GATEWAY", "communication.providers.SmtpEmailGateway")
-# One message to many Students (issue 26) is sent one by one while the request waits, so it is
+# One email to many Students (issue 26) is sent one by one while the request waits, so it is
 # kept short: at most this many Students, and anyone not reached in this many seconds is recorded
 # as failed. Keep it under gunicorn's --timeout and the Next.js bulk-send timeout.
 BULK_MAX_STUDENTS = 200

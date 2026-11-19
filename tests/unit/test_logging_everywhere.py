@@ -25,31 +25,27 @@ from gunicorn.config import Config
 from gunicorn.glogging import Logger
 from pytest_django.fixtures import Settings
 
-from communication.exceptions import SendFailedError
-from communication.models import SmsProvider
-from communication.providers import HttpSmsGateway, SmtpEmailGateway
-from communication.types import EmailAccount, SmsAccount
 from config import gunicorn as gunicorn_settings
 from config.logging import build_logging, read_slow_request_ms
 from config.logging_utils import redact
 from config.outside_calls import outside_call
 from documents.exceptions import DocumentStorageError
 from documents.storage import S3DocumentStorage
+from emails.exceptions import SendFailedError
+from emails.sender import send_email
+from emails.types import BuiltEmail
 from tests.conftest import JsonLogs, restore_logging
 
-SMS_TOKEN = "v2_secret-token"  # noqa: S105  # test-only credential
-SPARROW = SmsAccount(provider=SmsProvider.SPARROW, sender="ACME", token=SMS_TOKEN)
 MAIL_PASSWORD = "mail-password-x9"  # noqa: S105  # test-only credential
-MAILBOX = EmailAccount(
-    host="smtp.example.com",
-    port=587,
-    username="info@office.example",
-    password=MAIL_PASSWORD,
-    from_address="info@office.example",
+BUILT = BuiltEmail(
+    subject="A subject",
+    html="<p>Namaste, your visa is ready</p>",
+    text="Namaste, your visa is ready",
     from_name="ABC Education",
+    reply_to="info@office.example",
+    inline_images=(),
 )
 RECIPIENT = "sita@example.com"
-MOBILE = "9841000001"
 TEXT = "Namaste, your visa is ready"
 AWS_SECRET = "test-secret-key-never-logged"  # noqa: S105  # test-only credential
 DONE = re.compile(r"outside call done: provider=(\w+) operation=(\w+) duration_ms=\d+")
@@ -122,38 +118,6 @@ class TestS3:
         assert DONE.fullmatch(str(entry["message"])).groups() == ("s3", "delete_object")  # type: ignore[union-attr]
 
 
-class TestSms:
-    def test_no_answer_is_one_error_without_token_text_or_number(self, json_logs: JsonLogs) -> None:
-        def unreachable(*_: object) -> tuple[int, bytes]:
-            raise TimeoutError
-
-        with pytest.raises(SendFailedError):
-            HttpSmsGateway(unreachable).send(SPARROW, MOBILE, TEXT)
-
-        [entry] = _matching(json_logs, FAILED)
-        assert FAILED.fullmatch(str(entry["message"])).groups() == ("sparrow", "send_sms")  # type: ignore[union-attr]
-        assert "TimeoutError" in str(entry["exception"])
-        _no_secrets(json_logs, SMS_TOKEN, MOBILE, TEXT)
-
-    def test_a_refusal_is_an_error_too(self, json_logs: JsonLogs) -> None:
-        def refusing(*_: object) -> tuple[int, bytes]:
-            return 200, b'{"response_code": 1002, "response": "Invalid token v2_secret-token"}'
-
-        with pytest.raises(SendFailedError):
-            HttpSmsGateway(refusing).send(SPARROW, MOBILE, TEXT)
-
-        [entry] = _matching(json_logs, FAILED)
-        assert entry["level"] == "ERROR"
-        _no_secrets(json_logs, SMS_TOKEN, MOBILE, TEXT)
-
-    def test_a_sent_sms_is_info(self, json_logs: JsonLogs) -> None:
-        HttpSmsGateway(lambda *_: (200, b'{"response_code": 200}')).send(SPARROW, MOBILE, TEXT)
-
-        [entry] = _matching(json_logs, DONE)
-        assert entry["level"] == "INFO"
-        _no_secrets(json_logs, SMS_TOKEN, MOBILE, TEXT)
-
-
 class RefusingBackend(BaseEmailBackend):
     """An email server that refuses the recipient, naming them and the password."""
 
@@ -163,27 +127,25 @@ class RefusingBackend(BaseEmailBackend):
 
 class TestEmail:
     def test_a_refused_email_is_one_error_without_password_or_recipient(
-        self, json_logs: JsonLogs
+        self, json_logs: JsonLogs, settings: Settings
     ) -> None:
-        gateway = SmtpEmailGateway(f"{__name__}.RefusingBackend")
+        settings.EMAIL_BACKEND = f"{__name__}.RefusingBackend"
 
         with pytest.raises(SendFailedError):
-            gateway.send(MAILBOX, RECIPIENT, "A subject", TEXT)
+            send_email(BUILT, RECIPIENT)
 
         [entry] = _matching(json_logs, FAILED)
-        assert FAILED.fullmatch(str(entry["message"])).groups() == ("smtp", "send_email")  # type: ignore[union-attr]
+        assert FAILED.fullmatch(str(entry["message"])).groups() == ("email", "send_email")  # type: ignore[union-attr]
         assert "SMTPRecipientsRefused" in str(entry["exception"])
-        _no_secrets(json_logs, RECIPIENT, TEXT, "A subject")
+        _no_secrets(json_logs, RECIPIENT, TEXT, "A subject", MAIL_PASSWORD, "info@office.example")
 
     def test_a_sent_email_is_info(self, json_logs: JsonLogs) -> None:
-        SmtpEmailGateway("django.core.mail.backends.locmem.EmailBackend").send(
-            MAILBOX, RECIPIENT, "A subject", TEXT
-        )
+        send_email(BUILT, RECIPIENT)
 
         assert len(mail.outbox) == 1
         [entry] = _matching(json_logs, DONE)
-        assert DONE.fullmatch(str(entry["message"])).groups() == ("smtp", "send_email")  # type: ignore[union-attr]
-        _no_secrets(json_logs, RECIPIENT, TEXT, MAIL_PASSWORD)
+        assert DONE.fullmatch(str(entry["message"])).groups() == ("email", "send_email")  # type: ignore[union-attr]
+        _no_secrets(json_logs, RECIPIENT, TEXT, "info@office.example")
 
 
 class TestRedaction:

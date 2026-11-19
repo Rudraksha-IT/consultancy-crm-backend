@@ -1,6 +1,8 @@
-"""Communication: one SMS or email to many Students at once, a filtered list or a whole Batch.
+"""Email to many Students at once: the Students are chosen first (ADR 0023).
 
-Spec 90-91; issue 26. The SMS company and the email server are fakes (tests/fakes.py).
+Spec (2026-11-18) story 43 (Plain email only for now) and 51; issue 04. A class or a Student
+list only pre-ticks Students (GET); the email goes to the Students chosen (POST), each their
+own copy. Sent email is read from Django's test mailbox.
 """
 
 from __future__ import annotations
@@ -8,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from django.core import mail
 from django.test import override_settings
 from django_tenants.utils import tenant_context
 from rest_framework import status
@@ -19,9 +22,15 @@ from modules.types import Module
 from staff.models import Role, Staff
 from students.models import Stage, Student
 from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs
-from tests.fakes import SMS_REFUSED_FOR_NUMBER, FakeEmailGateway, FakeSmsGateway
 from tests.integration.test_batches_integration import make_batch
-from tests.integration.test_communication_integration import SETTINGS, save_settings
+from tests.integration.test_communication_integration import (
+    CONTACT_EMAIL,
+    NO_CONTACT_EMAIL,
+    NO_EMAIL_ADDRESS,
+    SEND_FAILED,
+    outbox,
+    set_contact_email,
+)
 from tests.integration.test_stage_and_counsellor_integration import (
     INJECTION_STRINGS,
     log_in,
@@ -30,48 +39,58 @@ from tests.integration.test_stage_and_counsellor_integration import (
 )
 
 if TYPE_CHECKING:
+    from pytest_django.fixtures import Settings
     from rest_framework.response import _MonkeyPatchedResponse
 
 BULK_URL = "/api/messages/bulk/"
 NOT_FOR_TEACHERS = {"detail": "Teachers can't see Students."}
 NOT_FOR_FRONT_DESK = {"detail": "Only Admins, counsellors and teachers can see classes."}
-SMS_NOT_SET_UP = {"channel": ["SMS isn't set up yet. An Admin can set it up in Configuration."]}
-NOBODY = {"detail": "No Students to send to."}
-TOO_MANY = {
-    "detail": f"Message at most {BULK_MAX_STUDENTS} Students at once. Narrow the list first."
-}
-ONE_OF = {"detail": "Choose a class or a Student list."}
+CHOOSE_SOMEONE = {"students": ["Choose at least one Student."]}
+NOT_FOUND = {"students": ["Some of these Students can't be found."]}
+LOST = {"students": ["Lost Students can't be chosen."]}
 TOO_SLOW = "Not sent: sending took too long. Send again to this Student."
 
 
 def send_bulk(office: ConsultancyContext, body: object) -> _MonkeyPatchedResponse:
-    """POST one message to many Students, as given."""
+    """POST one email to many Students, as given."""
     return office.client.post(BULK_URL, body, format="json")
 
 
-def sms(body: str = "Namaste, class is at 7.", **to: object) -> dict[str, object]:
-    """An SMS to the Students named by `to` (a batch, or a Student list's filters)."""
-    return {"channel": "sms", "body": body, **to}
+def bulk(
+    *students: Student | int, subject: str = "Office closed", body: str = ""
+) -> dict[str, object]:
+    """An email to the Students chosen."""
+    ids = [s if isinstance(s, int) else s.pk for s in students]
+    text = body or "Dear Student,\n\nThe office is closed on Friday."
+    return {"subject": subject, "body": text, "students": ids}
 
 
 def stored_messages(office: ConsultancyContext) -> list[Message]:
-    """Every stored message, oldest first, with its Student."""
+    """Every stored email, oldest first, with its Student."""
     with tenant_context(office.consultancy):
         return list(Message.objects.select_related("student").order_by("pk"))
 
 
+def chosen(answer: dict[str, Any]) -> list[str]:
+    """The names of the Students a pre-tick answer gives."""
+    return [student["name"] for student in answer["students"]]
+
+
 @pytest.fixture
 def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
-    """The Consultancy every test here works in, with SMS, email and classes switched on."""
+    """The Consultancy every test here works in, with Email and classes on and a contact email."""
     office = make_consultancy("ABC Education", "abcedu")
     switch_modules(office.consultancy, {Module.COMMUNICATION, Module.BATCHES})
+    set_contact_email(office)
     return office
 
 
 @pytest.fixture
 def admin(abc: ConsultancyContext) -> Staff:
-    """The office's Admin."""
-    return named_staff(abc, "Asha Admin", Role.ADMIN)
+    """The office's Admin, logged in."""
+    staff = named_staff(abc, "Asha Admin", Role.ADMIN)
+    log_in(abc, staff)
+    return staff
 
 
 @pytest.fixture
@@ -87,216 +106,291 @@ def teacher(abc: ConsultancyContext) -> Staff:
 
 
 @pytest.fixture
-def set_up(abc: ConsultancyContext, admin: Staff) -> None:
-    """The Admin has saved the SMS and email accounts, and is logged in."""
-    log_in(abc, admin)
-    assert save_settings(abc, SETTINGS).status_code == status.HTTP_200_OK
-
-
-@pytest.fixture
 def students(abc: ConsultancyContext, counsellor: Staff) -> dict[str, Student]:
-    """Three Onboarded Students of Ram's, one with a landline, and an unassigned Lead."""
+    """Ram's Students Sita and Gita (email), Hari (no email), an unassigned Lead and a Lost one."""
     return {
         "sita": make_student(
             abc, counsellor, Stage.COUNSELLING, name="Sita Gurung", email="sita@example.com"
         ),
-        "hari": make_student(
-            abc, counsellor, Stage.COUNSELLING, name="Hari Thapa", phone="9841000002"
-        ),
+        "hari": make_student(abc, counsellor, Stage.COUNSELLING, name="Hari Thapa"),
         "gita": make_student(
-            abc, counsellor, Stage.COUNSELLING, name="Gita Rai", phone="014412345"
+            abc, counsellor, Stage.COUNSELLING, name="Gita Rai", email="gita@example.com"
         ),
-        "maya": make_student(abc, None, Stage.LEAD, name="Maya Lama", phone="9841000004"),
+        "maya": make_student(abc, None, Stage.LEAD, name="Maya Lama", email="maya@example.com"),
+        "lila": make_student(
+            abc, counsellor, Stage.LOST, name="Lila Shrestha", email="lila@example.com"
+        ),
     }
 
 
 @pytest.fixture
 def ielts(abc: ConsultancyContext, teacher: Staff, students: dict[str, Student]) -> int:
-    """The IELTS Morning class, with Sita and Maya in it; returns its id."""
-    batch = make_batch(abc, teacher, (students["sita"], students["maya"]), name="IELTS Morning")
-    return batch.pk
+    """The IELTS Morning class, with Sita, Hari, Maya and Lila in it; returns its id."""
+    members = tuple(students[name] for name in ("sita", "hari", "maya", "lila"))
+    return make_batch(abc, teacher, members, name="IELTS Morning").pk
 
 
-class TestSendingToAStudentList:
+class TestSendingToTheStudentsChosen:
     @pytest.mark.parametrize("role", [Role.ADMIN, Role.COUNSELLOR, Role.FRONT_DESK])
-    def test_every_student_matching_the_filters_gets_one(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student], role: Role
+    def test_each_student_chosen_gets_their_own_copy(
+        self, abc: ConsultancyContext, students: dict[str, Student], role: Role
     ) -> None:
         sender = abc.log_in_as(role)
 
-        response = send_bulk(abc, sms(students={"stage": "counselling"}))
+        response = send_bulk(abc, bulk(students["sita"], students["gita"], students["maya"]))
 
         assert response.status_code == status.HTTP_201_CREATED
+        assert response.json() == {"sent": 3, "failed": 0, "failed_messages": []}
+        assert sorted(sent.to[0] for sent in outbox()) == [
+            "gita@example.com",
+            "maya@example.com",
+            "sita@example.com",
+        ]
+        assert all(len(sent.to) == 1 and sent.cc == [] and sent.bcc == [] for sent in outbox())
+        assert all(sent.reply_to == [CONTACT_EMAIL] for sent in outbox())
+        assert all("Dear Student," in sent.body for sent in outbox())
         messages = stored_messages(abc)
-        assert sorted(m.student.name for m in messages) == ["Gita Rai", "Hari Thapa", "Sita Gurung"]
         assert {m.sent_by_id for m in messages} == {sender.pk}
-        assert sorted(s.to for s in FakeSmsGateway.sent) == ["9841000001", "9841000002"]
+        assert {(m.channel, m.subject, m.status) for m in messages} == {
+            ("email", "Office closed", "sent")
+        }
+
+    def test_a_student_without_an_address_fails_alone(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        response = send_bulk(abc, bulk(students["sita"], students["hari"]))
+
         answer = response.json()
-        assert (answer["sent"], answer["failed"]) == (2, 1)
+        assert (answer["sent"], answer["failed"]) == (1, 1)
         [failed] = answer["failed_messages"]
-        assert failed["student"]["name"] == "Gita Rai"
-        assert failed["error"] == "014412345 isn't a 10-digit Nepali mobile number."
-        assert failed["status"] == "failed"
-
-    def test_the_search_source_and_counsellor_filters_apply(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        responses = [
-            send_bulk(abc, sms(students={"q": "hari"})),
-            send_bulk(abc, sms(students={"counsellor": "none", "source": "walk_in"})),
-        ]
-
-        assert [r.json()["sent"] for r in responses] == [1, 1]
-        assert [s.to for s in FakeSmsGateway.sent] == ["9841000002", "9841000004"]
-
-    def test_assigned_to_me_means_the_sender(
-        self, abc: ConsultancyContext, set_up: None, counsellor: Staff, students: dict[str, Student]
-    ) -> None:
-        log_in(abc, counsellor)
-
-        response = send_bulk(abc, sms(students={"counsellor": "me"}))
-
-        assert (response.json()["sent"], response.json()["failed"]) == (2, 1)
-
-    def test_no_filters_means_every_student(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        response = send_bulk(abc, sms(students={}))
-
-        assert len(stored_messages(abc)) == len(students)
-        assert response.json()["sent"] == 3
-
-    def test_an_email_goes_to_every_student_and_those_without_an_address_fail(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        response = send_bulk(
-            abc, {"channel": "email", "body": "Namaste,\n\nOffice closed.", "students": {}}
+        assert (failed["student"]["name"], failed["error"], failed["subject"]) == (
+            "Hari Thapa",
+            NO_EMAIL_ADDRESS,
+            "Office closed",
         )
+        assert [sent.to for sent in outbox()] == [["sita@example.com"]]
 
-        assert (response.json()["sent"], response.json()["failed"]) == (1, 3)
-        assert [e.to for e in FakeEmailGateway.sent] == ["sita@example.com"]
-        assert {m["error"] for m in response.json()["failed_messages"]} == {
-            "This Student has no email address."
-        }
-
-
-class TestSendingToABatch:
-    @pytest.mark.parametrize("role", [Role.ADMIN, Role.COUNSELLOR])
-    def test_everyone_in_the_class_gets_one(
-        self, abc: ConsultancyContext, set_up: None, ielts: int, role: Role
+    def test_a_student_chosen_twice_gets_one_copy(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        abc.log_in_as(role)
+        response = send_bulk(abc, bulk(students["sita"], students["sita"]))
 
-        response = send_bulk(abc, sms(batch=ielts))
+        assert response.json()["sent"] == 1
+        assert len(outbox()) == 1
 
-        assert response.status_code == status.HTTP_201_CREATED
-        assert (response.json()["sent"], response.json()["failed"]) == (2, 0)
-        assert response.json()["failed_messages"] == []
-        assert sorted(m.student.name for m in stored_messages(abc)) == ["Maya Lama", "Sita Gurung"]
-
-    def test_front_desk_cant_message_a_class(
-        self, abc: ConsultancyContext, set_up: None, ielts: int
+    def test_a_mail_server_that_fails_fails_each_without_its_words(
+        self,
+        abc: ConsultancyContext,
+        admin: Staff,
+        students: dict[str, Student],
+        settings: Settings,
     ) -> None:
-        abc.log_in_as(Role.FRONT_DESK)
+        settings.EMAIL_BACKEND = "tests.fakes.BrokenEmailBackend"
 
-        responses = [send_bulk(abc, sms(batch=ielts)), abc.client.get(BULK_URL, {"batch": ielts})]
-
-        assert [r.status_code for r in responses] == [status.HTTP_403_FORBIDDEN] * 2
-        assert all(r.json() == NOT_FOR_FRONT_DESK for r in responses)
-        assert stored_messages(abc) == []
-
-    def test_an_unknown_class_is_not_found(self, abc: ConsultancyContext, set_up: None) -> None:
-        responses = [
-            send_bulk(abc, sms(batch=999_999)),
-            abc.client.get(BULK_URL, {"batch": 999_999}),
-        ]
-
-        assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
-
-    def test_with_classes_switched_off_a_class_is_not_found_and_lists_still_work(
-        self, abc: ConsultancyContext, set_up: None, ielts: int
-    ) -> None:
-        switch_modules(abc.consultancy, {Module.COMMUNICATION})
-
-        responses = [send_bulk(abc, sms(batch=ielts)), abc.client.get(BULK_URL, {"batch": ielts})]
-
-        assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
-        assert stored_messages(abc) == []
-        assert send_bulk(abc, sms(students={})).status_code == status.HTTP_201_CREATED
-        switch_modules(abc.consultancy, {Module.COMMUNICATION, Module.BATCHES})
-        assert send_bulk(abc, sms(batch=ielts)).json()["sent"] == 2
-
-
-class TestOneFailureNeverStopsTheRest:
-    def test_a_refusal_for_one_number_fails_only_that_student(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        FakeSmsGateway.refused_numbers.add("9841000001")
-
-        response = send_bulk(abc, sms(students={"stage": "counselling"}))
+        response = send_bulk(abc, bulk(students["sita"], students["gita"]))
 
         answer = response.json()
-        assert (answer["sent"], answer["failed"]) == (1, 2)
-        assert {m["student"]["name"]: m["error"] for m in answer["failed_messages"]} == {
-            "Sita Gurung": SMS_REFUSED_FOR_NUMBER,
-            "Gita Rai": "014412345 isn't a 10-digit Nepali mobile number.",
-        }
-        assert [s.to for s in FakeSmsGateway.sent] == ["9841000002"]
-        assert len(stored_messages(abc)) == 3
-
-    def test_each_student_has_their_own_record(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        send_bulk(abc, sms("Hello all", students={"stage": "counselling"}))
-
-        rows = {(m.student.name, m.status, m.sent_to, m.body) for m in stored_messages(abc)}
-        assert rows == {
-            ("Sita Gurung", "sent", "9841000001", "Hello all"),
-            ("Hari Thapa", "sent", "9841000002", "Hello all"),
-            ("Gita Rai", "failed", "014412345", "Hello all"),
-        }
+        assert (answer["sent"], answer["failed"]) == (0, 2)
+        assert {m["error"] for m in answer["failed_messages"]} == {SEND_FAILED}
 
     @override_settings(BULK_SEND_SECONDS=0)
     def test_students_not_reached_in_time_are_recorded_as_failed(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
-    ) -> None:
-        response = send_bulk(abc, sms(students={"stage": "counselling"}))
-
-        assert (response.json()["sent"], response.json()["failed"]) == (0, 3)
-        assert FakeSmsGateway.sent == []
-        assert {m.error for m in stored_messages(abc)} == {TOO_SLOW}
-
-    def test_a_channel_not_set_up_is_refused_and_nothing_recorded(
         self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        log_in(abc, admin)
+        response = send_bulk(abc, bulk(students["sita"], students["gita"]))
 
-        response = send_bulk(abc, sms(students={}))
+        assert response.json()["failed"] == 2
+        assert {m.error for m in stored_messages(abc)} == {TOO_SLOW}
+        assert outbox() == []
+
+    def test_without_a_contact_email_nothing_is_sent_or_recorded(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        set_contact_email(abc, "")
+
+        response = send_bulk(abc, bulk(students["sita"]))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == SMS_NOT_SET_UP
+        assert response.json() == NO_CONTACT_EMAIL
         assert stored_messages(abc) == []
+        assert outbox() == []
+
+    def test_injection_shaped_text_is_kept_as_typed(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        for text in INJECTION_STRINGS:
+            send_bulk(abc, bulk(students["sita"], subject=text, body=text))
+
+        assert [m.body for m in stored_messages(abc)] == INJECTION_STRINGS
+        assert all("<script>" not in str(sent.alternatives[0][0]) for sent in outbox())
+
+    def test_logs_counts_and_ids_only(
+        self,
+        abc: ConsultancyContext,
+        admin: Staff,
+        students: dict[str, Student],
+        json_logs: JsonLogs,
+    ) -> None:
+        send_bulk(abc, bulk(students["sita"], students["hari"], subject="Secret subject"))
+
+        [line] = json_logs.with_message("Bulk email sent")
+        assert line["message"] == f"Bulk email sent: by_staff_id={admin.pk}, sent=1, failed=1"
+        for private in ("Secret subject", "sita@example.com", "The office is closed"):
+            assert private not in json_logs.text()
 
 
-class TestHowManyItGoesTo:
-    def test_counts_a_student_list_and_a_class(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student], ielts: int
+class TestRefusedBulkEmails:
+    def _refused(self, abc: ConsultancyContext, body: object) -> dict[str, Any]:
+        response = send_bulk(abc, body)
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert stored_messages(abc) == []
+        assert outbox() == []
+        answer: dict[str, Any] = response.json()
+        return answer
+
+    def test_unknown_fields_are_refused(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        for extra in ({"to": "x@evil.example"}, {"channel": "sms"}, {"batch": 1}):
+            answer = self._refused(abc, {**bulk(students["sita"]), **extra})
+            assert answer == {"detail": ["Unknown field."]}
+
+    def test_nobody_chosen_is_refused(self, abc: ConsultancyContext, admin: Staff) -> None:
+        assert self._refused(abc, bulk()) == CHOOSE_SOMEONE
+
+    def test_a_lost_student_cant_be_chosen(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        assert self._refused(abc, bulk(students["sita"], students["lila"])) == LOST
+
+    def test_an_unknown_student_is_refused(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        assert self._refused(abc, bulk(students["sita"], 999_999)) == NOT_FOUND
+
+    @override_settings(BULK_MAX_STUDENTS=2)
+    def test_too_many_students_are_refused(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        answer = self._refused(abc, bulk(students["sita"], students["gita"], students["maya"]))
+
+        assert answer == {"students": ["Email at most 2 Students at once."]}
+
+    @pytest.mark.parametrize(
+        ("body", "field"),
+        [
+            ({"body": "Hi", "students": [1]}, "subject"),
+            ({"subject": "Hi", "students": [1]}, "body"),
+            ({"subject": "Hi", "body": "Hi"}, "students"),
+            ({"subject": "Two\nlines", "body": "Hi", "students": [1]}, "subject"),
+            ({"subject": "x" * 151, "body": "Hi", "students": [1]}, "subject"),
+            ({"subject": "Hi", "body": "x" * 10_001, "students": [1]}, "body"),
+            ({"subject": "Hi", "body": "Hi", "students": "1"}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": 1}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": {"stage": "lead"}}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": ["1"]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [True]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [1.5]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [0]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [2**63]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [None]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": None}, "students"),
+        ],
+    )
+    def test_wrong_input_is_refused(
+        self,
+        abc: ConsultancyContext,
+        admin: Staff,
+        students: dict[str, Student],
+        body: dict[str, object],
+        field: str,
+    ) -> None:
+        assert field in self._refused(abc, body)
+
+    @pytest.mark.parametrize("body", [["Hi"], "Hi", 7, None])
+    def test_a_body_that_isnt_an_object_is_refused(
+        self, abc: ConsultancyContext, admin: Staff, body: object
+    ) -> None:
+        self._refused(abc, body)
+
+    def test_a_form_body_is_refused(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        response = abc.client.post(BULK_URL, {"subject": "Hi", "body": "Hi"})
+
+        assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+
+class TestPreTicking:
+    """A class or the Student list's filters only pre-tick the Students who can be chosen."""
+
+    def test_a_class_pre_ticks_its_students_with_an_address_who_arent_lost(
+        self, abc: ConsultancyContext, admin: Staff, ielts: int
+    ) -> None:
+        response = abc.client.get(BULK_URL, {"batch": ielts})
+
+        assert response.status_code == status.HTTP_200_OK
+        answer = response.json()
+        assert chosen(answer) == ["Maya Lama", "Sita Gurung"]
+        assert (answer["count"], answer["max"]) == (2, BULK_MAX_STUDENTS)
+        assert set(answer["students"][0]) == {"id", "name", "email", "stage"}
+
+    def test_the_student_lists_filters_pre_tick_too(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
         answers = [
-            abc.client.get(BULK_URL, {"stage": "counselling"}),
-            abc.client.get(BULK_URL, {"q": "maya"}),
-            abc.client.get(BULK_URL),
-            abc.client.get(BULK_URL, {"batch": ielts}),
+            abc.client.get(BULK_URL, {"stage": "counselling"}).json(),
+            abc.client.get(BULK_URL, {"q": "maya"}).json(),
+            abc.client.get(BULK_URL).json(),
         ]
 
-        assert [r.status_code for r in answers] == [status.HTTP_200_OK] * 4
-        assert [r.json() for r in answers] == [
-            {"count": 3, "max": BULK_MAX_STUDENTS},
-            {"count": 1, "max": BULK_MAX_STUDENTS},
-            {"count": 4, "max": BULK_MAX_STUDENTS},
-            {"count": 2, "max": BULK_MAX_STUDENTS},
+        assert [chosen(answer) for answer in answers] == [
+            ["Gita Rai", "Sita Gurung"],
+            ["Maya Lama"],
+            ["Gita Rai", "Maya Lama", "Sita Gurung"],
         ]
-        assert stored_messages(abc) == []
+
+    def test_assigned_to_me_means_the_one_asking(
+        self, abc: ConsultancyContext, counsellor: Staff, students: dict[str, Student]
+    ) -> None:
+        log_in(abc, counsellor)
+
+        answer = abc.client.get(BULK_URL, {"counsellor": "me"}).json()
+
+        assert chosen(answer) == ["Gita Rai", "Sita Gurung"]
+
+    @override_settings(BULK_MAX_STUDENTS=2)
+    def test_at_most_the_limit_is_pre_ticked_and_all_are_counted(
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
+    ) -> None:
+        answer = abc.client.get(BULK_URL).json()
+
+        assert (len(answer["students"]), answer["count"], answer["max"]) == (2, 3, 2)
+
+    def test_front_desk_cant_pre_tick_a_class(self, abc: ConsultancyContext, ielts: int) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+
+        response = abc.client.get(BULK_URL, {"batch": ielts})
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json() == NOT_FOR_FRONT_DESK
+
+    def test_an_unknown_class_is_not_found(self, abc: ConsultancyContext, admin: Staff) -> None:
+        response = abc.client.get(BULK_URL, {"batch": 999_999})
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_with_classes_switched_off_a_class_is_not_found_and_lists_still_work(
+        self, abc: ConsultancyContext, admin: Staff, ielts: int
+    ) -> None:
+        switch_modules(abc.consultancy, {Module.COMMUNICATION})
+
+        responses = [abc.client.get(BULK_URL, {"batch": ielts}), abc.client.get(BULK_URL)]
+
+        assert [r.status_code for r in responses] == [
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_200_OK,
+        ]
 
     @pytest.mark.parametrize(
         "query",
@@ -313,133 +407,33 @@ class TestHowManyItGoesTo:
         ],
     )
     def test_bad_queries_are_refused(
-        self, abc: ConsultancyContext, set_up: None, query: dict[str, str]
+        self, abc: ConsultancyContext, admin: Staff, query: dict[str, str]
     ) -> None:
         response = abc.client.get(BULK_URL, query)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-
-class TestRefusedBulkMessages:
-    @pytest.fixture(autouse=True)
-    def ready(self, set_up: None, students: dict[str, Student]) -> None:
-        """SMS and email are set up, the Admin is logged in, and there are Students."""
-
-    def _refused(self, abc: ConsultancyContext, body: object) -> dict[str, Any]:
-        response = send_bulk(abc, body)
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert stored_messages(abc) == []
-        assert FakeSmsGateway.sent == []
-        assert FakeEmailGateway.sent == []
-        answer: dict[str, Any] = response.json()
-        return answer
-
-    def test_unknown_fields_are_refused(self, abc: ConsultancyContext) -> None:
-        assert self._refused(abc, sms(students={}, to="9800000000")) == {
-            "detail": ["Unknown field."]
-        }
-        assert self._refused(abc, sms(students={"page": 2})) == {
-            "students": {"detail": ["Unknown field."]}
-        }
-
-    def test_a_class_or_a_student_list_is_needed_but_not_both(
-        self, abc: ConsultancyContext, ielts: int
-    ) -> None:
-        assert self._refused(abc, sms()) == ONE_OF
-        assert self._refused(abc, sms(batch=ielts, students={})) == ONE_OF
-
-    @pytest.mark.parametrize(
-        ("body", "field"),
-        [
-            ({"body": "Hi", "students": {}}, "channel"),
-            ({"channel": "sms", "students": {}}, "body"),
-            ({"channel": "whatsapp", "body": "Hi", "students": {}}, "channel"),
-            ({"channel": "sms", "body": "", "students": {}}, "body"),
-            ({"channel": "sms", "body": 42, "students": {}}, "body"),
-            ({"channel": "sms", "body": "x" * 801, "students": {}}, "body"),
-            ({"channel": "email", "body": "x" * 5001, "students": {}}, "body"),
-            ({"channel": "sms", "body": "bell\x07", "students": {}}, "body"),
-            (sms(batch="one"), "batch"),
-            (sms(batch=True), "batch"),
-            (sms(batch=1.5), "batch"),
-            (sms(batch=0), "batch"),
-            (sms(batch=None), "batch"),
-            (sms(students=[]), "students"),
-            (sms(students="all"), "students"),
-            (sms(students=None), "students"),
-            (sms(students={"stage": "sleeping"}), "students"),
-            (sms(students={"source": "pigeon"}), "students"),
-            (sms(students={"counsellor": "x"}), "students"),
-            (sms(students={"q": "x" * 101}), "students"),
-            (sms(students={"q": 5}), "students"),
-        ],
-    )
-    def test_wrong_input_is_refused(
-        self, abc: ConsultancyContext, body: dict[str, object], field: str
-    ) -> None:
-        assert field in self._refused(abc, body)
-
-    @pytest.mark.parametrize("text", INJECTION_STRINGS)
     def test_an_injection_shaped_search_finds_nobody(
-        self, abc: ConsultancyContext, text: str
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        assert self._refused(abc, sms(students={"q": text})) == NOBODY
-
-    @pytest.mark.parametrize("text", INJECTION_STRINGS)
-    def test_injection_shaped_text_is_sent_and_kept_exactly_as_typed(
-        self, abc: ConsultancyContext, text: str
-    ) -> None:
-        send_bulk(abc, sms(text, students={"stage": "counselling"}))
-
-        assert {m.body for m in stored_messages(abc)} == {text}
-        assert {s.text for s in FakeSmsGateway.sent} == {text}
-
-    def test_nobody_matching_is_refused(self, abc: ConsultancyContext) -> None:
-        assert self._refused(abc, sms(students={"stage": "visa"})) == NOBODY
-
-    def test_an_empty_class_is_refused(self, abc: ConsultancyContext, teacher: Staff) -> None:
-        empty = make_batch(abc, teacher, name="PTE Evening")
-
-        assert self._refused(abc, sms(batch=empty.pk)) == NOBODY
-
-    @override_settings(BULK_MAX_STUDENTS=2)
-    def test_too_many_students_are_refused(self, abc: ConsultancyContext) -> None:
-        answer = self._refused(abc, sms(students={"stage": "counselling"}))
-
-        assert answer == {"detail": "Message at most 2 Students at once. Narrow the list first."}
-        assert abc.client.get(BULK_URL, {"stage": "counselling"}).json() == {"count": 3, "max": 2}
-
-    @pytest.mark.parametrize("body", [["sms"], "sms", 7, None])
-    def test_a_body_that_isnt_an_object_is_refused(
-        self, abc: ConsultancyContext, body: object
-    ) -> None:
-        self._refused(abc, body)
-
-    def test_a_form_body_is_refused(self, abc: ConsultancyContext) -> None:
-        response = abc.client.post(BULK_URL, {"channel": "sms", "body": "Hi"})
-
-        assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        for text in INJECTION_STRINGS:
+            answer = abc.client.get(BULK_URL, {"q": text[:100]}).json()
+            assert answer["students"] == []
 
 
 class TestBulkAccess:
-    def test_teachers_cant_send_or_count(
-        self, abc: ConsultancyContext, set_up: None, ielts: int
+    def test_teachers_cant_send_or_pre_tick(
+        self, abc: ConsultancyContext, teacher: Staff, students: dict[str, Student]
     ) -> None:
-        abc.log_in_as(Role.TEACHER)
+        log_in(abc, teacher)
 
-        responses = [
-            send_bulk(abc, sms(batch=ielts)),
-            send_bulk(abc, sms(students={})),
-            abc.client.get(BULK_URL),
-        ]
+        responses = [abc.client.get(BULK_URL), send_bulk(abc, bulk(students["sita"]))]
 
-        assert [r.status_code for r in responses] == [status.HTTP_403_FORBIDDEN] * 3
+        assert [r.status_code for r in responses] == [status.HTTP_403_FORBIDDEN] * 2
         assert all(r.json() == NOT_FOR_TEACHERS for r in responses)
-        assert stored_messages(abc) == []
+        assert outbox() == []
 
-    def test_logged_out_is_refused(
-        self, abc: ConsultancyContext, students: dict[str, Student]
-    ) -> None:
+    def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         logged_out = abc.new_client()
 
         responses = [logged_out.get(BULK_URL), logged_out.post(BULK_URL, {}, format="json")]
@@ -447,35 +441,19 @@ class TestBulkAccess:
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
 
     def test_switched_off_it_is_not_found(
-        self, abc: ConsultancyContext, set_up: None, students: dict[str, Student]
+        self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        switch_modules(abc.consultancy, {Module.BATCHES})
+        switch_modules(abc.consultancy, set())
 
-        responses = [send_bulk(abc, sms(students={})), abc.client.get(BULK_URL)]
+        responses = [send_bulk(abc, bulk(students["sita"])), abc.client.get(BULK_URL)]
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
-        assert stored_messages(abc) == []
+        assert len(mail.outbox) == 0
 
     @pytest.mark.parametrize("method", ["put", "patch", "delete"])
     def test_only_the_methods_needed_are_allowed(
-        self, abc: ConsultancyContext, set_up: None, method: str
+        self, abc: ConsultancyContext, admin: Staff, method: str
     ) -> None:
         response = getattr(abc.client, method)(BULK_URL, {}, format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
-
-    def test_logs_counts_and_ids_only(
-        self,
-        abc: ConsultancyContext,
-        set_up: None,
-        students: dict[str, Student],
-        json_logs: JsonLogs,
-    ) -> None:
-        send_bulk(abc, sms("Secret plans for Sita", students={"stage": "counselling"}))
-
-        logged = json_logs.text()
-        assert "Bulk message sent" in logged
-        assert "sent=2, failed=1" in logged
-        assert "Secret plans" not in logged
-        assert "9841000001" not in logged
-        assert "Sita Gurung" not in logged

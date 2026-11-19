@@ -33,7 +33,7 @@ from tenancy.context import activate_public_schema
 from tenancy.models import Consultancy
 from tenancy.services import create_consultancy
 from tenancy.subdomains import build_host, get_platform_host
-from tests.fakes import FakeDocumentStorage, FakeEmailGateway, FakeSmsGateway
+from tests.fakes import FakeDocumentStorage
 
 __all__ = ["build_host"]
 
@@ -45,7 +45,6 @@ TEST_INTERNAL_API_TOKEN = "test-internal-api-token-0123456789abcdef"  # noqa: S1
 # What Django signs login tokens with (ADR 0003); test-only.
 TEST_JWT_SIGNING_KEY = "test-jwt-signing-key-0123456789abcdefghij"
 # What Django seals SMS and email provider secrets with (issue 25); test-only.
-TEST_PROVIDER_SECRETS_KEY = "test-provider-secrets-key-0123456789abcdef"
 # What the Central login's index of Staff emails is hashed with (issue 44); test-only.
 TEST_STAFF_DIRECTORY_KEY = "test-staff-directory-key-0123456789abcdef"
 # A Fernet key that seals authenticator secrets (issue 61); test-only.
@@ -263,31 +262,9 @@ def fake_document_storage(settings: Settings) -> Iterator[type[FakeDocumentStora
 
 
 @pytest.fixture(autouse=True)
-def provider_secrets_key(settings: Settings) -> None:
-    """Give Django the key it seals SMS and email provider secrets with."""
-    settings.PROVIDER_SECRETS_KEY = TEST_PROVIDER_SECRETS_KEY
-
-
-@pytest.fixture(autouse=True)
 def two_factor_secrets_key(settings: Settings) -> None:
     """Give Django the key it seals authenticator secrets with (issue 61)."""
     settings.TWO_FACTOR_SECRETS_KEY = TEST_TWO_FACTOR_SECRETS_KEY
-
-
-@pytest.fixture(autouse=True)
-def fake_gateways(settings: Settings) -> Iterator[None]:
-    """Send SMS and email to fakes in memory, never to a real company, empty for every test."""
-    settings.SMS_GATEWAY = "tests.fakes.FakeSmsGateway"
-    settings.EMAIL_GATEWAY = "tests.fakes.FakeEmailGateway"
-    for gateway in (FakeSmsGateway, FakeEmailGateway):
-        gateway.sent.clear()
-        gateway.failure = None
-    FakeSmsGateway.refused_numbers.clear()
-    yield
-    for gateway in (FakeSmsGateway, FakeEmailGateway):
-        gateway.sent.clear()
-        gateway.failure = None
-    FakeSmsGateway.refused_numbers.clear()
 
 
 # The offices the tests use. Their schemas are built and migrated once per test run.

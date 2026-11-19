@@ -81,7 +81,6 @@ jobs:
       POSTGRES_PORT: "5432"
       INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
       JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
-      PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
