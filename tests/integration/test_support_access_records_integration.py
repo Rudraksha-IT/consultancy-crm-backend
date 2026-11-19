@@ -517,7 +517,7 @@ class TestEmployees:
         self, abc: ConsultancyContext, visitor: PlatformVisitor
     ) -> None:
         admin = abc.add_staff(Role.ADMIN)
-        office = Office(name="ABC Education", join_link="https://abcedu.example/join")
+        office = Office(consultancy=abc.consultancy, join_link="https://abcedu.example/join")
         with tenant_context(abc.consultancy):
             invited = invite_employee(
                 NewStaff(name="Mina Rai", email="mina@abc.test", role=Role.COUNSELLOR),

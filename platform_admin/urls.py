@@ -4,6 +4,7 @@ from django.urls import URLPattern, URLResolver, include, path
 
 from auth_tokens.views import LogoutView, RefreshView
 from platform_admin.brand_views import ProductLogoView
+from platform_admin.email_views import PlatformEmailView, PlatformTestEmailView
 from platform_admin.reset_views import (
     PlatformResetConfirmView,
     PlatformResetRequestView,
@@ -43,6 +44,8 @@ from platform_admin.views import (
 urlpatterns: list[URLPattern | URLResolver] = [
     path("", include("platform_admin.brand_urls")),
     path("brand/logo/", ProductLogoView.as_view(), name="product-logo"),
+    path("email/", PlatformEmailView.as_view(), name="platform-email"),
+    path("email/test/", PlatformTestEmailView.as_view(), name="platform-test-email"),
     path("auth/login/", PlatformLoginView.as_view(), name="platform-login"),
     path("auth/login/next/", PlatformLoginStepView.as_view(), name="platform-login-step"),
     path("auth/refresh/", RefreshView.as_view(), name="platform-refresh"),

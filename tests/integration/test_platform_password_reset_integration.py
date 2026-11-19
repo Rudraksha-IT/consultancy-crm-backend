@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from email.utils import parseaddr
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
@@ -25,6 +26,7 @@ from rest_framework.test import APIClient
 
 from codes.services import MAX_ATTEMPTS, MAX_CODES_PER_HOUR
 from config.responses import AnswerThenRun
+from emails.looks import PRODUCT_NAME
 from platform_admin.models import (
     PlatformAdmin,
     PlatformAdminChange,
@@ -138,7 +140,7 @@ class TestRequestCode:
         assert len(mail.outbox) == 1
         message = mail.outbox[0]
         assert message.to == [EMAIL]
-        assert message.from_email == settings.DEFAULT_FROM_EMAIL
+        assert parseaddr(message.from_email) == (PRODUCT_NAME, settings.DEFAULT_FROM_EMAIL)
         assert "Platform" in message.subject
         assert get_platform_host() in message.body
         assert "30 minutes" in message.body
@@ -154,7 +156,10 @@ class TestRequestCode:
         assert not re.search(rf"[/?=&]{code}", body)
         sent = mail.outbox[0]
         assert isinstance(sent, EmailMultiAlternatives)
-        assert sent.alternatives == []
+        [(html, kind)] = sent.alternatives
+        assert kind == "text/html"
+        assert code in str(html)
+        assert all(code not in link for link in re.findall(r'href="([^"]*)"', str(html)))
 
     def test_the_email_is_matched_regardless_of_case(
         self, platform_site: PlatformContext, admin: PlatformAdmin

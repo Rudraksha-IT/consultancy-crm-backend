@@ -485,6 +485,35 @@ class TestOfficeDetailsIsolation:
         assert xyz.client.get("/api/context/").json()["consultancy"]["has_contact_email"] is False
 
 
+class TestAccountEmailIsolation:
+    def test_each_offices_code_email_carries_only_its_own_look(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        set_office_details(abc.consultancy, OfficeDetails(contact_email="info@abc.com"))
+        staff = xyz.add_staff(Role.COUNSELLOR)
+
+        xyz.new_client().post("/api/auth/password-reset/", {"email": str(staff.email)})
+
+        [sent] = mail.outbox
+        assert sent.from_email.startswith("XYZ Overseas")
+        assert sent.reply_to == []
+        assert "ABC Education" not in str(sent.body)
+        assert "info@abc.com" not in str(sent.body)
+
+    def test_an_offices_admin_cannot_reach_the_platform_test_email(
+        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        on_platform = platform_site.new_client()
+        use_access_token(on_platform, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        assert on_platform.post("/api/platform/email/test/").status_code in {401, 403}
+        assert on_platform.get("/api/platform/email/").status_code in {401, 403}
+        assert mail.outbox == []
+
+
 class TestModuleIsolation:
     def test_switching_one_consultancys_modules_leaves_another_alone(
         self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext

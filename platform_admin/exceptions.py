@@ -23,3 +23,9 @@ class WrongCurrentPlatformPasswordError(Exception):
 
 class TooManyPasswordTriesError(Exception):
     """Too many wrong current passwords on the Account page; wait before trying again."""
+
+
+class TestEmailLimitError(Exception):
+    """A Platform Admin has sent too many test emails in the last hour."""
+
+    __test__ = False  # not a pytest test class, despite its name

@@ -24,6 +24,7 @@ from codes.services import issue_code
 from codes.types import CodePurpose
 from staff.exceptions import EmployeeChangeRefusedError
 from staff.models import PlatformVisitor, Staff, StaffStatus
+from tenancy.models import Consultancy
 
 # Each Consultancy's own apps whose data the download holds (spec Implementation: Platform).
 EXPORTED_APPS = (
@@ -55,7 +56,7 @@ NOT_JOINED_MESSAGE = (
 logger = logging.getLogger(__name__)
 
 
-def send_reset_code_to(staff: Staff, office: str, by: PlatformVisitor) -> None:
+def send_reset_code_to(staff: Staff, office: Consultancy, by: PlatformVisitor) -> None:
     """Email `staff` a password reset Code, whatever their Role (Admins included).
 
     Raises:

@@ -1,113 +1,72 @@
-"""Emails that carry a Code. Sent through Django's mail interface, which tests replace."""
+"""Emails that carry a Code (spec 2026-11-18 stories 23-27, ADR 0023).
+
+A Staff member's Codes come in their office's look (its name as sender, logo, Theme colour and
+Office details); a Platform Admin's in the Platform's look. They never need the office's contact
+email, and the Code is never put in a link or button.
+"""
 
 from __future__ import annotations
 
-from django.core.mail import send_mail
+from typing import TYPE_CHECKING
 
-from codes.services import CODE_LIFETIME
 from codes.types import CodePurpose
-from config.outside_calls import EMAIL_PROVIDER, outside_call
-from platform_admin.models import PlatformAdmin
+from emails.builder import build_email
+from emails.office import office_look
+from emails.platform import platform_look
+from emails.sender import send_email
+from emails.types import PlatformInvite, PlatformResetCode, StaffInviteCode, StaffResetCode
 from staff.models import Role, Staff
 
-_MINUTES = int(CODE_LIFETIME.total_seconds() // 60)
-
-_SUBJECTS = {
-    CodePurpose.RESET: "Your code to reset your password at {office}",
-    CodePurpose.JOIN: "Your code to join {office}",
-}
-
-_INTROS = {
-    CodePurpose.RESET: "Use this code to choose a new password for {office}:",
-    CodePurpose.JOIN: (
-        "You've been added to {office}'s CRM as {role}. "
-        "Open the sign-up page, enter your work email and this code, then choose your password:"
-    ),
-}
-
-_ENDINGS = {
-    CodePurpose.RESET: (
-        "If you didn't ask for it, you can ignore this email. Your password stays the same."
-    ),
-    CodePurpose.JOIN: (
-        "After that, ask your Admin to send a new one. "
-        "If you weren't expecting it, you can ignore this email."
-    ),
-}
+if TYPE_CHECKING:
+    from platform_admin.models import PlatformAdmin
+    from tenancy.models import Consultancy
 
 
 def send_code_email(
-    staff: Staff, code: str, purpose: CodePurpose, office: str, link: str | None = None
+    staff: Staff,
+    code: str,
+    purpose: CodePurpose,
+    consultancy: Consultancy,
+    link: str | None = None,
 ) -> None:
-    """Email `code` to `staff` as plain text (no HTML, so nothing typed can become markup).
+    """Email `code` to `staff` in `consultancy`'s look.
 
-    `link` is the page to enter it on (the sign-up page for an Invite).
+    `link` is the sign-up page for an Invite (shown as a button; it never carries the Code).
+
+    Raises:
+        SendFailedError: the mail server didn't take it.
     """
-    role = Role(staff.role).label
-    lines = [
-        f"Hello {staff.name},",
-        _INTROS[purpose].format(office=office, role=role),
-        code,
-        f"It works for {_MINUTES} minutes, once.",
-        _ENDINGS[purpose],
-    ]
-    if link is not None:
-        lines.insert(3, f"Sign-up page: {link}")
-    with outside_call(EMAIL_PROVIDER, f"send_{purpose.value}_code"):
-        send_mail(
-            subject=_SUBJECTS[purpose].format(office=office),
-            message="\n\n".join(lines),
-            from_email=None,
-            recipient_list=[str(staff.email)],
+    if purpose == CodePurpose.JOIN:
+        content: StaffInviteCode | StaffResetCode = StaffInviteCode(
+            name=str(staff.name),
+            role=Role(staff.role).label,
+            code=code,
+            signup_link=link or "",
         )
-
-
-PLATFORM_RESET_SUBJECT = "Your code to reset your Platform password"
+    else:
+        content = StaffResetCode(name=str(staff.name), code=code)
+    send_email(
+        build_email(office_look(consultancy), content),
+        str(staff.email),
+        f"send_{purpose.value}_code",
+    )
 
 
 def send_platform_code_email(admin: PlatformAdmin, code: str, platform_address: str) -> None:
-    """Email a Platform Admin their reset `code` as plain text (issue 63).
+    """Email a Platform Admin their reset `code`, naming the Platform's address to enter it on.
 
-    It names the Platform's address to enter it on, and never holds a link carrying the Code.
-    Sent from DEFAULT_FROM_EMAIL.
+    Raises:
+        SendFailedError: the mail server didn't take it.
     """
-    lines = [
-        f"Hello {admin.name},",
-        f"Use this code to choose a new password for the Platform at {platform_address}:",
-        code,
-        f"It works for {_MINUTES} minutes, once. Enter it on the Platform's Forgot password page.",
-        _ENDINGS[CodePurpose.RESET],
-    ]
-    with outside_call(EMAIL_PROVIDER, "send_platform_reset_code"):
-        send_mail(
-            subject=PLATFORM_RESET_SUBJECT,
-            message="\n\n".join(lines),
-            from_email=None,
-            recipient_list=[str(admin.email)],
-        )
-
-
-PLATFORM_JOIN_SUBJECT = "Your code to join the Platform"
+    content = PlatformResetCode(name=str(admin.name), code=code, platform_address=platform_address)
+    send_email(build_email(platform_look(), content), str(admin.email), "send_platform_reset_code")
 
 
 def send_platform_join_email(admin: PlatformAdmin, code: str, join_link: str) -> None:
-    """Email an invited Platform Admin their join `code` and the Join page (issue 65).
+    """Email an invited Platform Admin their join `code` and the Join page (never in the link).
 
-    Plain text, from DEFAULT_FROM_EMAIL; the link never carries the Code.
+    Raises:
+        SendFailedError: the mail server didn't take it.
     """
-    lines = [
-        f"Hello {admin.name},",
-        "You've been added to the Platform as a Platform Admin. Open the Join page, enter your "
-        "email and this code, then choose your password:",
-        code,
-        f"Join page: {join_link}",
-        f"It works for {_MINUTES} minutes, once.",
-        _ENDINGS[CodePurpose.JOIN],
-    ]
-    with outside_call(EMAIL_PROVIDER, "send_platform_join_code"):
-        send_mail(
-            subject=PLATFORM_JOIN_SUBJECT,
-            message="\n\n".join(lines),
-            from_email=None,
-            recipient_list=[str(admin.email)],
-        )
+    content = PlatformInvite(name=str(admin.name), code=code, join_link=join_link)
+    send_email(build_email(platform_look(), content), str(admin.email), "send_platform_join_code")

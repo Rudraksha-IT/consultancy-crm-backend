@@ -167,3 +167,26 @@ class ProductBrand(models.Model):
 
     def __str__(self) -> str:
         return "Product brand"
+
+
+EMAIL_TEST_REFERENCE_MAX_LENGTH = 64
+
+
+class EmailTest(models.Model):
+    """One "Send a test email" from Platform → Settings (spec 2026-11-18 stories 3-4).
+
+    The newest one is the email status the Platform shows; the last hour's count towards each
+    Platform Admin's limit. A failed one keeps the reference to quote (the request's correlation
+    ID), never the mail server's words. Written only by `platform_admin.email_check`.
+    """
+
+    platform_admin = models.ForeignKey(PlatformAdmin, on_delete=models.CASCADE)
+    tested_at = models.DateTimeField()
+    sent = models.BooleanField()
+    reference = models.CharField(max_length=EMAIL_TEST_REFERENCE_MAX_LENGTH, blank=True, default="")
+
+    class Meta:
+        indexes: ClassVar = [models.Index(fields=["platform_admin", "tested_at"])]
+
+    def __str__(self) -> str:
+        return f"Email test {self.pk}"

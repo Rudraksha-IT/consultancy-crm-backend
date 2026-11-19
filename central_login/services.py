@@ -11,13 +11,15 @@ from dataclasses import dataclass
 from datetime import timedelta
 from urllib.parse import urlencode
 
-from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 
 from central_login.directory import email_hash, normalise_email, offices_for
 from central_login.models import CentralLoginRequest
-from config.outside_calls import EMAIL_PROVIDER, outside_call
+from emails.builder import build_email
+from emails.platform import platform_look
+from emails.sender import send_email
+from emails.types import CentralLogin, LoginOffice
 from tenancy.models import Consultancy, Domain
 from tenancy.services import is_ready
 from tenancy.status import ConsultancyStatus
@@ -25,7 +27,6 @@ from tenancy.status import ConsultancyStatus
 MAX_EMAILS_PER_HOUR = 3
 LIMIT_WINDOW = timedelta(hours=1)
 LOGIN_PATH = "/login"
-SUBJECT = "Your offices' login pages"
 
 logger = logging.getLogger(__name__)
 
@@ -83,15 +84,8 @@ def _login_link(office: Consultancy, email: str, base: LinkBase) -> str:
 
 
 def _send(email: str, offices: list[Consultancy], base: LinkBase) -> None:
-    """Send one plain-text email (no HTML, so no office name can become markup)."""
-    lines = [
-        "Hello,",
-        "You asked for the login pages of the offices this email belongs to:",
-        *(f"{office.name}\n{_login_link(office, email, base)}" for office in offices),
-        "Open the one you want; your email will already be filled in.",
-        "If you didn't ask for this, you can ignore this email.",
-    ]
-    with outside_call(EMAIL_PROVIDER, "send_office_links"):
-        send_mail(
-            subject=SUBJECT, message="\n\n".join(lines), from_email=None, recipient_list=[email]
-        )
+    """Send the list in the Platform's look: each office's name and a button to its login page."""
+    content = CentralLogin(
+        tuple(LoginOffice(str(office.name), _login_link(office, email, base)) for office in offices)
+    )
+    send_email(build_email(platform_look(), content), email, "send_office_links")

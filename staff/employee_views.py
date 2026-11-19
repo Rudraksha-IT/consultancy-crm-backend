@@ -63,9 +63,9 @@ def employee_answer(staff: Staff, set_up: bool | None = None) -> dict[str, objec
 
 
 def office_of(request: Request) -> Office:
-    """The office's name and its sign-up page, at the address the request came in on."""
-    name = str(get_request_consultancy(request).name)
-    return Office(name=name, join_link=request.build_absolute_uri(JOIN_PATH))
+    """The office and its sign-up page, at the address the request came in on."""
+    consultancy = get_request_consultancy(request)
+    return Office(consultancy=consultancy, join_link=request.build_absolute_uri(JOIN_PATH))
 
 
 def _refused(error: EmployeeChangeRefusedError) -> Response:

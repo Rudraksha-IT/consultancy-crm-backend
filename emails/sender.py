@@ -59,14 +59,14 @@ def _message(email: BuiltEmail, to: str) -> EmailMultiAlternatives:
     return message
 
 
-def send_email(email: BuiltEmail, to: str) -> None:
-    """Send `email` to the one address `to`.
+def send_email(email: BuiltEmail, to: str, operation: str = "send_email") -> None:
+    """Send `email` to the one address `to`; `operation` names it in the outside-call log.
 
     Raises:
         SendFailedError: the mail server didn't take it; the reason never holds its words.
     """
     message = _message(email, to)
-    with outside_call(EMAIL_PROVIDER, "send_email"):
+    with outside_call(EMAIL_PROVIDER, operation):
         try:
             message.send(fail_silently=False)
         except (smtplib.SMTPException, OSError) as error:

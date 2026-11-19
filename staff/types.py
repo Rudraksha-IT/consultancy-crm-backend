@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 from staff.models import ColourMode, Role
+
+if TYPE_CHECKING:
+    from tenancy.models import Consultancy
 
 
 @dataclass(frozen=True)
@@ -24,9 +28,9 @@ class NewStaff:
 
 @dataclass(frozen=True)
 class Office:
-    """Where an email about joining comes from: the office's name and its sign-up page."""
+    """Where an email about joining comes from: the office (for its look) and its sign-up page."""
 
-    name: str
+    consultancy: Consultancy
     join_link: str
 
 
