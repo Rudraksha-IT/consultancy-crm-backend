@@ -90,7 +90,7 @@ def classes_answer(rows: list[ClassRow]) -> dict[str, object]:
 
 
 def money_answer(report: MoneyReport) -> dict[str, object]:
-    """Money in (from Students, from Commission) and out each month, and out by category."""
+    """Money in (from Students, from Commission) and out each month; out by category; in by type."""
     return {
         "months": [
             {
@@ -104,5 +104,9 @@ def money_answer(report: MoneyReport) -> dict[str, object]:
         "money_out_by_category": [
             {"category": category.value, "amount": amount}
             for category, amount in report.money_out_by_category
+        ],
+        "money_in_by_fee_type": [
+            {"fee_type": {"id": type_id, "name": name}, "amount": amount}
+            for type_id, name, amount in report.money_in_by_fee_type
         ],
     }

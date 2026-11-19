@@ -2,48 +2,39 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rest_framework import serializers
 
 from config.serializers import StrictSerializer
-from fees.models import PURPOSE_MAX_LENGTH
+from fee_types.serializers import FeeTypeField, NoteField, check_fee_type_and_note
 from fees.types import NewFee
 from payments.serializers import AmountField
-from staff.serializers import PlainTextField
-
-PURPOSE_MESSAGE = "Say what the fee is for."
-PURPOSE_LENGTH_MESSAGE = f"Use at most {PURPOSE_MAX_LENGTH} characters."
-_PURPOSE_MESSAGES = ("required", "null", "blank", "invalid")
-
-
-class FeePurposeField(PlainTextField):
-    """What the Fee is for: one line of text, up to `PURPOSE_MAX_LENGTH` characters."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            max_length=PURPOSE_MAX_LENGTH,
-            error_messages={
-                **dict.fromkeys(_PURPOSE_MESSAGES, PURPOSE_MESSAGE),
-                "max_length": PURPOSE_LENGTH_MESSAGE,
-            },
-        )
-
-    def to_internal_value(self, data: object) -> str:
-        """Refuse anything that isn't text with the same message as a missing purpose."""
-        if not isinstance(data, str):
-            self.fail("invalid")
-        return super().to_internal_value(data)
 
 
 class NewFeeSerializer(StrictSerializer[None]):
-    """A Fee to add, or a Fee's new details (spec 76a). Both fields are always needed."""
+    """A Fee to add, or a Fee's new details (spec 76a): Fee Type and amount; a note for Other.
 
-    purpose = FeePurposeField()
+    The Fee Type must be offered (not hidden), unless an edit keeps the one the Fee has.
+    """
+
+    fee_type = FeeTypeField()
+    note = NoteField()
     amount = AmountField()
+
+    def __init__(self, *, data: object, kept_type_id: int | None = None) -> None:
+        super().__init__(data=data)
+        self.kept_type_id = kept_type_id
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Refuse a hidden Fee Type, and Other without a note."""
+        check_fee_type_and_note(attrs, kept_type_id=self.kept_type_id)
+        return attrs
 
     def to_new_fee(self) -> NewFee:
         """Return the validated Fee."""
         data = self.validated_data
-        return NewFee(purpose=data["purpose"], amount=data["amount"])
+        return NewFee(fee_type=data["fee_type"], note=data.get("note", ""), amount=data["amount"])
 
 
 class NoQuerySerializer(StrictSerializer[None]):

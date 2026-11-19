@@ -22,6 +22,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Greatest
 
+from fee_types.services import describe_for
 from fees.balance import Balance, balance_of
 from fees.models import Fee
 from fees.types import NewFee
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def fees_of(student: Student) -> QuerySet[Fee]:
     """The Student's Fees, oldest first."""
-    return Fee.objects.filter(student=student).order_by("pk")
+    return Fee.objects.filter(student=student).select_related("fee_type").order_by("pk")
 
 
 def balance_of_student(student: Student) -> Balance:
@@ -48,9 +49,13 @@ def balance_of_student(student: Student) -> Balance:
     return balance_of(fees=fees, paid=paid)
 
 
-def describe_fee(purpose: str, amount: int) -> str:
-    """The Fee as History writes it, e.g. "Visa processing, NPR 40,000"."""
-    return f"{purpose}, {format_npr(amount)}"
+def describe_fee(fee_type_name: str, note: str, amount: int) -> str:
+    """The Fee as History writes it, e.g. "Visa fee (first half), NPR 40,000"."""
+    return f"{describe_for(fee_type_name, note)}, {format_npr(amount)}"
+
+
+def _described(fee: Fee) -> str:
+    return describe_fee(fee.fee_type.name, fee.note, fee.amount)
 
 
 def add_fee(student: Student, details: NewFee, by: Staff) -> Fee:
@@ -58,7 +63,8 @@ def add_fee(student: Student, details: NewFee, by: Staff) -> Fee:
     with transaction.atomic():
         fee = Fee.objects.create(
             student=student,
-            purpose=details.purpose,
+            fee_type=details.fee_type,
+            note=details.note,
             amount=details.amount,
             added_by=stored_staff(by),
             added_by_name=actor_name(by),
@@ -67,7 +73,7 @@ def add_fee(student: Student, details: NewFee, by: Staff) -> Fee:
             student,
             HistoryKind.FEE_ADDED,
             by,
-            Change(after=describe_fee(fee.purpose, fee.amount)),
+            Change(after=_described(fee)),
         )
     _log("Fee added", fee.pk, student.pk, by)
     return fee
@@ -79,11 +85,11 @@ def fee_with_student(fee_id: int) -> Fee:
     Raises:
         Fee.DoesNotExist: There is no such Fee.
     """
-    return Fee.objects.select_related("student").get(pk=fee_id)
+    return Fee.objects.select_related("student", "fee_type").get(pk=fee_id)
 
 
 def change_fee(fee_id: int, details: NewFee, by: Staff) -> Fee:
-    """Replace a Fee's purpose and amount, and note the change in History.
+    """Replace a Fee's Fee Type, note and amount, and note the change in History.
 
     Who added it, and when, stay as they were. Nothing is written when nothing changes.
 
@@ -91,17 +97,15 @@ def change_fee(fee_id: int, details: NewFee, by: Staff) -> Fee:
         Fee.DoesNotExist: There is no such Fee.
     """
     with transaction.atomic():
-        fee = Fee.objects.select_for_update().select_related("student").get(pk=fee_id)
-        if (fee.purpose, fee.amount) == (details.purpose, details.amount):
+        fee = Fee.objects.select_for_update().select_related("student", "fee_type").get(pk=fee_id)
+        now = (details.fee_type.pk, details.note, details.amount)
+        if (fee.fee_type_id, fee.note, fee.amount) == now:
             return fee
-        before = describe_fee(fee.purpose, fee.amount)
-        fee.purpose, fee.amount = details.purpose, details.amount
-        fee.save(update_fields=["purpose", "amount"])
+        before = _described(fee)
+        fee.fee_type, fee.note, fee.amount = details.fee_type, details.note, details.amount
+        fee.save(update_fields=["fee_type", "note", "amount"])
         record(
-            fee.student,
-            HistoryKind.FEE_EDITED,
-            by,
-            Change(before=before, after=describe_fee(fee.purpose, fee.amount)),
+            fee.student, HistoryKind.FEE_EDITED, by, Change(before=before, after=_described(fee))
         )
     _log("Fee changed", fee.pk, fee.student_id, by)
     return fee
@@ -114,13 +118,8 @@ def delete_fee(fee_id: int, by: Staff) -> None:
         Fee.DoesNotExist: There is no such Fee.
     """
     with transaction.atomic():
-        fee = Fee.objects.select_for_update().select_related("student").get(pk=fee_id)
-        record(
-            fee.student,
-            HistoryKind.FEE_DELETED,
-            by,
-            Change(before=describe_fee(fee.purpose, fee.amount)),
-        )
+        fee = Fee.objects.select_for_update().select_related("student", "fee_type").get(pk=fee_id)
+        record(fee.student, HistoryKind.FEE_DELETED, by, Change(before=_described(fee)))
         fee_id, student_id = fee.pk, fee.student_id
         fee.delete()
     _log("Fee deleted", fee_id, student_id, by)
@@ -211,5 +210,5 @@ def _sum_per_student(amounts: QuerySet[Fee] | QuerySet[Payment]) -> Subquery:
 
 
 def _log(what: str, fee_id: int, student_id: int, by: Staff) -> None:
-    """Log ids only: never the purpose, amounts or names."""
+    """Log ids only: never the note, amounts or names."""
     logger.info("%s: fee_id=%s, student_id=%s, by_staff_id=%s", what, fee_id, student_id, by.pk)

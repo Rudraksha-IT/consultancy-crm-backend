@@ -11,6 +11,7 @@ from django.utils import timezone
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
+from fee_types.models import FeeType
 from history.models import HistoryEntry, HistoryKind
 from payments.models import Payment
 from payments.serializers import AmountField, PaidOnField
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
 AMOUNT_MESSAGE = {"amount": ["Enter a whole amount from NPR 1 to NPR 10,00,00,000."]}
 PAID_ON_MESSAGE = {"paid_on": ["Enter a date from 1 Jan 2000 to today."]}
 METHOD_MESSAGE = {"method": ["Choose how they paid."]}
-PURPOSE_MESSAGE = {"purpose": ["Say what the payment is for."]}
 ONLY_ADMIN_SEES = {"detail": "Only an Admin can see other Payments."}
 STUDENT_ROLES = (Role.ADMIN, Role.COUNSELLOR, Role.FRONT_DESK)
 
@@ -59,13 +59,19 @@ def today() -> str:
     return timezone.localdate().isoformat()
 
 
-def good_body(**changes: object) -> dict[str, object]:
-    """A Payment the server accepts; `changes` override it."""
+def fee_type_named(office: ConsultancyContext, name: str) -> FeeType:
+    """The office's Fee Type with this name."""
+    with tenant_context(office.consultancy):
+        return FeeType.objects.get(name=name)
+
+
+def good_body(office: ConsultancyContext, **changes: object) -> dict[str, object]:
+    """A Payment the server accepts, for the Application fee; `changes` override it."""
     return {
         "amount": 25000,
         "paid_on": today(),
         "method": "esewa",
-        "purpose": "Application processing fee",
+        "fee_type": fee_type_named(office, "Application fee").pk,
         **changes,
     }
 
@@ -74,7 +80,7 @@ def pay(
     office: ConsultancyContext, student: Student | int, **changes: object
 ) -> _MonkeyPatchedResponse:
     """POST a Payment for the Student."""
-    return office.client.post(payments_url(student), good_body(**changes), format="json")
+    return office.client.post(payments_url(student), good_body(office, **changes), format="json")
 
 
 def stored_payments(office: ConsultancyContext) -> list[Payment]:
@@ -96,15 +102,17 @@ def payment_entries(office: ConsultancyContext, student: Student) -> list[Histor
 def make_payment(
     office: ConsultancyContext, student: Student, by: Staff, **fields: object
 ) -> Payment:
-    """Store a Payment directly."""
+    """Store a Payment directly; `fee_type` may be a Fee Type's name (PTE class if none)."""
     details: dict[str, object] = {
         "amount": 18000,
         "paid_on": timezone.localdate(),
         "method": "cash",
-        "purpose": "PTE class fee",
         **fields,
     }
     with tenant_context(office.consultancy):
+        chosen = details.get("fee_type", "PTE class")
+        if isinstance(chosen, str):
+            details["fee_type"] = FeeType.objects.get(name=chosen)
         return Payment.objects.create(
             student=student, recorded_by=by, recorded_by_name=by.name, **details
         )
@@ -129,7 +137,11 @@ class TestRecording:
             "amount": 25000,
             "paid_on": today(),
             "method": "esewa",
-            "purpose": "Application processing fee",
+            "fee_type": {
+                "id": fee_type_named(abc, "Application fee").pk,
+                "name": "Application fee",
+            },
+            "note": "",
             "recorded_by": {"name": "Sunita Shrestha"},
             "recorded_at": payment.recorded_at.isoformat(),
         }
@@ -175,7 +187,7 @@ class TestRecording:
     def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         student = make_student(abc)
 
-        response = abc.new_client().post(payments_url(student), good_body(), format="json")
+        response = abc.new_client().post(payments_url(student), good_body(abc), format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -201,18 +213,18 @@ class TestRecording:
 
         assert pay(abc, make_student(abc), method=method).json()["method"] == method
 
-    def test_the_purpose_is_trimmed(self, abc: ConsultancyContext) -> None:
+    def test_the_note_is_trimmed(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
 
-        response = pay(abc, make_student(abc), purpose="  IELTS class fee  ")
+        response = pay(abc, make_student(abc), note="  first half  ")
 
-        assert response.json()["purpose"] == "IELTS class fee"
+        assert response.json()["note"] == "first half"
 
     def test_logs_carry_ids_only(self, abc: ConsultancyContext, json_logs: JsonLogs) -> None:
         desk = abc.log_in_as(Role.FRONT_DESK)
         student = make_student(abc, name="Aarav Sharma")
 
-        pay(abc, student, purpose="Secret purpose text")
+        pay(abc, student, note="Secret note text")
 
         [payment] = stored_payments(abc)
         entry = json_logs.only(
@@ -220,7 +232,7 @@ class TestRecording:
             f"by_staff_id={desk.pk}"
         )
         assert entry["level"] == "INFO"
-        assert "Secret purpose" not in json_logs.text()
+        assert "Secret note" not in json_logs.text()
         assert "Aarav" not in json_logs.text()
 
 
@@ -230,14 +242,15 @@ class TestHistory:
         log_in(abc, desk)
         student = make_student(abc)
 
-        pay(abc, student, amount=125000, method="fonepay_qr", purpose="Visa processing fee")
+        visa = fee_type_named(abc, "Visa fee").pk
+        pay(abc, student, amount=125000, method="fonepay_qr", fee_type=visa)
 
         [payment] = stored_payments(abc)
         [entry] = payment_entries(abc, student)
         assert entry.by_staff_id == desk.pk
         assert entry.by_name == "Sunita Shrestha"
         assert entry.before == ""
-        assert entry.after == "NPR 1,25,000, Visa processing fee, Fonepay QR"
+        assert entry.after == "NPR 1,25,000, Visa fee, Fonepay QR"
         assert entry.detail == f"Receipt {payment.pk:06d}"
 
     def test_the_history_api_shows_it(self, abc: ConsultancyContext) -> None:
@@ -248,7 +261,7 @@ class TestHistory:
         [entry] = abc.client.get(f"/api/students/{student.pk}/history/").json()["results"]
 
         assert entry["kind"] == "payment_recorded"
-        assert entry["after"] == "NPR 25,000, Application processing fee, eSewa"
+        assert entry["after"] == "NPR 25,000, Application fee, eSewa"
 
     def test_a_refused_payment_writes_no_history(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
@@ -306,42 +319,10 @@ class TestRefusedInput:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == METHOD_MESSAGE
 
-    @pytest.mark.parametrize("purpose", ["", "   ", None, 12, True, ["fee"]])
-    def test_a_missing_or_wrong_purpose_is_refused(
-        self, abc: ConsultancyContext, purpose: object
-    ) -> None:
-        abc.log_in_as(Role.FRONT_DESK)
-
-        response = pay(abc, make_student(abc), purpose=purpose)
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == PURPOSE_MESSAGE
-
-    def test_an_over_long_purpose_is_refused(self, abc: ConsultancyContext) -> None:
-        abc.log_in_as(Role.FRONT_DESK)
-
-        refused = pay(abc, make_student(abc), purpose="x" * 201)
-        accepted = pay(abc, make_student(abc), purpose="x" * 200)
-
-        assert refused.status_code == status.HTTP_400_BAD_REQUEST
-        assert refused.json() == {"purpose": ["Use at most 200 characters."]}
-        assert accepted.status_code == status.HTTP_201_CREATED
-
-    @pytest.mark.parametrize("purpose", ["fee\nnext line", "fee\x00", "fee\x1b[31m"])
-    def test_control_characters_in_the_purpose_are_refused(
-        self, abc: ConsultancyContext, purpose: str
-    ) -> None:
-        abc.log_in_as(Role.FRONT_DESK)
-
-        response = pay(abc, make_student(abc), purpose=purpose)
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert list(response.json()) == ["purpose"]
-
-    @pytest.mark.parametrize("missing", ["amount", "paid_on", "method", "purpose"])
+    @pytest.mark.parametrize("missing", ["amount", "paid_on", "method", "fee_type"])
     def test_every_field_is_required(self, abc: ConsultancyContext, missing: str) -> None:
         abc.log_in_as(Role.FRONT_DESK)
-        body = good_body()
+        body = good_body(abc)
         del body[missing]
 
         response = abc.client.post(payments_url(make_student(abc)), body, format="json")
@@ -355,7 +336,7 @@ class TestRefusedInput:
     ) -> None:
         abc.log_in_as(Role.FRONT_DESK)
 
-        body = {**good_body(), field: 1}
+        body = {**good_body(abc), field: 1}
 
         response = abc.client.post(payments_url(make_student(abc)), body, format="json")
 
@@ -366,7 +347,7 @@ class TestRefusedInput:
     def test_a_body_that_isnt_an_object_is_refused(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
 
-        response = abc.client.post(payments_url(make_student(abc)), [good_body()], format="json")
+        response = abc.client.post(payments_url(make_student(abc)), [good_body(abc)], format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored_payments(abc) == []
@@ -374,23 +355,23 @@ class TestRefusedInput:
     def test_a_form_body_is_refused(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
 
-        response = abc.client.post(payments_url(make_student(abc)), good_body())
+        response = abc.client.post(payments_url(make_student(abc)), good_body(abc))
 
         assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
-    @pytest.mark.parametrize("purpose", INJECTION_STRINGS)
-    def test_injection_shaped_purposes_are_kept_as_plain_text(
-        self, abc: ConsultancyContext, purpose: str
+    @pytest.mark.parametrize("note", INJECTION_STRINGS)
+    def test_injection_shaped_notes_are_kept_as_plain_text(
+        self, abc: ConsultancyContext, note: str
     ) -> None:
         abc.log_in_as(Role.FRONT_DESK)
         student = make_student(abc)
 
-        response = pay(abc, student, purpose=purpose)
+        response = pay(abc, student, note=note)
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.json()["purpose"] == purpose
+        assert response.json()["note"] == note.strip()
         [payment] = stored_payments(abc)
-        assert payment.purpose == purpose
+        assert payment.note == note.strip()
 
 
 class TestReceipt:
@@ -550,7 +531,7 @@ class TestMethods:
         student = make_student(abc)
         platform_site.log_in()
 
-        recorded = platform_site.client.post(payments_url(student), good_body(), format="json")
+        recorded = platform_site.client.post(payments_url(student), good_body(abc), format="json")
         receipt = platform_site.client.get(payment_url(1))
 
         assert recorded.status_code == status.HTTP_404_NOT_FOUND
@@ -569,7 +550,8 @@ class TestModels:
                 amount=0,
                 paid_on=timezone.localdate(),
                 method="cash",
-                purpose="x",
+                fee_type=FeeType.objects.get(name="Other"),
+                note="x",
                 recorded_by_name=desk.name,
             )
 

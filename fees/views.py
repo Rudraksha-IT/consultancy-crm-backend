@@ -119,9 +119,9 @@ class FeeView(APIView):
         return fee
 
     def put(self, request: Request, fee_id: int) -> Response:
-        """Replace the purpose and amount, and return the Student's Fees."""
+        """Replace the Fee Type, note and amount, and return the Student's Fees."""
         fee = self._fee(request, fee_id)
-        serializer = NewFeeSerializer(data=request.data)
+        serializer = NewFeeSerializer(data=request.data, kept_type_id=fee.fee_type_id)
         serializer.is_valid(raise_exception=True)
         staff = get_request_staff(request)
         change_fee(fee.pk, serializer.to_new_fee(), by=staff)

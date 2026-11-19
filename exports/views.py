@@ -32,7 +32,10 @@ from tenancy.context import get_request_consultancy
 EXPORT_RECORDS_PER_PAGE = 25
 TOO_MANY_ROWS_MESSAGE = "That's more than 10,000 rows. Narrow the filters first."
 # Lists that belong to a switchable Module: while it is off, they can't be exported (404).
-LIST_MODULES: dict[str, Module] = {ExportList.CLOCK_IN.value: Module.CLOCK_IN}
+LIST_MODULES: dict[str, Module] = {
+    ExportList.CLOCK_IN.value: Module.CLOCK_IN,
+    ExportList.PAYMENTS.value: Module.ACCOUNTS,
+}
 
 
 def list_module_is_off(request: Request) -> bool:

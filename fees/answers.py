@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from fee_types.answers import fee_type_ref
 from fees.balance import Balance
 from fees.models import Fee
 from fees.services import OwingStudent
 
 
 def fee_answer(fee: Fee) -> dict[str, object]:
-    """One Fee: what it's for, how much, and who added it when."""
+    """One Fee: its Fee Type and note, how much, and who added it when."""
     return {
         "id": fee.pk,
-        "purpose": fee.purpose,
+        "fee_type": fee_type_ref(fee.fee_type),
+        "note": fee.note,
         "amount": fee.amount,
         "added_by": {"name": fee.added_by_name},
         "added_at": fee.added_at.isoformat(),

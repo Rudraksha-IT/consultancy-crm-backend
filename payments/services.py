@@ -14,6 +14,7 @@ from datetime import date
 from django.db import transaction
 from django.db.models import Q, QuerySet, Sum
 
+from fee_types.services import describe_for
 from history.models import HistoryKind
 from history.services import Change, record
 from payments.models import Payment, PaymentMethod
@@ -39,7 +40,8 @@ def record_payment(student: Student, details: NewPayment, by: Staff) -> Payment:
             amount=details.amount,
             paid_on=details.paid_on,
             method=details.method,
-            purpose=details.purpose,
+            fee_type=details.fee_type,
+            note=details.note,
             recorded_by=stored_staff(by),
             recorded_by_name=actor_name(by),
         )
@@ -59,9 +61,14 @@ def record_payment(student: Student, details: NewPayment, by: Staff) -> Payment:
 
 
 def describe_payment(payment: Payment) -> str:
-    """The Payment as History writes it, e.g. "NPR 25,000, Visa processing fee, eSewa"."""
+    """The Payment as History writes it, e.g. "NPR 25,000, Visa fee (first half), eSewa"."""
     method = PaymentMethod(payment.method).label
-    return f"{format_npr(payment.amount)}, {payment.purpose}, {method}"
+    return f"{format_npr(payment.amount)}, {paid_for(payment)}, {method}"
+
+
+def paid_for(payment: Payment) -> str:
+    """What the Payment was for: its Fee Type and note, e.g. "Visa fee (first half)"."""
+    return describe_for(payment.fee_type.name, payment.note)
 
 
 def payment_with_student(payment_id: int) -> Payment:
@@ -70,7 +77,15 @@ def payment_with_student(payment_id: int) -> Payment:
     Raises:
         Payment.DoesNotExist: There is no such Payment.
     """
-    return Payment.objects.select_related("student").get(pk=payment_id)
+    return Payment.objects.select_related("student", "fee_type").get(pk=payment_id)
+
+
+def fee_type_of_payment(payment_id: int) -> int | None:
+    """The id of the Payment's Fee Type, or None when there is no such Payment."""
+    found: int | None = (
+        Payment.objects.filter(pk=payment_id).values_list("fee_type_id", flat=True).first()
+    )
+    return found
 
 
 def describe_deleted_payment(payment: Payment) -> str:
@@ -90,7 +105,7 @@ def describe_changes(payment: Payment, details: NewPayment) -> tuple[str, str] |
             ("amount", format_npr(payment.amount), format_npr(details.amount)),
             ("date", _written_date(payment.paid_on), _written_date(details.paid_on)),
             ("method", PaymentMethod(payment.method).label, details.method.label),
-            ("for", payment.purpose, details.purpose),
+            ("for", paid_for(payment), describe_for(details.fee_type.name, details.note)),
         )
         if old != new
     ]
@@ -102,7 +117,7 @@ def describe_changes(payment: Payment, details: NewPayment) -> tuple[str, str] |
 
 
 def change_payment(payment_id: int, details: NewPayment, by: Staff) -> Payment:
-    """Replace a Payment's amount, date, method and purpose, and note what changed in History.
+    """Replace a Payment's amount, date, method, Fee Type and note; History names what changed.
 
     Who recorded it, and when, stay as they were. Nothing is written when nothing changes.
 
@@ -110,15 +125,20 @@ def change_payment(payment_id: int, details: NewPayment, by: Staff) -> Payment:
         Payment.DoesNotExist: There is no such Payment.
     """
     with transaction.atomic():
-        payment = Payment.objects.select_for_update().select_related("student").get(pk=payment_id)
+        payment = (
+            Payment.objects.select_for_update()
+            .select_related("student", "fee_type")
+            .get(pk=payment_id)
+        )
         change = describe_changes(payment, details)
         if change is None:
             return payment
         payment.amount = details.amount
         payment.paid_on = details.paid_on
         payment.method = details.method
-        payment.purpose = details.purpose
-        payment.save(update_fields=["amount", "paid_on", "method", "purpose"])
+        payment.fee_type = details.fee_type
+        payment.note = details.note
+        payment.save(update_fields=["amount", "paid_on", "method", "fee_type", "note"])
         record(
             payment.student,
             HistoryKind.PAYMENT_EDITED,
@@ -136,7 +156,11 @@ def delete_payment(payment_id: int, by: Staff) -> None:
         Payment.DoesNotExist: There is no such Payment.
     """
     with transaction.atomic():
-        payment = Payment.objects.select_for_update().select_related("student").get(pk=payment_id)
+        payment = (
+            Payment.objects.select_for_update()
+            .select_related("student", "fee_type")
+            .get(pk=payment_id)
+        )
         record(
             payment.student,
             HistoryKind.PAYMENT_DELETED,
@@ -158,7 +182,7 @@ class FoundPayments:
 
 def find_payments(filters: PaymentFilters) -> FoundPayments:
     """Every Payment matching the filters, newest first, with their total (spec 74)."""
-    payments = Payment.objects.select_related("student").filter(_matching(filters))
+    payments = Payment.objects.select_related("student", "fee_type").filter(_matching(filters))
     total = payments.aggregate(total=Sum("amount"))["total"] or 0
     return FoundPayments(payments=payments.order_by("-paid_on", "-pk"), total=total)
 
@@ -169,7 +193,7 @@ def _matching(filters: PaymentFilters) -> Q:
         "paid_on__gte": filters.paid_from,
         "paid_on__lte": filters.paid_to,
         "student_id": filters.student_id,
-        "purpose__icontains": filters.purpose or None,
+        "fee_type_id": filters.fee_type_id,
     }
     match = Q(**{lookup: value for lookup, value in conditions.items() if value is not None})
     return match & _search(filters.query) if filters.query else match
@@ -196,7 +220,7 @@ def _receipt(payment: Payment) -> str:
 
 
 def _log(what: str, payment_id: int, student_id: int, by: Staff) -> None:
-    """Log ids only: never the purpose, amounts or names."""
+    """Log ids only: never the note, amounts or names."""
     logger.info(
         "%s: payment_id=%s, student_id=%s, by_staff_id=%s", what, payment_id, student_id, by.pk
     )

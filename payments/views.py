@@ -33,6 +33,7 @@ from payments.serializers import NewPaymentSerializer, PaymentListQuerySerialize
 from payments.services import (
     change_payment,
     delete_payment,
+    fee_type_of_payment,
     find_payments,
     payment_with_student,
     record_payment,
@@ -82,7 +83,7 @@ class StudentPaymentsView(APIView):
 
 
 class PaymentListView(APIView):
-    """Every Payment, filtered by date, Student and purpose, with their total (GET; spec 74)."""
+    """Every Payment, filtered by date, Student and Fee Type, with their total (GET; spec 74)."""
 
     permission_classes = (IsAuthenticated, AccountsModuleIsOn, CanManagePayments)
 
@@ -131,8 +132,14 @@ class PaymentView(APIView):
         return Response(receipt_answer(payment))
 
     def put(self, request: Request, payment_id: int) -> Response:
-        """Replace the amount, date, method and purpose, and return the receipt (spec 75-76)."""
-        serializer = NewPaymentSerializer(data=request.data)
+        """Replace the amount, date, method, Fee Type and note; return the receipt (spec 75-76).
+
+        A hidden Fee Type may stay on the Payment that has it, never be newly chosen.
+        """
+        kept_type_id = fee_type_of_payment(payment_id)
+        if kept_type_id is None:
+            raise NotFound
+        serializer = NewPaymentSerializer(data=request.data, kept_type_id=kept_type_id)
         serializer.is_valid(raise_exception=True)
         try:
             payment = change_payment(

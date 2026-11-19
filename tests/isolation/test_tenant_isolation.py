@@ -33,6 +33,7 @@ from documents.models import Document, DocumentFile, DocumentRequirement, Docume
 from emails.types import OfficeDetails
 from expenses.models import Expense
 from exports.models import ExportRecord
+from fee_types.models import FeeType
 from fees.models import Fee
 from history.models import HistoryEntry, HistoryKind
 from inbox.models import InboxMessage
@@ -2419,12 +2420,18 @@ class TestCountryListIsolation:
         assert checklist["total"] == 8
 
 
-def _payment_body() -> dict[str, object]:
+def _fee_type_id(office: ConsultancyContext, name: str = "Visa fee") -> int:
+    """The id of the office's Fee Type with this name."""
+    with tenant_context(office.consultancy):
+        return FeeType.objects.get(name=name).pk
+
+
+def _payment_body(office: ConsultancyContext) -> dict[str, object]:
     return {
         "amount": 25000,
         "paid_on": timezone.localdate().isoformat(),
         "method": "cash",
-        "purpose": "Visa processing fee",
+        "fee_type": _fee_type_id(office),
     }
 
 
@@ -2432,7 +2439,7 @@ def _student_with_payment(office: ConsultancyContext, name: str) -> tuple[int, i
     """A new Student of the office's logged-in Admin, with one Payment: (student id, payment id)."""
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()
     payment = office.client.post(
-        f"/api/students/{student['id']}/payments/", _payment_body(), format="json"
+        f"/api/students/{student['id']}/payments/", _payment_body(office), format="json"
     ).json()
     return student["id"], payment["id"]
 
@@ -2464,7 +2471,7 @@ class TestPaymentIsolation:
         abc_student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
 
         response = xyz.client.post(
-            f"/api/students/{abc_student['id']}/payments/", _payment_body(), format="json"
+            f"/api/students/{abc_student['id']}/payments/", _payment_body(xyz), format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -2502,7 +2509,7 @@ class TestPaymentIsolation:
 
         responses = [
             intruder.get(f"/api/payments/{payment}/"),
-            intruder.post(f"/api/students/{ram}/payments/", _payment_body(), format="json"),
+            intruder.post(f"/api/students/{ram}/payments/", _payment_body(xyz), format="json"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
@@ -2541,7 +2548,7 @@ class TestAdminPaymentsIsolation:
     ) -> None:
         abc, xyz = self._two_offices(make_consultancy)
         _, abc_payment = _student_with_payment(abc, "Sita Karki")
-        body = {**_payment_body(), "amount": 1}
+        body = {**_payment_body(xyz), "amount": 1}
 
         edited = xyz.client.put(f"/api/payments/{abc_payment + 1000}/", body, format="json")
         edited_same_id = xyz.client.put(f"/api/payments/{abc_payment}/", body, format="json")
@@ -2561,7 +2568,7 @@ class TestAdminPaymentsIsolation:
         _, xyz_payment = _student_with_payment(xyz, "Ram Thapa")
 
         xyz.client.put(
-            f"/api/payments/{xyz_payment}/", {**_payment_body(), "amount": 1}, format="json"
+            f"/api/payments/{xyz_payment}/", {**_payment_body(xyz), "amount": 1}, format="json"
         )
         xyz.client.delete(f"/api/payments/{xyz_payment}/")
 
@@ -2582,7 +2589,7 @@ class TestAdminPaymentsIsolation:
 
         responses = [
             intruder.get("/api/payments/"),
-            intruder.put(f"/api/payments/{payment}/", _payment_body(), format="json"),
+            intruder.put(f"/api/payments/{payment}/", _payment_body(xyz), format="json"),
             intruder.delete(f"/api/payments/{payment}/"),
         ]
 
@@ -3626,7 +3633,7 @@ def _student_with_fee(office: ConsultancyContext, name: str) -> tuple[int, int]:
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()
     fees = office.client.post(
         f"/api/students/{student['id']}/fees/",
-        {"purpose": "Visa processing", "amount": 40000},
+        {"fee_type": _fee_type_id(office), "amount": 40000},
         format="json",
     ).json()
     return student["id"], fees["fees"][0]["id"]
@@ -3664,7 +3671,7 @@ class TestFeeIsolation:
     ) -> None:
         abc, xyz = self._two_offices(make_consultancy)
         abc_student, abc_fee = _student_with_fee(abc, "Sita Karki")
-        body = {"purpose": "Changed", "amount": 1}
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
 
         responses = [
             xyz.client.get(f"/api/students/{abc_student}/fees/"),
@@ -3675,8 +3682,8 @@ class TestFeeIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 4
         with tenant_context(abc.consultancy):
-            assert list(Fee.objects.values_list("purpose", "amount")) == [
-                ("Visa processing", 40000)
+            assert list(Fee.objects.values_list("fee_type__name", "amount")) == [
+                ("Visa fee", 40000)
             ]
 
     def test_the_same_ids_change_only_this_consultancys_fee(
@@ -3686,7 +3693,8 @@ class TestFeeIsolation:
         abc_student, abc_fee = _student_with_fee(abc, "Sita Karki")
         xyz_student, xyz_fee = _student_with_fee(xyz, "Ram Thapa")
 
-        xyz.client.put(f"/api/fees/{xyz_fee}/", {"purpose": "X", "amount": 1}, format="json")
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
+        xyz.client.put(f"/api/fees/{xyz_fee}/", body, format="json")
         xyz.client.delete(f"/api/fees/{xyz_fee}/")
 
         assert (abc_student, abc_fee) == (xyz_student, xyz_fee)
@@ -3704,7 +3712,7 @@ class TestFeeIsolation:
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abcedu.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        body = {"purpose": "X", "amount": 1}
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
 
         responses = [
             intruder.get("/api/accounts/student-fees/"),
@@ -3717,6 +3725,103 @@ class TestFeeIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 5
         with tenant_context(xyz.consultancy):
             assert Fee.objects.get(pk=fee).amount == 40000
+
+
+class TestFeeTypeIsolation:
+    """Issue 06: Fee Types never cross Consultancies; an id is always this office's own."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext, int]:
+        """Both offices with an Admin in; ABC has one more Fee Type than XYZ: (abc, xyz, its id)."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            switch_modules(office.consultancy, {Module.ACCOUNTS})
+            office.log_in_as(Role.ADMIN)
+        added = abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json").json()
+        return abc, xyz, int(added["id"])
+
+    def test_each_office_lists_only_its_own(self, make_consultancy: ConsultancyFactory) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+
+        names = [row["name"] for row in xyz.client.get("/api/fee-types/").json()["results"]]
+
+        assert "ABC only" not in names
+        assert "ABC only" in abc.client.get("/api/fee-types/").content.decode()
+
+    def test_another_offices_fee_type_cannot_be_picked(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, xyz, abc_only = self._two_offices(make_consultancy)
+        student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+
+        payment = xyz.client.post(
+            f"/api/students/{student['id']}/payments/",
+            {**_payment_body(xyz), "fee_type": abc_only},
+            format="json",
+        )
+        fee = xyz.client.post(
+            f"/api/students/{student['id']}/fees/",
+            {"fee_type": abc_only, "amount": 1},
+            format="json",
+        )
+
+        assert payment.json() == {"fee_type": ["Choose a Fee Type."]}
+        assert fee.json() == {"fee_type": ["Choose a Fee Type."]}
+        with tenant_context(xyz.consultancy):
+            assert not Payment.objects.exists()
+            assert not Fee.objects.exists()
+
+    def test_another_offices_fee_type_cannot_be_changed_deleted_or_ordered(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, abc_only = self._two_offices(make_consultancy)
+        xyz_ids = [row["id"] for row in xyz.client.get("/api/fee-types/").json()["results"]]
+
+        renamed = xyz.client.patch(f"/api/fee-types/{abc_only}/", {"name": "X"}, format="json")
+        deleted = xyz.client.delete(f"/api/fee-types/{abc_only}/")
+        ordered = xyz.client.put(
+            "/api/fee-types/order/", {"order": [abc_only, *xyz_ids]}, format="json"
+        )
+
+        assert (renamed.status_code, deleted.status_code, ordered.status_code) == (404, 404, 400)
+        with tenant_context(abc.consultancy):
+            assert FeeType.objects.filter(pk=abc_only, name="ABC only").exists()
+
+    def test_the_same_id_changes_only_this_offices_fee_type(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        visa = _fee_type_id(xyz)
+
+        xyz.client.patch(f"/api/fee-types/{visa}/", {"name": "Visa (XYZ)"}, format="json")
+
+        assert visa == _fee_type_id(abc)
+        with tenant_context(abc.consultancy):
+            assert FeeType.objects.filter(pk=visa, name="Visa fee").exists()
+
+    def test_a_token_from_one_office_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abcedu.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+        visa = _fee_type_id(xyz)
+
+        responses = [
+            intruder.get("/api/fee-types/"),
+            intruder.post("/api/fee-types/", {"name": "Intruder"}, format="json"),
+            intruder.patch(f"/api/fee-types/{visa}/", {"hidden": True}, format="json"),
+            intruder.delete(f"/api/fee-types/{visa}/"),
+            intruder.put("/api/fee-types/order/", {"order": [visa]}, format="json"),
+        ]
+
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 5
+        with tenant_context(xyz.consultancy):
+            assert not FeeType.objects.filter(name="Intruder").exists()
+            assert FeeType.objects.get(pk=visa).hidden is False
 
 
 _EXPENSE_BODY = {
@@ -3950,7 +4055,11 @@ class TestMoneyReportIsolation:
             university = University.objects.create(name=f"{name} University", country="australia")
             recorded = {"recorded_by": admin, "recorded_by_name": admin.name, "amount": amount}
             Payment.objects.create(
-                student=student, paid_on=today, method="cash", purpose="Fee", **recorded
+                student=student,
+                paid_on=today,
+                method="cash",
+                fee_type=FeeType.objects.get(name="Visa fee"),
+                **recorded,
             )
             Commission.objects.create(
                 student=student,

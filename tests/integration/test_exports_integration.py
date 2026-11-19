@@ -15,11 +15,15 @@ from rest_framework import status
 from applications.statuses import ApplicationStatus, VisaStatus
 from exports.exceptions import ExportRecordIsAppendOnlyError
 from exports.models import ExportRecord
+from fee_types.models import FeeType
+from modules.services import switch_modules
+from modules.types import Module
 from staff.models import Role, Staff
 from students.models import Stage, TargetLevel
 from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs, PlatformContext
 from tests.integration.test_applications_list_integration import applied, course_at, student_named
 from tests.integration.test_consultancy_status_integration import set_status
+from tests.integration.test_payments_integration import make_payment
 from tests.integration.test_stage_and_counsellor_integration import (
     INJECTION_STRINGS,
     log_in,
@@ -72,6 +76,16 @@ VISA_COLUMNS = [
     "Next appointment",
     "Documents",
     "Counsellor",
+]
+PAYMENT_COLUMNS = [
+    "Date",
+    "Receipt",
+    "Student",
+    "Fee Type",
+    "Note",
+    "Amount (NPR)",
+    "Method",
+    "Taken by",
 ]
 
 
@@ -298,6 +312,80 @@ class TestVisasExport:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
+class TestPaymentsExport:
+    """The Admin Payments list as a CSV file, with each Payment's Fee Type (spec 78)."""
+
+    def test_the_rows_are_the_filtered_list_with_the_fee_type(
+        self, abc: ConsultancyContext
+    ) -> None:
+        switch_modules(abc.consultancy, {Module.ACCOUNTS})
+        abc.log_in_as(Role.ADMIN)
+        desk = named_staff(abc, "Sunita Shrestha", Role.FRONT_DESK)
+        sita = make_student(abc, name="Sita Karki")
+        visa = make_payment(abc, sita, desk, amount=40000, fee_type="Visa fee", note="first half")
+        make_payment(abc, sita, desk, amount=15000, fee_type="PTE class")
+        with tenant_context(abc.consultancy):
+            visa_id = FeeType.objects.get(name="Visa fee").pk
+        filters = {"fee_type": str(visa_id)}
+
+        listed = abc.client.get("/api/payments/", filters).json()["results"]
+        rows = csv_rows(export(abc.client, "payments", filters))
+
+        assert rows[0] == PAYMENT_COLUMNS
+        assert len(rows) - 1 == len(listed) == 1
+        assert rows[1] == [
+            visa.paid_on.isoformat(),
+            visa.receipt_number,
+            "Sita Karki",
+            "Visa fee",
+            "first half",
+            "40000",
+            "Cash",
+            "Sunita Shrestha",
+        ]
+        [record] = records(abc)
+        assert record.filters_text == "Fee Type: Visa fee"
+
+    def test_the_filters_in_words(self, abc: ConsultancyContext) -> None:
+        switch_modules(abc.consultancy, {Module.ACCOUNTS})
+        abc.log_in_as(Role.ADMIN)
+        sita = make_student(abc, name="Sita Karki")
+        filters = {
+            "from": "2026-10-01",
+            "to": "2026-10-31",
+            "student": str(sita.pk),
+            "fee_type": "999999",
+            "q": "000",
+        }
+
+        export(abc.client, "payments", filters)
+
+        [record] = records(abc)
+        assert record.filters_text == (
+            "From: 2026-10-01, To: 2026-10-31, Student: Sita Karki, "
+            "Fee Type: A Fee Type since deleted, Search: 000"
+        )
+
+    def test_not_while_accounts_is_off(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = export(abc.client, "payments")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert records(abc) == []
+
+    def test_bad_filters_are_refused_as_the_list_refuses_them(
+        self, abc: ConsultancyContext
+    ) -> None:
+        switch_modules(abc.consultancy, {Module.ACCOUNTS})
+        abc.log_in_as(Role.ADMIN)
+
+        response = export(abc.client, "payments", {"fee_type": "visa"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert records(abc) == []
+
+
 class TestRowLimit:
     def test_more_than_the_limit_is_refused_and_nothing_recorded(
         self, abc: ConsultancyContext
@@ -501,7 +589,7 @@ class TestRefusedInput:
             {"filters": {}},
             {"list": "students"},
             {"list": "clock", "filters": {}},
-            {"list": "payments", "filters": {}},
+            {"list": "fees", "filters": {}},
             {"list": 1, "filters": {}},
             {"list": ["students"], "filters": {}},
             {"list": "students", "filters": []},

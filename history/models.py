@@ -28,7 +28,7 @@ class HistoryKind(models.TextChoices):
     COUNSELLOR_ASSIGNED = "counsellor_assigned", "Counsellor assigned"
     # Before and after are the counsellors' names as they were then.
     TRANSFERRED = "transferred", "Transferred"
-    # After is the amount, purpose and method; `detail` is the receipt number.
+    # After is the amount, Fee Type (with its note) and method; `detail` is the receipt number.
     PAYMENT_RECORDED = "payment_recorded", "Payment recorded"
     # Before and after name only what changed; `detail` is the receipt number (issue 19).
     PAYMENT_EDITED = "payment_edited", "Payment edited"

@@ -18,12 +18,13 @@ LIST_MAX_LENGTH = 20
 
 
 class ExportList(models.TextChoices):
-    """The lists that can be exported, including the Clock-in team view (issue 56)."""
+    """The lists that can be exported: the Clock-in team view (issue 56) and Payments too."""
 
     STUDENTS = "students", "Students"
     APPLICATIONS = "applications", "Applications"
     VISAS = "visas", "Visas"
     CLOCK_IN = "clock_in", "Clock-in"
+    PAYMENTS = "payments", "Payments"
 
 
 class AppendOnlyQuerySet(models.QuerySet["ExportRecord"]):

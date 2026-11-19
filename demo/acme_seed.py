@@ -101,6 +101,7 @@ from documents.verification import Verification
 from expenses.models import ExpenseCategory as EC, ExpenseMethod as EM
 from expenses.services import add_expense
 from expenses.types import NewExpense
+from fee_types.models import FeeType
 from fees.services import add_fee
 from fees.types import NewFee
 from history.models import HistoryEntry
@@ -123,6 +124,12 @@ from tasks.types import NewTask
 from transfer_requests.services import ask_transfer
 from visits.models import Visit, VisitReason as VR
 from visits.services import log_follow_up
+
+
+def ft(name: str) -> FeeType:
+    """The office's Fee Type with this name (the seven every office starts with)."""
+    return FeeType.objects.get(name=name)
+
 
 with tenant_context(office):
     if Student.objects.exists():
@@ -260,9 +267,9 @@ with tenant_context(office):
             return s
         if plan == "counselling":
             return s
-        step(d(10), add_fee, s, NewFee(purpose="Application processing", amount=40000), admin)
+        step(d(10), add_fee, s, NewFee(fee_type=ft("Application fee"), amount=40000), admin)
         step(d(11), record_payment, s, NewPayment(amount=20000, paid_on=d(11), method=PM.ESEWA,
-                                                   purpose="Application processing (first half)"), anita)
+                                                   fee_type=ft("Application fee"), note="first half"), anita)
         upload(s, by, "passport")
         upload(s, by, "citizenship")
         upload(s, by, "+2")
@@ -278,12 +285,12 @@ with tenant_context(office):
         if plan == "offer":
             return s
         step(d(58), record_payment, s, NewPayment(amount=20000, paid_on=d(58), method=PM.BANK_TRANSFER,
-                                                   purpose="Application processing (second half)"), anita)
+                                                   fee_type=ft("Application fee"), note="second half"), anita)
         upload(s, by, "offer", application=app, file_name="coe.pdf")
         upload(s, by, "bank")
         upload(s, by, "sponsor")
         upload(s, by, "statement of purpose")
-        step(d(72), add_fee, s, NewFee(purpose="Visa processing", amount=25000), admin)
+        step(d(72), add_fee, s, NewFee(fee_type=ft("Visa fee"), amount=25000), admin)
         step(d(74), choose_offer, s, app.pk, by)
         if plan == "visa_preparing":
             # Papers being prepared: no Visa until it is sent to the embassy (issue 75).
@@ -302,7 +309,7 @@ with tenant_context(office):
         step(d(100), change_visa_status, s, visa.pk, VS.GRANTED, by)
         Visa.objects.filter(pk=visa.pk).update(granted_on=d(100))
         step(d(101), record_payment, s, NewPayment(amount=25000, paid_on=d(101), method=PM.CASH,
-                                                    purpose="Visa processing"), anita)
+                                                    fee_type=ft("Visa fee")), anita)
         upload(s, by, "visa grant", visa=visa, file_name="visa-grant.pdf")
         return s
 
@@ -404,11 +411,11 @@ with tenant_context(office):
         step(ago(days), log_follow_up, students[name], reason, details, anita)
 
     # Extra Fees and Payments; some still owe.
-    step(ago(39), add_fee, students["Manisha Bhattarai"], NewFee(purpose="IELTS class (6 weeks)", amount=15000), admin)
-    step(ago(12), record_payment, students["Manisha Bhattarai"], NewPayment(amount=15000, paid_on=ago(12), method=PM.KHALTI, purpose="IELTS class"), anita)
-    step(ago(32), add_fee, students["Ujjwal Basnet"], NewFee(purpose="IELTS class (6 weeks)", amount=15000), admin)
-    step(ago(30), record_payment, students["Ujjwal Basnet"], NewPayment(amount=7500, paid_on=ago(30), method=PM.CASH, purpose="IELTS class (first half)"), anita)
-    step(ago(20), add_fee, students["Sabina Rana"], NewFee(purpose="Counselling and SOP review", amount=5000), admin)
+    step(ago(39), add_fee, students["Manisha Bhattarai"], NewFee(fee_type=ft("IELTS class"), note="6 weeks", amount=15000), admin)
+    step(ago(12), record_payment, students["Manisha Bhattarai"], NewPayment(amount=15000, paid_on=ago(12), method=PM.KHALTI, fee_type=ft("IELTS class")), anita)
+    step(ago(32), add_fee, students["Ujjwal Basnet"], NewFee(fee_type=ft("IELTS class"), note="6 weeks", amount=15000), admin)
+    step(ago(30), record_payment, students["Ujjwal Basnet"], NewPayment(amount=7500, paid_on=ago(30), method=PM.CASH, fee_type=ft("IELTS class"), note="first half"), anita)
+    step(ago(20), add_fee, students["Sabina Rana"], NewFee(fee_type=ft("Other"), note="Counselling and SOP review", amount=5000), admin)
 
     # Commission from the Universities of the granted Students.
     def commission(name, university, intake, amount, status, received=None):

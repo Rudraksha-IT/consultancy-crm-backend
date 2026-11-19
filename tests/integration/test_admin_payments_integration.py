@@ -10,6 +10,7 @@ from django.utils import timezone
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
+from fee_types.models import FeeType
 from history.models import HistoryEntry, HistoryKind
 from modules.services import switch_modules
 from modules.types import Module
@@ -64,20 +65,32 @@ def ids(response: _MonkeyPatchedResponse) -> list[int]:
     return [row["id"] for row in response.json()["results"]]
 
 
-def edit_body(**changes: object) -> dict[str, object]:
-    """A full Payment the server accepts as an edit; `changes` override it."""
-    return {
+def type_id(office: ConsultancyContext, name: str) -> int:
+    """The id of the office's Fee Type with this name."""
+    with tenant_context(office.consultancy):
+        return FeeType.objects.get(name=name).pk
+
+
+def edit_body(office: ConsultancyContext, **changes: object) -> dict[str, object]:
+    """A full Payment the server accepts as an edit; `changes` override it.
+
+    A `fee_type` given by name is sent as its id.
+    """
+    body: dict[str, object] = {
         "amount": 30000,
         "paid_on": days_ago(1).isoformat(),
         "method": "khalti",
-        "purpose": "Visa processing fee",
+        "fee_type": "Visa fee",
         **changes,
     }
+    if isinstance(body["fee_type"], str):
+        body["fee_type"] = type_id(office, body["fee_type"])
+    return body
 
 
 def edit(office: ConsultancyContext, payment: Payment, **changes: object) -> _MonkeyPatchedResponse:
     """PUT the Payment's new details."""
-    return office.client.put(payment_url(payment), edit_body(**changes), format="json")
+    return office.client.put(payment_url(payment), edit_body(office, **changes), format="json")
 
 
 def stored(office: ConsultancyContext, payment: Payment) -> Payment | None:
@@ -128,7 +141,8 @@ class TestList:
             "amount": 40000,
             "paid_on": days_ago(1).isoformat(),
             "method": "esewa",
-            "purpose": "PTE class fee",
+            "fee_type": {"id": type_id(abc, "PTE class"), "name": "PTE class"},
+            "note": "",
             "recorded_by": {"name": "Sunita Shrestha"},
             "recorded_at": newer.recorded_at.isoformat(),
         }
@@ -193,20 +207,49 @@ class TestList:
 
         assert ids(listed(abc, q=first.receipt_number)) == [first.pk]
 
-    def test_by_purpose_ignoring_case(self, abc: ConsultancyContext) -> None:
-        desk, student, visa = desk_payment(abc, purpose="Visa processing fee")
-        make_payment(abc, student, desk, purpose="PTE class fee")
+    def test_by_fee_type(self, abc: ConsultancyContext) -> None:
+        desk, student, visa = desk_payment(abc, fee_type="Visa fee")
+        make_payment(abc, student, desk, fee_type="PTE class")
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, purpose="visa")) == [visa.pk]
+        response = listed(abc, fee_type=type_id(abc, "Visa fee"))
+
+        assert ids(response) == [visa.pk]
+        assert response.json()["total"] == visa.amount
+
+    def test_a_hidden_fee_type_still_filters(self, abc: ConsultancyContext) -> None:
+        _, _, pte = desk_payment(abc, fee_type="PTE class")
+        with tenant_context(abc.consultancy):
+            FeeType.objects.filter(name="PTE class").update(hidden=True)
+        abc.log_in_as(Role.ADMIN)
+
+        assert ids(listed(abc, fee_type=type_id(abc, "PTE class"))) == [pte.pk]
+
+    def test_an_unknown_fee_type_finds_nothing(self, abc: ConsultancyContext) -> None:
+        desk_payment(abc)
+        abc.log_in_as(Role.ADMIN)
+
+        assert listed(abc, fee_type=999_999).json()["count"] == 0
+
+    @pytest.mark.parametrize("value", ["visa", "1.5", "0", "-1", str(2**31)])
+    def test_a_fee_type_that_is_not_an_id_is_refused(
+        self, abc: ConsultancyContext, value: str
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = listed(abc, fee_type=value)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert list(response.json()) == ["fee_type"]
 
     def test_filters_combine(self, abc: ConsultancyContext) -> None:
-        desk, aarav, _ = desk_payment(abc, purpose="Visa processing fee", paid_on=days_ago(20))
-        wanted = make_payment(abc, aarav, desk, purpose="Visa processing fee", paid_on=days_ago(2))
-        make_payment(abc, aarav, desk, purpose="PTE class fee", paid_on=days_ago(2))
+        desk, aarav, _ = desk_payment(abc, fee_type="Visa fee", paid_on=days_ago(20))
+        wanted = make_payment(abc, aarav, desk, fee_type="Visa fee", paid_on=days_ago(2))
+        make_payment(abc, aarav, desk, fee_type="PTE class", paid_on=days_ago(2))
         abc.log_in_as(Role.ADMIN)
+        visa = type_id(abc, "Visa fee")
 
-        response = listed(abc, student=aarav.pk, purpose="Visa", **{"from": days_ago(5)})
+        response = listed(abc, student=aarav.pk, fee_type=visa, **{"from": days_ago(5)})
 
         assert ids(response) == [wanted.pk]
 
@@ -229,7 +272,7 @@ class TestList:
         desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = listed(abc, q=query, purpose=query)
+        response = listed(abc, q=query)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["count"] == 0
@@ -289,7 +332,7 @@ class TestRefusedListQueries:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert list(response.json()) == [name]
 
-    @pytest.mark.parametrize(("name", "longest"), [("q", 100), ("purpose", 200)])
+    @pytest.mark.parametrize(("name", "longest"), [("q", 100)])
     def test_over_long_text_is_refused(
         self, abc: ConsultancyContext, name: str, longest: int
     ) -> None:
@@ -301,7 +344,7 @@ class TestRefusedListQueries:
         assert refused.status_code == status.HTTP_400_BAD_REQUEST
         assert list(refused.json()) == [name]
 
-    @pytest.mark.parametrize("name", ["from", "to", "student", "q", "purpose", "page"])
+    @pytest.mark.parametrize("name", ["from", "to", "student", "q", "fee_type", "page"])
     def test_an_empty_filter_means_any(self, abc: ConsultancyContext, name: str) -> None:
         desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
@@ -331,11 +374,11 @@ class TestEdit:
         body = response.json()
         assert body["id"] == payment.pk
         assert body["student"] == {"id": student.pk, "name": "Aarav Sharma", "phone": "9841234567"}
-        assert (body["amount"], body["paid_on"], body["method"], body["purpose"]) == (
+        assert (body["amount"], body["paid_on"], body["method"], body["fee_type"]["name"]) == (
             30000,
             days_ago(1).isoformat(),
             "khalti",
-            "Visa processing fee",
+            "Visa fee",
         )
         # Who received it and when it was recorded stay as they were.
         assert body["recorded_by"] == {"name": "Sunita Shrestha"}
@@ -350,12 +393,12 @@ class TestEdit:
 
     def test_the_history_says_what_changed(self, abc: ConsultancyContext) -> None:
         _, student, payment = desk_payment(
-            abc, amount=25000, paid_on=date(2026, 10, 30), method="esewa", purpose="Visa fee"
+            abc, amount=25000, paid_on=date(2026, 10, 30), method="esewa", fee_type="Visa fee"
         )
         admin = named_staff(abc, "Maya Admin", Role.ADMIN)
         log_in(abc, admin)
 
-        edit(abc, payment, amount=125000, paid_on="2026-10-29", method="esewa", purpose="Visa fee")
+        edit(abc, payment, amount=125000, paid_on="2026-10-29", method="esewa", fee_type="Visa fee")
 
         [entry] = entries(abc, student, HistoryKind.PAYMENT_EDITED)
         assert entry.by_staff_id == admin.pk
@@ -364,8 +407,8 @@ class TestEdit:
         assert entry.after == "Amount NPR 1,25,000; date 29 Oct 2026"
         assert entry.detail == f"Receipt {payment.receipt_number}"
 
-    def test_method_and_purpose_changes_are_named(self, abc: ConsultancyContext) -> None:
-        _, student, payment = desk_payment(abc, method="cash", purpose="PTE class fee")
+    def test_method_and_fee_type_changes_are_named(self, abc: ConsultancyContext) -> None:
+        _, student, payment = desk_payment(abc, method="cash", fee_type="PTE class")
         abc.log_in_as(Role.ADMIN)
 
         edit(
@@ -374,12 +417,13 @@ class TestEdit:
             amount=payment.amount,
             paid_on=payment.paid_on.isoformat(),
             method="bank_transfer",
-            purpose="IELTS class fee",
+            fee_type="IELTS class",
+            note="evening batch",
         )
 
         [entry] = entries(abc, student, HistoryKind.PAYMENT_EDITED)
-        assert entry.before == "Method Cash; for PTE class fee"
-        assert entry.after == "Method Bank transfer; for IELTS class fee"
+        assert entry.before == "Method Cash; for PTE class"
+        assert entry.after == "Method Bank transfer; for IELTS class (evening batch)"
 
     def test_saving_without_a_change_writes_no_history(self, abc: ConsultancyContext) -> None:
         _, student, payment = desk_payment(abc)
@@ -391,7 +435,7 @@ class TestEdit:
             amount=payment.amount,
             paid_on=payment.paid_on.isoformat(),
             method=payment.method,
-            purpose=payment.purpose,
+            fee_type="PTE class",
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -410,14 +454,14 @@ class TestEdit:
         _, student, payment = desk_payment(abc)
         admin = abc.log_in_as(Role.ADMIN)
 
-        edit(abc, payment, purpose="Secret purpose text")
+        edit(abc, payment, note="Secret note text")
 
         entry = json_logs.only(
             f"Payment changed: payment_id={payment.pk}, student_id={student.pk}, "
             f"by_staff_id={admin.pk}"
         )
         assert entry["level"] == "INFO"
-        assert "Secret purpose" not in json_logs.text()
+        assert "Secret note" not in json_logs.text()
         assert "Aarav" not in json_logs.text()
 
     @pytest.mark.parametrize("role", NOT_ADMINS)
@@ -443,14 +487,14 @@ class TestEdit:
     def test_an_unknown_payment_is_not_found(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.put(payment_url(999_999), edit_body(), format="json")
+        response = abc.client.put(payment_url(999_999), edit_body(abc), format="json")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         _, _, payment = desk_payment(abc)
 
-        response = abc.new_client().put(payment_url(payment), edit_body(), format="json")
+        response = abc.new_client().put(payment_url(payment), edit_body(abc), format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -467,9 +511,9 @@ class TestRefusedEdits:
             ("paid_on", "1999-12-31", "Enter a date from 1 Jan 2000 to today."),
             ("method", "paypal", "Choose how they paid."),
             ("method", None, "Choose how they paid."),
-            ("purpose", "", "Say what the payment is for."),
-            ("purpose", 12, "Say what the payment is for."),
-            ("purpose", "x" * 201, "Use at most 200 characters."),
+            ("fee_type", None, "Choose a Fee Type."),
+            ("fee_type", 3.5, "Choose a Fee Type."),
+            ("note", "x" * 201, "Use at most 200 characters."),
         ],
     )
     def test_bad_values_are_refused_and_nothing_changes(
@@ -484,7 +528,11 @@ class TestRefusedEdits:
         assert response.json() == {field: [message]}
         unchanged = stored(abc, payment)
         assert unchanged is not None
-        assert (unchanged.amount, unchanged.purpose) == (payment.amount, payment.purpose)
+        assert (unchanged.amount, unchanged.fee_type_id, unchanged.note) == (
+            payment.amount,
+            payment.fee_type_id,
+            payment.note,
+        )
         assert entries(abc, student, HistoryKind.PAYMENT_EDITED) == []
 
     def test_a_future_date_is_refused(self, abc: ConsultancyContext) -> None:
@@ -495,11 +543,11 @@ class TestRefusedEdits:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    @pytest.mark.parametrize("missing", ["amount", "paid_on", "method", "purpose"])
+    @pytest.mark.parametrize("missing", ["amount", "paid_on", "method", "fee_type"])
     def test_every_field_is_required(self, abc: ConsultancyContext, missing: str) -> None:
         _, _, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
-        body = edit_body()
+        body = edit_body(abc)
         del body[missing]
 
         response = abc.client.put(payment_url(payment), body, format="json")
@@ -512,7 +560,7 @@ class TestRefusedEdits:
         _, student, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.put(payment_url(payment), {**edit_body(), field: 1}, format="json")
+        response = abc.client.put(payment_url(payment), {**edit_body(abc), field: 1}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -533,33 +581,33 @@ class TestRefusedEdits:
         _, _, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.put(payment_url(payment), [edit_body()], format="json")
+        response = abc.client.put(payment_url(payment), [edit_body(abc)], format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    @pytest.mark.parametrize("purpose", ["fee\nnext", "fee\x00"])
-    def test_control_characters_are_refused(self, abc: ConsultancyContext, purpose: str) -> None:
+    @pytest.mark.parametrize("note", ["fee\nnext", "fee\x00"])
+    def test_control_characters_are_refused(self, abc: ConsultancyContext, note: str) -> None:
         _, _, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = edit(abc, payment, purpose=purpose)
+        response = edit(abc, payment, note=note)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert list(response.json()) == ["purpose"]
+        assert list(response.json()) == ["note"]
 
-    @pytest.mark.parametrize("purpose", INJECTION_STRINGS)
-    def test_injection_shaped_purposes_are_kept_as_plain_text(
-        self, abc: ConsultancyContext, purpose: str
+    @pytest.mark.parametrize("note", INJECTION_STRINGS)
+    def test_injection_shaped_notes_are_kept_as_plain_text(
+        self, abc: ConsultancyContext, note: str
     ) -> None:
         _, _, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = edit(abc, payment, purpose=purpose)
+        response = edit(abc, payment, note=note)
 
-        assert response.json()["purpose"] == purpose
+        assert response.json()["note"] == note.strip()
         changed = stored(abc, payment)
         assert changed is not None
-        assert changed.purpose == purpose
+        assert changed.note == note.strip()
 
 
 class TestDelete:
@@ -567,7 +615,7 @@ class TestDelete:
         self, abc: ConsultancyContext
     ) -> None:
         _, student, payment = desk_payment(
-            abc, amount=25000, paid_on=date(2026, 10, 30), method="esewa", purpose="Visa fee"
+            abc, amount=25000, paid_on=date(2026, 10, 30), method="esewa", fee_type="Visa fee"
         )
         admin = named_staff(abc, "Maya Admin", Role.ADMIN)
         log_in(abc, admin)
@@ -679,7 +727,7 @@ class TestAccountsModule:
                 "amount": 1000,
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
-                "purpose": "PTE class fee",
+                "fee_type": type_id(abc, "PTE class"),
             },
             format="json",
         )
@@ -717,7 +765,7 @@ class TestMethods:
         _, _, payment = desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = getattr(abc.client, method)(payment_url(payment), edit_body(), format="json")
+        response = getattr(abc.client, method)(payment_url(payment), edit_body(abc), format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         unchanged = stored(abc, payment)
@@ -732,7 +780,7 @@ class TestMethods:
 
         responses = [
             platform_site.client.get(LIST_URL),
-            platform_site.client.put(payment_url(payment), edit_body(), format="json"),
+            platform_site.client.put(payment_url(payment), edit_body(abc), format="json"),
             platform_site.client.delete(payment_url(payment)),
         ]
 

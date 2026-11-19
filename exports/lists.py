@@ -23,9 +23,13 @@ from clock_in.serializers import ClockInExportQuerySerializer
 from clock_in.services import team_month_rows, team_staff
 from config.serializers import StrictSerializer
 from exports.models import ExportList
+from fee_types.models import FeeType
+from payments.models import PaymentMethod
+from payments.serializers import PaymentListQuerySerializer
+from payments.services import find_payments
 from staff.actors import actor_name
 from staff.models import Staff
-from students.models import Country, Source, Stage, TargetLevel
+from students.models import Country, Source, Stage, Student, TargetLevel
 from students.serializers import StudentListQuerySerializer
 from students.services import find_students
 from students.types import COUNSELLOR_ME, COUNSELLOR_NONE
@@ -40,6 +44,8 @@ CHUNK_SIZE = 500
 NO_FILTERS_TEXT = "No filters, everyone"
 UNKNOWN_COUNSELLOR_TEXT = "Unknown counsellor"
 NO_COUNSELLOR_TEXT = "No counsellor yet"
+UNKNOWN_FEE_TYPE_TEXT = "A Fee Type since deleted"
+UNKNOWN_STUDENT_TEXT = "Unknown Student"
 HAS_APPOINTMENT_TEXT = {"true": "Has a date", "false": "No date yet"}
 _MONTH_NAMES = (
     "January",
@@ -157,6 +163,32 @@ def _counsellor(counsellor: Staff | None) -> str:
 def _day(moment: datetime) -> str:
     """The Consultancy's calendar day of a stored moment."""
     return timezone.localdate(moment).isoformat()
+
+
+def _fee_type_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
+    """The Fee Type's name; one deleted since reads as unknown."""
+    found = FeeType.objects.filter(pk=value).values_list("name", flat=True).first()
+    return found or UNKNOWN_FEE_TYPE_TEXT
+
+
+def _student_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
+    """The Student's name."""
+    found = Student.objects.filter(pk=value).values_list("name", flat=True).first()
+    return found or UNKNOWN_STUDENT_TEXT
+
+
+def _payment_rows(payments: QuerySet[Any]) -> Iterator[Row]:
+    for payment in payments.iterator(chunk_size=CHUNK_SIZE):
+        yield [
+            payment.paid_on.isoformat(),
+            payment.receipt_number,
+            payment.student.name,
+            payment.fee_type.name,
+            payment.note,
+            str(payment.amount),
+            PaymentMethod(payment.method).label,
+            payment.recorded_by_name,
+        ]
 
 
 def _student_rows(students: QuerySet[Any]) -> Iterator[Row]:
@@ -329,5 +361,27 @@ LIST_EXPORTS: dict[ExportList, ListExport] = {
         find=lambda query, _viewer: team_staff(*query.year_month()),
         rows=_clock_in_rows,
         described=(("Month", "month", _month),),
+    ),
+    ExportList.PAYMENTS: ListExport(
+        query=PaymentListQuerySerializer,
+        columns=(
+            "Date",
+            "Receipt",
+            "Student",
+            "Fee Type",
+            "Note",
+            "Amount (NPR)",
+            "Method",
+            "Taken by",
+        ),
+        find=lambda query, _viewer: find_payments(query.to_filters()).payments,
+        rows=lambda found, _query: _payment_rows(found),
+        described=(
+            ("From", "from", _as_is),
+            ("To", "to", _as_is),
+            ("Student", "student", _student_filter),
+            ("Fee Type", "fee_type", _fee_type_filter),
+            ("Search", "q", _as_is),
+        ),
     ),
 }

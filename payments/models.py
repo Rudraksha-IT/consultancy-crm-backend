@@ -1,14 +1,14 @@
-"""Payments: money received from a Student, always with what it was for (GLOSSARY: Payment)."""
+"""Payments: money received from a Student, always with its Fee Type (GLOSSARY: Payment)."""
 
 from __future__ import annotations
 
 from django.db import models
 from django.db.models import Q
 
+from fee_types.models import NOTE_MAX_LENGTH, FeeType
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import CHOICE_MAX_LENGTH, Student
 
-PURPOSE_MAX_LENGTH = 200
 # NPR 10 crore: far above any Fee, low enough to catch a slip of the keyboard.
 MAX_AMOUNT = 100_000_000
 RECEIPT_NUMBER_DIGITS = 6
@@ -26,7 +26,7 @@ class PaymentMethod(models.TextChoices):
 
 
 class Payment(models.Model):
-    """One Payment from a Student (spec 71): whole NPR, the day paid, how, and what for.
+    """One Payment from a Student (spec 71): whole NPR, the day paid, how, and its Fee Type.
 
     Balances are calculated from Payments and Fees (issue 35); nothing here is an invoice.
     """
@@ -35,7 +35,9 @@ class Payment(models.Model):
     amount = models.PositiveBigIntegerField()
     paid_on = models.DateField()
     method = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=PaymentMethod.choices)
-    purpose = models.CharField(max_length=PURPOSE_MAX_LENGTH)
+    fee_type = models.ForeignKey(FeeType, on_delete=models.PROTECT, related_name="+")
+    # Optional, needed for Other; payments typed before Fee Types keep their old text here.
+    note = models.CharField(max_length=NOTE_MAX_LENGTH, blank=True, default="")
     # None when a Platform Admin did it during Support Access; the name says who (issue 27).
     recorded_by = models.ForeignKey(Staff, on_delete=models.PROTECT, null=True, related_name="+")
     # The name as it was, so the receipt reads the same after a rename or deactivation.

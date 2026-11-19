@@ -42,6 +42,7 @@ from emails.types import OfficeDetails
 from expenses.models import ExpenseCategory, ExpenseMethod
 from expenses.services import add_expense
 from expenses.types import NewExpense
+from fee_types.models import FeeType
 from fees.models import Fee
 from fees.services import add_fee, change_fee, delete_fee
 from fees.types import NewFee
@@ -226,7 +227,7 @@ class TestMoney:
             amount=5000,
             paid_on=timezone.localdate(),
             method=PaymentMethod.CASH,
-            purpose="PTE class fee",
+            fee_type=FeeType.objects.get(name="PTE class"),
         )
         payment = record_payment(student, details, by=visitor)
         assert payment.recorded_by_id is None
@@ -246,10 +247,11 @@ class TestMoney:
         self, abc: ConsultancyContext, visitor: PlatformVisitor, inside: None
     ) -> None:
         student = make_student(abc)
-        fee = add_fee(student, NewFee(purpose="Visa processing", amount=40000), by=visitor)
+        visa = FeeType.objects.get(name="Visa fee")
+        fee = add_fee(student, NewFee(fee_type=visa, amount=40000), by=visitor)
         assert fee.added_by_id is None
         assert fee.added_by_name == MARKED_NAME
-        change_fee(fee.pk, NewFee(purpose="Visa processing", amount=45000), by=visitor)
+        change_fee(fee.pk, NewFee(fee_type=visa, amount=45000), by=visitor)
         delete_fee(fee.pk, by=visitor)
         entries = history(student)
         assert [entry.kind for entry in entries] == [
@@ -290,13 +292,15 @@ class TestMoney:
         self, abc: ConsultancyContext, visit: Visit
     ) -> None:
         student = make_student(abc)
+        with tenant_context(abc.consultancy):
+            pte = FeeType.objects.get(name="PTE class").pk
         response = visit.client.post(
             f"/api/students/{student.pk}/payments/",
             {
                 "amount": 5000,
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
-                "purpose": "PTE class fee",
+                "fee_type": pte,
             },
             format="json",
         )

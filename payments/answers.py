@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from fee_types.answers import fee_type_ref
 from payments.models import Payment
 
 
 def receipt_answer(payment: Payment) -> dict[str, object]:
-    """One Payment as its receipt shows it: who paid, how much, when (AD), how and what for."""
+    """One Payment as its receipt shows it: who paid, how much, when (AD), how, and Fee Type."""
     student = payment.student
     return {
         "id": payment.pk,
@@ -15,7 +16,8 @@ def receipt_answer(payment: Payment) -> dict[str, object]:
         "amount": payment.amount,
         "paid_on": payment.paid_on.isoformat(),
         "method": payment.method,
-        "purpose": payment.purpose,
+        "fee_type": fee_type_ref(payment.fee_type),
+        "note": payment.note,
         "recorded_by": {"name": payment.recorded_by_name},
         "recorded_at": payment.recorded_at.isoformat(),
     }

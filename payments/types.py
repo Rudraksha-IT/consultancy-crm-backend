@@ -3,17 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from fee_types.models import FeeType
 from payments.models import PaymentMethod
 
 
 @dataclass(frozen=True)
 class NewPayment:
-    """A Payment to record: whole NPR, the day it was paid (AD), how, and what it was for."""
+    """A Payment to record: whole NPR, the day it was paid (AD), how, its Fee Type and note."""
 
     amount: int
     paid_on: date
     method: PaymentMethod
-    purpose: str
+    fee_type: FeeType
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -23,5 +25,5 @@ class PaymentFilters:
     paid_from: date | None = None
     paid_to: date | None = None
     student_id: int | None = None
-    purpose: str = ""
+    fee_type_id: int | None = None
     query: str = ""

@@ -9,13 +9,20 @@ import pytest
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
+from fee_types.models import FeeType
 from staff.models import Role, Staff, StaffStatus
-from tests.conftest import ConsultancyFactory, PlatformContext
+from tests.conftest import ConsultancyContext, ConsultancyFactory, PlatformContext
 from tests.integration.test_stage_and_counsellor_integration import make_student
 
 CONTEXT_URL = "/api/context/"
 DATES_URL = "/api/configuration/dates/"
 PAYMENTS_URL = "/api/students/{id}/payments/"
+
+
+def pte_id(office: ConsultancyContext) -> int:
+    """The id of the office's PTE class Fee Type."""
+    with tenant_context(office.consultancy):
+        return FeeType.objects.get(name="PTE class").pk
 
 
 class TestDateDisplayInContext:
@@ -191,7 +198,7 @@ class TestDatesStayInAd:
         abc.log_in_as(Role.ADMIN)
         abc.client.put(DATES_URL, {"date_display": "BS"}, format="json")
         student = make_student(abc)
-        body = {"amount": 5000, "paid_on": "2026-10-20", "method": "cash", "purpose": "PTE"}
+        body = {"amount": 5000, "paid_on": "2026-10-20", "method": "cash", "fee_type": pte_id(abc)}
 
         response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
 
@@ -205,7 +212,7 @@ class TestDatesStayInAd:
         abc.log_in_as(Role.ADMIN)
         abc.client.put(DATES_URL, {"date_display": "BS"}, format="json")
         student = make_student(abc)
-        body = {"amount": 5000, "paid_on": "2083-07-03", "method": "cash", "purpose": "PTE"}
+        body = {"amount": 5000, "paid_on": "2083-07-03", "method": "cash", "fee_type": pte_id(abc)}
 
         response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
 
