@@ -13,6 +13,8 @@ from rest_framework import status
 
 from fee_types.models import FeeType
 from history.models import HistoryEntry, HistoryKind
+from modules.services import switch_modules
+from modules.types import Module
 from payments.models import Payment
 from payments.serializers import AmountField, PaidOnField
 from staff.models import Role, Staff, StaffStatus
@@ -65,15 +67,25 @@ def fee_type_named(office: ConsultancyContext, name: str) -> FeeType:
         return FeeType.objects.get(name=name)
 
 
+# What each line of a visit's Payments has; the date and method are the visit's own.
+LINE_FIELDS = frozenset({"amount", "fee_type", "note"})
+
+
+def good_line(office: ConsultancyContext, **changes: object) -> dict[str, object]:
+    """One line the server accepts: NPR 25,000 for the Application fee; `changes` override it."""
+    return {"amount": 25000, "fee_type": fee_type_named(office, "Application fee").pk, **changes}
+
+
 def good_body(office: ConsultancyContext, **changes: object) -> dict[str, object]:
-    """A Payment the server accepts, for the Application fee; `changes` override it."""
-    return {
-        "amount": 25000,
-        "paid_on": today(),
-        "method": "esewa",
-        "fee_type": fee_type_named(office, "Application fee").pk,
-        **changes,
-    }
+    """One visit's Payment with one line; `changes` override the line or the visit's fields."""
+    line = good_line(office, **{k: v for k, v in changes.items() if k in LINE_FIELDS})
+    visit = {k: v for k, v in changes.items() if k not in LINE_FIELDS}
+    return {"paid_on": today(), "method": "esewa", **visit, "lines": [line]}
+
+
+def line_error(error: dict[str, list[str]], at: int = 0, of: int = 1) -> dict[str, object]:
+    """The answer when line `at` of `of` lines is refused: its errors in its place."""
+    return {"lines": [error if index == at else {} for index in range(of)]}
 
 
 def pay(
@@ -130,6 +142,10 @@ class TestRecording:
 
         assert response.status_code == status.HTTP_201_CREATED
         [payment] = stored_payments(abc)
+        application_fee = {
+            "id": fee_type_named(abc, "Application fee").pk,
+            "name": "Application fee",
+        }
         assert response.json() == {
             "id": payment.pk,
             "receipt_number": f"{payment.pk:06d}",
@@ -137,13 +153,21 @@ class TestRecording:
             "amount": 25000,
             "paid_on": today(),
             "method": "esewa",
-            "fee_type": {
-                "id": fee_type_named(abc, "Application fee").pk,
-                "name": "Application fee",
-            },
+            "fee_type": application_fee,
             "note": "",
             "recorded_by": {"name": "Sunita Shrestha"},
             "recorded_at": payment.recorded_at.isoformat(),
+            "lines": [
+                {
+                    "id": payment.pk,
+                    "fee_type": application_fee,
+                    "note": "",
+                    "amount": 25000,
+                    "paid_on": today(),
+                    "method": "esewa",
+                }
+            ],
+            "total": 25000,
         }
         assert payment.recorded_by_id == desk.pk
 
@@ -282,7 +306,7 @@ class TestRefusedInput:
         response = pay(abc, make_student(abc), amount=amount)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == AMOUNT_MESSAGE
+        assert response.json() == line_error(AMOUNT_MESSAGE)
         assert stored_payments(abc) == []
 
     def test_the_largest_amount_is_accepted(self, abc: ConsultancyContext) -> None:
@@ -319,7 +343,7 @@ class TestRefusedInput:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == METHOD_MESSAGE
 
-    @pytest.mark.parametrize("missing", ["amount", "paid_on", "method", "fee_type"])
+    @pytest.mark.parametrize("missing", ["paid_on", "method", "lines"])
     def test_every_field_is_required(self, abc: ConsultancyContext, missing: str) -> None:
         abc.log_in_as(Role.FRONT_DESK)
         body = good_body(abc)
@@ -329,6 +353,22 @@ class TestRefusedInput:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert list(response.json()) == [missing]
+
+    @pytest.mark.parametrize("missing", ["amount", "fee_type"])
+    def test_every_line_needs_its_fee_type_and_amount(
+        self, abc: ConsultancyContext, missing: str
+    ) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        line = good_line(abc)
+        del line[missing]
+        body = {**good_body(abc), "lines": [line]}
+
+        response = abc.client.post(payments_url(make_student(abc)), body, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        [errors] = response.json()["lines"]
+        assert list(errors) == [missing]
+        assert stored_payments(abc) == []
 
     @pytest.mark.parametrize("field", ["recorded_by", "student", "receipt_number", "id"])
     def test_an_unknown_field_is_refused_and_nothing_stored(
@@ -372,6 +412,328 @@ class TestRefusedInput:
         assert response.json()["note"] == note.strip()
         [payment] = stored_payments(abc)
         assert payment.note == note.strip()
+
+
+LINES_MESSAGE = {"lines": ["Add 1 to 10 lines, each with a Fee Type and an amount."]}
+HIDDEN = {"fee_type": ["This Fee Type is hidden. Choose another."]}
+OTHER_NOTE = {"note": ["Add a short note for Other."]}
+
+
+def visit_body(office: ConsultancyContext, *lines: dict[str, object]) -> dict[str, object]:
+    """One visit's money split across these lines, paid today by Fonepay QR."""
+    return {"paid_on": today(), "method": "fonepay_qr", "lines": list(lines)}
+
+
+def line_for(
+    office: ConsultancyContext, name: str, amount: int, note: str = ""
+) -> dict[str, object]:
+    """One line: `amount` for the Fee Type with this name."""
+    return {"fee_type": fee_type_named(office, name).pk, "amount": amount, "note": note}
+
+
+def split_visit(office: ConsultancyContext, student: Student) -> _MonkeyPatchedResponse:
+    """Visa fee 40,000, IELTS class 10,000 and courier (Other) 500, on one receipt."""
+    body = visit_body(
+        office,
+        line_for(office, "Visa fee", 40000),
+        line_for(office, "IELTS class", 10000, "first half"),
+        line_for(office, "Other", 500, "Courier"),
+    )
+    return office.client.post(payments_url(student), body, format="json")
+
+
+class TestSeveralLines:
+    """One visit's money split across Fee Types: a Payment per line, one receipt (spec 73)."""
+
+    def test_each_line_is_a_payment_and_they_share_one_receipt(
+        self, abc: ConsultancyContext
+    ) -> None:
+        desk = named_staff(abc, "Sunita Shrestha", Role.FRONT_DESK)
+        log_in(abc, desk)
+        student = make_student(abc, name="Aarav Sharma")
+
+        response = split_visit(abc, student)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        visa, ielts, courier = stored_payments(abc)
+        number = f"{visa.pk:06d}"
+        assert [p.receipt_number for p in (visa, ielts, courier)] == [number] * 3
+        assert [(p.amount, p.note) for p in (visa, ielts, courier)] == [
+            (40000, ""),
+            (10000, "first half"),
+            (500, "Courier"),
+        ]
+        assert {(p.paid_on.isoformat(), p.method, p.recorded_by_id) for p in (visa, ielts)} == {
+            (today(), "fonepay_qr", desk.pk)
+        }
+        body = response.json()
+        assert (body["id"], body["receipt_number"], body["total"]) == (visa.pk, number, 50500)
+        assert [
+            (line["id"], line["fee_type"]["name"], line["note"], line["amount"])
+            for line in body["lines"]
+        ] == [
+            (visa.pk, "Visa fee", "", 40000),
+            (ielts.pk, "IELTS class", "first half", 10000),
+            (courier.pk, "Other", "Courier", 500),
+        ]
+
+    @pytest.mark.parametrize("role", STUDENT_ROLES)
+    def test_every_student_role_records_several_lines(
+        self, abc: ConsultancyContext, role: Role
+    ) -> None:
+        abc.log_in_as(role)
+
+        assert split_visit(abc, make_student(abc)).status_code == status.HTTP_201_CREATED
+        assert len(stored_payments(abc)) == 3
+
+    def test_a_teacher_is_refused(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.TEACHER)
+
+        response = split_visit(abc, make_student(abc))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert stored_payments(abc) == []
+
+    def test_each_line_writes_its_own_history_entry_with_the_shared_receipt(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        student = make_student(abc)
+
+        split_visit(abc, student)
+
+        first = stored_payments(abc)[0]
+        assert [(e.after, e.detail) for e in payment_entries(abc, student)] == [
+            ("NPR 40,000, Visa fee, Fonepay QR", f"Receipt {first.receipt_number}"),
+            ("NPR 10,000, IELTS class (first half), Fonepay QR", f"Receipt {first.receipt_number}"),
+            ("NPR 500, Other (Courier), Fonepay QR", f"Receipt {first.receipt_number}"),
+        ]
+
+    def test_the_receipt_of_any_line_shows_every_line_and_the_total(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        made = split_visit(abc, make_student(abc)).json()
+
+        receipts = [abc.client.get(payment_url(line["id"])).json() for line in made["lines"]]
+
+        assert [r["lines"] for r in receipts] == [made["lines"]] * 3
+        assert {(r["receipt_number"], r["total"]) for r in receipts} == {
+            (made["receipt_number"], 50500)
+        }
+
+    def test_the_same_fee_type_twice_stays_two_payments(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        body = visit_body(
+            abc, line_for(abc, "Visa fee", 20000), line_for(abc, "Visa fee", 20000, "second half")
+        )
+
+        response = abc.client.post(payments_url(make_student(abc)), body, format="json")
+
+        assert response.json()["total"] == 40000
+        assert [p.amount for p in stored_payments(abc)] == [20000, 20000]
+
+    def test_each_visit_gets_its_own_receipt_number(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        student = make_student(abc)
+
+        first = split_visit(abc, student).json()
+        later = pay(abc, student).json()
+        third = split_visit(abc, student).json()
+
+        numbers = [first["receipt_number"], later["receipt_number"], third["receipt_number"]]
+        assert len(set(numbers)) == 3
+        assert [line["amount"] for line in later["lines"]] == [25000]
+
+    def test_up_to_ten_lines_are_taken(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.FRONT_DESK)
+        body = visit_body(abc, *[line_for(abc, "PTE class", 1000)] * 10)
+
+        response = abc.client.post(payments_url(make_student(abc)), body, format="json")
+
+        assert (response.status_code, response.json()["total"]) == (201, 10000)
+
+
+class TestOneBadLineSavesNothing:
+    """Saving several lines is all or nothing (ticket 07)."""
+
+    def post(self, office: ConsultancyContext, body: object) -> _MonkeyPatchedResponse:
+        office.log_in_as(Role.FRONT_DESK)
+        self.student = make_student(office)
+        return office.client.post(payments_url(self.student), body, format="json")
+
+    def assert_nothing_saved(self, office: ConsultancyContext) -> None:
+        assert stored_payments(office) == []
+        assert payment_entries(office, self.student) == []
+
+    @pytest.mark.parametrize(
+        ("bad", "error"),
+        [
+            ({"amount": 0}, AMOUNT_MESSAGE),
+            ({"amount": "500"}, AMOUNT_MESSAGE),
+            ({"fee_type": 999_999}, {"fee_type": ["Choose a Fee Type."]}),
+            ({"note": "x" * 201}, {"note": ["Use at most 200 characters."]}),
+            ({"note": 5}, {"note": ["Not a valid string."]}),
+            ({"receipt": 1}, {"detail": ["Unknown field."]}),
+        ],
+    )
+    def test_a_bad_second_line_is_named_and_nothing_is_saved(
+        self, abc: ConsultancyContext, bad: dict[str, object], error: dict[str, list[str]]
+    ) -> None:
+        body = visit_body(
+            abc, line_for(abc, "Visa fee", 40000), {**line_for(abc, "IELTS class", 10000), **bad}
+        )
+
+        response = self.post(abc, body)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == line_error(error, at=1, of=2)
+        self.assert_nothing_saved(abc)
+
+    def test_other_without_a_note_saves_nothing(self, abc: ConsultancyContext) -> None:
+        body = visit_body(abc, line_for(abc, "Visa fee", 40000), line_for(abc, "Other", 500))
+
+        response = self.post(abc, body)
+
+        assert response.json() == line_error(OTHER_NOTE, at=1, of=2)
+        self.assert_nothing_saved(abc)
+
+    def test_a_hidden_fee_type_on_one_line_saves_nothing(self, abc: ConsultancyContext) -> None:
+        with tenant_context(abc.consultancy):
+            FeeType.objects.filter(name="PTE class").update(hidden=True)
+        body = visit_body(abc, line_for(abc, "PTE class", 1000), line_for(abc, "Visa fee", 1))
+
+        response = self.post(abc, body)
+
+        assert response.json() == line_error(HIDDEN, at=0, of=2)
+        self.assert_nothing_saved(abc)
+
+    @pytest.mark.parametrize(
+        "lines",
+        [[], None, "lines", 5, {"amount": 1}, ["line"], [[1]], [None], "too many"],
+    )
+    def test_the_lines_must_be_one_to_ten_objects(
+        self, abc: ConsultancyContext, lines: object
+    ) -> None:
+        if lines == "too many":
+            lines = [line_for(abc, "PTE class", 1000)] * 11
+
+        response = self.post(abc, {**visit_body(abc), "lines": lines})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == LINES_MESSAGE
+        self.assert_nothing_saved(abc)
+
+    def test_a_bad_visit_field_saves_no_line(self, abc: ConsultancyContext) -> None:
+        body = {**visit_body(abc, line_for(abc, "Visa fee", 1)), "method": "paypal"}
+
+        response = self.post(abc, body)
+
+        assert response.json() == METHOD_MESSAGE
+        self.assert_nothing_saved(abc)
+
+    @pytest.mark.parametrize("note", INJECTION_STRINGS)
+    def test_injection_shaped_notes_on_several_lines_are_plain_text(
+        self, abc: ConsultancyContext, note: str
+    ) -> None:
+        body = visit_body(
+            abc, line_for(abc, "Other", 500, note), line_for(abc, "Visa fee", 1000, note)
+        )
+
+        response = self.post(abc, body)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert [line["note"] for line in response.json()["lines"]] == [note.strip()] * 2
+
+
+class TestChangesAfterwards:
+    """A Payment edited or deleted later keeps its receipt number; the receipt shows it as now."""
+
+    @pytest.fixture
+    def made(self, abc: ConsultancyContext) -> dict[str, object]:
+        switch_modules(abc.consultancy, {Module.ACCOUNTS})
+        abc.log_in_as(Role.ADMIN)
+        self.student = make_student(abc)
+        body: dict[str, object] = split_visit(abc, self.student).json()
+        return body
+
+    def line_ids(self, made: dict[str, object]) -> list[int]:
+        lines = made["lines"]
+        assert isinstance(lines, list)
+        return [int(line["id"]) for line in lines]
+
+    def test_an_edited_line_keeps_the_number_and_the_receipt_shows_it_now(
+        self, abc: ConsultancyContext, made: dict[str, object]
+    ) -> None:
+        visa, ielts, _ = self.line_ids(made)
+        edit = {**line_for(abc, "IELTS class", 15000, "whole course")}
+        edit.update(paid_on=today(), method="cash")
+
+        edited = abc.client.put(payment_url(ielts), edit, format="json")
+        receipt = abc.client.get(payment_url(visa)).json()
+
+        assert edited.status_code == status.HTTP_200_OK
+        assert edited.json()["receipt_number"] == made["receipt_number"]
+        assert receipt["receipt_number"] == made["receipt_number"]
+        assert [(line["amount"], line["note"], line["method"]) for line in receipt["lines"]] == [
+            (40000, "", "fonepay_qr"),
+            (15000, "whole course", "cash"),
+            (500, "Courier", "fonepay_qr"),
+        ]
+        assert receipt["total"] == 55500
+        edits = [e for e in all_entries(abc, self.student) if e.kind == HistoryKind.PAYMENT_EDITED]
+        assert [e.detail for e in edits] == [f"Receipt {made['receipt_number']}"]
+
+    def test_a_deleted_line_leaves_the_rest_on_the_same_receipt(
+        self, abc: ConsultancyContext, made: dict[str, object]
+    ) -> None:
+        visa, ielts, courier = self.line_ids(made)
+
+        deleted = abc.client.delete(payment_url(visa))
+        gone = abc.client.get(payment_url(visa))
+        receipt = abc.client.get(payment_url(courier)).json()
+
+        assert (deleted.status_code, gone.status_code) == (204, 404)
+        assert receipt["receipt_number"] == made["receipt_number"]
+        assert [line["id"] for line in receipt["lines"]] == [ielts, courier]
+        assert receipt["total"] == 10500
+        deletions = [
+            e for e in all_entries(abc, self.student) if e.kind == HistoryKind.PAYMENT_DELETED
+        ]
+        assert [e.detail for e in deletions] == [f"Receipt {made['receipt_number']}"]
+
+    def test_the_admin_list_finds_every_line_by_the_receipt_number(
+        self, abc: ConsultancyContext, made: dict[str, object]
+    ) -> None:
+        pay(abc, make_student(abc, phone="9841234567"))
+
+        rows = abc.client.get("/api/payments/", {"q": str(made["receipt_number"])}).json()[
+            "results"
+        ]
+
+        assert sorted(row["id"] for row in rows) == sorted(self.line_ids(made))
+        assert {row["receipt_number"] for row in rows} == {made["receipt_number"]}
+        assert all("lines" not in row for row in rows)
+
+    @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])
+    def test_only_an_admin_edits_or_deletes_a_line(
+        self, abc: ConsultancyContext, made: dict[str, object], role: Role
+    ) -> None:
+        _, ielts, _ = self.line_ids(made)
+        abc.log_in_as(role)
+        edit = {**line_for(abc, "IELTS class", 1), "paid_on": today(), "method": "cash"}
+
+        edited = abc.client.put(payment_url(ielts), edit, format="json")
+        deleted = abc.client.delete(payment_url(ielts))
+
+        assert (edited.status_code, deleted.status_code) == (403, 403)
+        assert [p.amount for p in stored_payments(abc)] == [40000, 10000, 500]
+
+
+def all_entries(office: ConsultancyContext, student: Student) -> list[HistoryEntry]:
+    """Every History entry of the Student, oldest first."""
+    with tenant_context(office.consultancy):
+        return list(HistoryEntry.objects.filter(student=student).order_by("pk"))
 
 
 class TestReceipt:
@@ -564,3 +926,13 @@ class TestModels:
         payment = make_payment(abc, make_student(abc), desk)
 
         assert str(payment) == f"{payment.pk:06d}"
+        assert payment.receipt == payment.pk
+
+    def test_payments_saved_one_by_one_each_get_their_own_number(
+        self, abc: ConsultancyContext
+    ) -> None:
+        desk = abc.add_staff(Role.FRONT_DESK)
+        student = make_student(abc)
+        first, second = make_payment(abc, student, desk), make_payment(abc, student, desk)
+
+        assert (first.receipt, second.receipt) == (first.pk, second.pk)

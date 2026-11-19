@@ -19,7 +19,7 @@ from history.models import HistoryKind
 from history.services import Change, record
 from payments.models import Payment, PaymentMethod
 from payments.money import format_npr
-from payments.types import NewPayment, PaymentFilters
+from payments.types import NewPayment, NewPayments, PaymentFilters, PaymentLine
 from staff.actors import actor_name, stored_staff
 from staff.models import Staff
 from students.models import Student
@@ -28,36 +28,63 @@ logger = logging.getLogger(__name__)
 
 PHONE_SEPARATORS = re.compile(r"[\s-]")
 DIGITS = re.compile(r"^[0-9]+\Z")
-# Larger numbers can't be a receipt number (and wouldn't fit the id column).
+# Larger numbers can't be a receipt number (and wouldn't fit the column).
 MAX_RECEIPT_DIGITS = 12
 
 
-def record_payment(student: Student, details: NewPayment, by: Staff) -> Payment:
-    """Record a Payment from the Student, received now by `by`, and add it to their History."""
+def record_payments(student: Student, visit: NewPayments, by: Staff) -> list[Payment]:
+    """Record one visit's money as a Payment per line, on one receipt, all or none (spec 73).
+
+    Each Payment gets its own History entry naming the shared receipt.
+    """
+    made: list[Payment] = []
     with transaction.atomic():
-        payment = Payment.objects.create(
-            student=student,
-            amount=details.amount,
-            paid_on=details.paid_on,
-            method=details.method,
-            fee_type=details.fee_type,
-            note=details.note,
-            recorded_by=stored_staff(by),
-            recorded_by_name=actor_name(by),
+        for line in visit.lines:
+            # The first line takes its own id as the receipt; the others share it.
+            shared = {"receipt": made[0].receipt} if made else {}
+            payment = Payment.objects.create(
+                student=student,
+                amount=line.amount,
+                paid_on=visit.paid_on,
+                method=visit.method,
+                fee_type=line.fee_type,
+                note=line.note,
+                recorded_by=stored_staff(by),
+                recorded_by_name=actor_name(by),
+                **shared,
+            )
+            record(
+                student,
+                HistoryKind.PAYMENT_RECORDED,
+                by,
+                Change(after=describe_payment(payment), detail=_receipt(payment)),
+            )
+            made.append(payment)
+    for payment in made:
+        logger.info(
+            "Payment recorded: payment_id=%s, student_id=%s, by_staff_id=%s",
+            payment.pk,
+            student.pk,
+            by.pk,
         )
-        record(
-            student,
-            HistoryKind.PAYMENT_RECORDED,
-            by,
-            Change(after=describe_payment(payment), detail=f"Receipt {payment.receipt_number}"),
-        )
-    logger.info(
-        "Payment recorded: payment_id=%s, student_id=%s, by_staff_id=%s",
-        payment.pk,
-        student.pk,
-        by.pk,
-    )
+    return made
+
+
+def record_payment(student: Student, details: NewPayment, by: Staff) -> Payment:
+    """Record one Payment from the Student, on a receipt of its own."""
+    line = PaymentLine(fee_type=details.fee_type, amount=details.amount, note=details.note)
+    visit = NewPayments(paid_on=details.paid_on, method=details.method, lines=(line,))
+    [payment] = record_payments(student, visit, by)
     return payment
+
+
+def receipt_lines(payment: Payment) -> list[Payment]:
+    """Every Payment on the same receipt as this one, as they are now, oldest first."""
+    return list(
+        Payment.objects.select_related("fee_type")
+        .filter(receipt=payment.receipt, student_id=payment.student_id)
+        .order_by("pk")
+    )
 
 
 def describe_payment(payment: Payment) -> str:
@@ -206,7 +233,7 @@ def _search(query: str) -> Q:
     if phone:
         match |= Q(student__phone__contains=phone)
     if DIGITS.match(query) and len(query) <= MAX_RECEIPT_DIGITS:
-        match |= Q(pk=int(query))
+        match |= Q(receipt=int(query))
     return match
 
 

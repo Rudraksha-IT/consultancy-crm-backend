@@ -27,16 +27,21 @@ from access.policy import (
 )
 from modules.permissions import requires_module
 from modules.types import Module
-from payments.answers import receipt_answer
+from payments.answers import payment_answer, receipt_answer
 from payments.models import Payment
-from payments.serializers import NewPaymentSerializer, PaymentListQuerySerializer
+from payments.serializers import (
+    NewPaymentSerializer,
+    NewPaymentsSerializer,
+    PaymentListQuerySerializer,
+)
 from payments.services import (
     change_payment,
     delete_payment,
     fee_type_of_payment,
     find_payments,
     payment_with_student,
-    record_payment,
+    receipt_lines,
+    record_payments,
 )
 from staff.context import get_request_staff
 from staff.models import Staff
@@ -64,22 +69,22 @@ class CanManagePayments(BasePermission):
 
 
 class StudentPaymentsView(APIView):
-    """Record a Payment from one Student (POST only: there is no list here; spec 73)."""
+    """Record one visit's Payments from a Student (POST only: there is no list here; spec 73)."""
 
     permission_classes = (IsAuthenticated, CanRecordPayments)
     parser_classes = (JSONParser,)
 
     def post(self, request: Request, student_id: int) -> Response:
-        """Record it and return its receipt."""
+        """Record a Payment per line, all on one receipt, and return that receipt."""
         staff = get_request_staff(request)
         try:
             student = Student.objects.get(pk=student_id)
         except Student.DoesNotExist as error:
             raise NotFound from error
-        serializer = NewPaymentSerializer(data=request.data)
+        serializer = NewPaymentsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        payment = record_payment(student, serializer.to_new_payment(), by=staff)
-        return Response(receipt_answer(payment), status=status.HTTP_201_CREATED)
+        made = record_payments(student, serializer.to_new_payments(), by=staff)
+        return Response(receipt_answer(made[0], made), status=status.HTTP_201_CREATED)
 
 
 class PaymentListView(APIView):
@@ -102,7 +107,7 @@ class PaymentListView(APIView):
                 "page": page.number,
                 "page_size": PAYMENTS_PER_PAGE,
                 "total": found.total,
-                "results": [receipt_answer(payment) for payment in page],
+                "results": [payment_answer(payment) for payment in page],
             }
         )
 
@@ -119,7 +124,10 @@ class PaymentView(APIView):
         return (IsAuthenticated(), CanSeeStudents())
 
     def get(self, request: Request, payment_id: int) -> Response:
-        """Return the receipt: any for an Admin, else only one just recorded (spec 72-73)."""
+        """Return the receipt with every line on it.
+
+        An Admin sees any; others only one they just recorded (spec 72-73).
+        """
         try:
             payment = payment_with_student(payment_id)
         except Payment.DoesNotExist as error:
@@ -129,7 +137,7 @@ class PaymentView(APIView):
         )
         if reason is not None:
             raise PermissionDenied(reason)
-        return Response(receipt_answer(payment))
+        return Response(receipt_answer(payment, receipt_lines(payment)))
 
     def put(self, request: Request, payment_id: int) -> Response:
         """Replace the amount, date, method, Fee Type and note; return the receipt (spec 75-76).
@@ -147,7 +155,7 @@ class PaymentView(APIView):
             )
         except Payment.DoesNotExist as error:
             raise NotFound from error
-        return Response(receipt_answer(payment))
+        return Response(receipt_answer(payment, receipt_lines(payment)))
 
     def delete(self, request: Request, payment_id: int) -> Response:
         """Delete it; the Student's History keeps its details (spec 75-76)."""

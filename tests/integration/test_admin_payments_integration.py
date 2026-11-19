@@ -724,10 +724,9 @@ class TestAccountsModule:
         made = abc.client.post(
             f"/api/students/{student.pk}/payments/",
             {
-                "amount": 1000,
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
-                "fee_type": type_id(abc, "PTE class"),
+                "lines": [{"amount": 1000, "fee_type": type_id(abc, "PTE class")}],
             },
             format="json",
         )

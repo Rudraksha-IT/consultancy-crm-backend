@@ -578,6 +578,7 @@ class TestOldPurposesBecomeOther:
             40000,
         )
         assert (payment.fee_type.name, payment.note) == ("Other", "x" * 200)
+        assert payment.receipt_number == f"{old_payment.pk:06d}"
 
 
 def payment_body(office: ConsultancyContext, name: str, **changes: object) -> dict[str, object]:
@@ -596,6 +597,15 @@ def fee_body(office: ConsultancyContext, name: str, **changes: object) -> dict[s
     return {"fee_type": fee_type_id(office, name), "amount": 40000, **changes}
 
 
+def line_refusal(response: _MonkeyPatchedResponse) -> object:
+    """The refusal of a visit's only line: the answer must be `{"lines": [refusal]}`."""
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    body = response.json()
+    assert list(body) == ["lines"]
+    [refusal] = body["lines"]
+    return refusal
+
+
 class TestPickingAFeeType:
     """Every Fee and Payment picks an offered Fee Type; Other needs a note (spec 69-72)."""
 
@@ -605,9 +615,11 @@ class TestPickingAFeeType:
         return make_student(abc)
 
     def record(
-        self, office: ConsultancyContext, student: Student, body: object
+        self, office: ConsultancyContext, student: Student, body: dict[str, object]
     ) -> _MonkeyPatchedResponse:
-        return office.client.post(f"/api/students/{student.pk}/payments/", body, format="json")
+        """Record `body` (as one Payment's fields) as a visit with that one line."""
+        visit = {"paid_on": body.pop("paid_on"), "method": body.pop("method"), "lines": [body]}
+        return office.client.post(f"/api/students/{student.pk}/payments/", visit, format="json")
 
     def add_fee(
         self, office: ConsultancyContext, student: Student, body: object
@@ -635,8 +647,8 @@ class TestPickingAFeeType:
         other_noted = self.record(abc, student, payment_body(abc, "Other", note="Courier"))
 
         assert (without.status_code, without.json()["note"]) == (status.HTTP_201_CREATED, "")
-        assert (other.status_code, other.json()) == (status.HTTP_400_BAD_REQUEST, OTHER_NOTE)
-        assert other_blank.json() == OTHER_NOTE
+        assert line_refusal(other) == OTHER_NOTE
+        assert line_refusal(other_blank) == OTHER_NOTE
         assert other_noted.status_code == status.HTTP_201_CREATED
 
     @pytest.mark.parametrize("sent", [None, "3", True, 1.5, 0, -1, 2**31, 999_999, [3]])
@@ -646,14 +658,14 @@ class TestPickingAFeeType:
         payment = self.record(abc, student, payment_body(abc, "Visa fee", fee_type=sent))
         fee = self.add_fee(abc, student, fee_body(abc, "Visa fee", fee_type=sent))
 
-        assert (payment.status_code, payment.json()) == (status.HTTP_400_BAD_REQUEST, CHOOSE)
+        assert line_refusal(payment) == CHOOSE
         assert (fee.status_code, fee.json()) == (status.HTTP_400_BAD_REQUEST, CHOOSE)
 
     def test_a_fee_type_is_needed(self, abc: ConsultancyContext, student: Student) -> None:
         body = payment_body(abc, "Visa fee")
         del body["fee_type"]
 
-        assert self.record(abc, student, body).json() == CHOOSE
+        assert line_refusal(self.record(abc, student, body)) == CHOOSE
 
     def test_a_hidden_fee_type_is_not_offered(
         self, abc: ConsultancyContext, student: Student
@@ -663,7 +675,7 @@ class TestPickingAFeeType:
         payment = self.record(abc, student, payment_body(abc, "PTE class"))
         fee = self.add_fee(abc, student, fee_body(abc, "PTE class"))
 
-        assert (payment.status_code, payment.json()) == (status.HTTP_400_BAD_REQUEST, HIDDEN)
+        assert line_refusal(payment) == HIDDEN
         assert (fee.status_code, fee.json()) == (status.HTTP_400_BAD_REQUEST, HIDDEN)
 
     def test_an_old_payment_keeps_its_hidden_fee_type_when_edited(
@@ -706,8 +718,7 @@ class TestPickingAFeeType:
     ) -> None:
         response = self.record(abc, student, payment_body(abc, "Visa fee", note=note))
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert list(response.json()) == ["note"]
+        assert list(line_refusal(response)) == ["note"]  # type: ignore[call-overload]
 
     def test_a_note_of_two_hundred_characters_at_most(
         self, abc: ConsultancyContext, student: Student
@@ -715,7 +726,7 @@ class TestPickingAFeeType:
         refused = self.record(abc, student, payment_body(abc, "Visa fee", note="x" * 201))
         accepted = self.record(abc, student, payment_body(abc, "Visa fee", note="x" * 200))
 
-        assert refused.json() == {"note": ["Use at most 200 characters."]}
+        assert line_refusal(refused) == {"note": ["Use at most 200 characters."]}
         assert accepted.status_code == status.HTTP_201_CREATED
 
     @pytest.mark.parametrize("note", ["first\nhalf", "x\x00", "x\x1b[31m"])
@@ -724,7 +735,7 @@ class TestPickingAFeeType:
     ) -> None:
         response = self.record(abc, student, payment_body(abc, "Visa fee", note=note))
 
-        assert list(response.json()) == ["note"]
+        assert list(line_refusal(response)) == ["note"]  # type: ignore[call-overload]
 
     @pytest.mark.parametrize("text", INJECTION_STRINGS)
     def test_injection_shaped_notes_are_kept_as_plain_text(

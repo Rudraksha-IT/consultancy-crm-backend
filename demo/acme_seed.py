@@ -108,8 +108,8 @@ from history.models import HistoryEntry
 from office_networks.networks import parse_office_network
 from office_networks.services import add_office_network, office_network_limits
 from payments.models import Payment, PaymentMethod as PM
-from payments.services import record_payment
-from payments.types import NewPayment
+from payments.services import record_payment, record_payments
+from payments.types import NewPayment, NewPayments, PaymentLine
 from staff.models import Role, Staff
 from staff.services import create_staff
 from staff.types import NewStaff
@@ -415,6 +415,11 @@ with tenant_context(office):
     step(ago(12), record_payment, students["Manisha Bhattarai"], NewPayment(amount=15000, paid_on=ago(12), method=PM.KHALTI, fee_type=ft("IELTS class")), anita)
     step(ago(32), add_fee, students["Ujjwal Basnet"], NewFee(fee_type=ft("IELTS class"), note="6 weeks", amount=15000), admin)
     step(ago(30), record_payment, students["Ujjwal Basnet"], NewPayment(amount=7500, paid_on=ago(30), method=PM.CASH, fee_type=ft("IELTS class"), note="first half"), anita)
+    # One visit's money split across Fee Types, on one receipt (ticket 07).
+    step(ago(5), record_payments, students["Ujjwal Basnet"], NewPayments(paid_on=ago(5), method=PM.FONEPAY_QR, lines=(
+        PaymentLine(fee_type=ft("IELTS class"), amount=7500, note="second half"),
+        PaymentLine(fee_type=ft("Other"), amount=500, note="Courier"),
+    )), anita)
     step(ago(20), add_fee, students["Sabina Rana"], NewFee(fee_type=ft("Other"), note="Counselling and SOP review", amount=5000), admin)
 
     # Commission from the Universities of the granted Students.

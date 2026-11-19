@@ -297,10 +297,9 @@ class TestMoney:
         response = visit.client.post(
             f"/api/students/{student.pk}/payments/",
             {
-                "amount": 5000,
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
-                "fee_type": pte,
+                "lines": [{"amount": 5000, "fee_type": pte}],
             },
             format="json",
         )

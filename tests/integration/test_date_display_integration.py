@@ -198,7 +198,8 @@ class TestDatesStayInAd:
         abc.log_in_as(Role.ADMIN)
         abc.client.put(DATES_URL, {"date_display": "BS"}, format="json")
         student = make_student(abc)
-        body = {"amount": 5000, "paid_on": "2026-10-20", "method": "cash", "fee_type": pte_id(abc)}
+        line = {"amount": 5000, "fee_type": pte_id(abc)}
+        body = {"paid_on": "2026-10-20", "method": "cash", "lines": [line]}
 
         response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
 
@@ -212,7 +213,8 @@ class TestDatesStayInAd:
         abc.log_in_as(Role.ADMIN)
         abc.client.put(DATES_URL, {"date_display": "BS"}, format="json")
         student = make_student(abc)
-        body = {"amount": 5000, "paid_on": "2083-07-03", "method": "cash", "fee_type": pte_id(abc)}
+        line = {"amount": 5000, "fee_type": pte_id(abc)}
+        body = {"paid_on": "2083-07-03", "method": "cash", "lines": [line]}
 
         response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
 

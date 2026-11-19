@@ -2427,6 +2427,7 @@ def _fee_type_id(office: ConsultancyContext, name: str = "Visa fee") -> int:
 
 
 def _payment_body(office: ConsultancyContext) -> dict[str, object]:
+    """One Payment's new details, as an Admin's edit sends them."""
     return {
         "amount": 25000,
         "paid_on": timezone.localdate().isoformat(),
@@ -2435,11 +2436,17 @@ def _payment_body(office: ConsultancyContext) -> dict[str, object]:
     }
 
 
+def _visit_body(office: ConsultancyContext, *fee_types: int) -> dict[str, object]:
+    """One visit's Payments, NPR 25,000 a line, for these Fee Types (the Visa fee if none)."""
+    lines = [{"amount": 25000, "fee_type": pk} for pk in fee_types or (_fee_type_id(office),)]
+    return {"paid_on": timezone.localdate().isoformat(), "method": "cash", "lines": lines}
+
+
 def _student_with_payment(office: ConsultancyContext, name: str) -> tuple[int, int]:
     """A new Student of the office's logged-in Admin, with one Payment: (student id, payment id)."""
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()
     payment = office.client.post(
-        f"/api/students/{student['id']}/payments/", _payment_body(office), format="json"
+        f"/api/students/{student['id']}/payments/", _visit_body(office), format="json"
     ).json()
     return student["id"], payment["id"]
 
@@ -2471,7 +2478,7 @@ class TestPaymentIsolation:
         abc_student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
 
         response = xyz.client.post(
-            f"/api/students/{abc_student['id']}/payments/", _payment_body(xyz), format="json"
+            f"/api/students/{abc_student['id']}/payments/", _visit_body(xyz), format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -2509,12 +2516,69 @@ class TestPaymentIsolation:
 
         responses = [
             intruder.get(f"/api/payments/{payment}/"),
-            intruder.post(f"/api/students/{ram}/payments/", _payment_body(xyz), format="json"),
+            intruder.post(f"/api/students/{ram}/payments/", _visit_body(xyz), format="json"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
         with tenant_context(xyz.consultancy):
             assert Payment.objects.count() == 1
+
+
+class TestReceiptIsolation:
+    """Ticket 07: one receipt's lines never cross Consultancies, even with the same numbers."""
+
+    def test_a_receipt_shows_only_this_offices_lines(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
+        ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        three = (
+            _fee_type_id(abc),
+            _fee_type_id(abc, "IELTS class"),
+            _fee_type_id(abc, "PTE class"),
+        )
+        abc_made = abc.client.post(
+            f"/api/students/{sita['id']}/payments/", _visit_body(abc, *three), format="json"
+        ).json()
+        xyz_made = xyz.client.post(
+            f"/api/students/{ram['id']}/payments/", _visit_body(xyz), format="json"
+        ).json()
+
+        receipt = xyz.client.get(f"/api/payments/{xyz_made['id']}/").json()
+        other_lines = [
+            xyz.client.get(f"/api/payments/{line['id']}/") for line in abc_made["lines"][1:]
+        ]
+
+        assert abc_made["receipt_number"] == xyz_made["receipt_number"]
+        assert (len(receipt["lines"]), receipt["total"]) == (1, 25000)
+        assert receipt["student"]["name"] == "Ram Thapa"
+        assert [r.status_code for r in other_lines] == [status.HTTP_404_NOT_FOUND] * 2
+        assert "Sita" not in "".join(r.content.decode() for r in other_lines)
+
+    def test_another_offices_fee_type_on_any_line_saves_nothing(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.FRONT_DESK)
+        abc_only = abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json")
+        assert abc_only.status_code == status.HTTP_201_CREATED
+        ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+
+        response = xyz.client.post(
+            f"/api/students/{ram['id']}/payments/",
+            _visit_body(xyz, abc_only.json()["id"], _fee_type_id(xyz)),
+            format="json",
+        )
+
+        assert response.json() == {"lines": [{"fee_type": ["Choose a Fee Type."]}, {}]}
+        with tenant_context(xyz.consultancy):
+            assert Payment.objects.count() == 0
 
 
 class TestAdminPaymentsIsolation:
@@ -3758,7 +3822,7 @@ class TestFeeTypeIsolation:
 
         payment = xyz.client.post(
             f"/api/students/{student['id']}/payments/",
-            {**_payment_body(xyz), "fee_type": abc_only},
+            _visit_body(xyz, _fee_type_id(xyz), abc_only),
             format="json",
         )
         fee = xyz.client.post(
@@ -3767,7 +3831,7 @@ class TestFeeTypeIsolation:
             format="json",
         )
 
-        assert payment.json() == {"fee_type": ["Choose a Fee Type."]}
+        assert payment.json() == {"lines": [{}, {"fee_type": ["Choose a Fee Type."]}]}
         assert fee.json() == {"fee_type": ["Choose a Fee Type."]}
         with tenant_context(xyz.consultancy):
             assert not Payment.objects.exists()

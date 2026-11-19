@@ -19,6 +19,27 @@ class NewPayment:
 
 
 @dataclass(frozen=True)
+class PaymentLine:
+    """One line of a visit's Payments: whole NPR for one Fee Type, with its note."""
+
+    fee_type: FeeType
+    amount: int
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class NewPayments:
+    """One visit's money (spec 73): the day it was paid (AD), how, and a Payment per line.
+
+    The lines are saved together, all or none, and share one receipt.
+    """
+
+    paid_on: date
+    method: PaymentMethod
+    lines: tuple[PaymentLine, ...]
+
+
+@dataclass(frozen=True)
 class PaymentFilters:
     """The Payments list's filters (spec 74); empty or None means "any"."""
 
