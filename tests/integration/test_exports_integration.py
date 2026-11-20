@@ -79,7 +79,6 @@ VISA_COLUMNS = [
 ]
 PAYMENT_COLUMNS = [
     "Date",
-    "Receipt",
     "Student",
     "Fee Type",
     "Note",
@@ -335,7 +334,6 @@ class TestPaymentsExport:
         assert len(rows) - 1 == len(listed) == 1
         assert rows[1] == [
             visa.paid_on.isoformat(),
-            visa.receipt_number,
             "Sita Karki",
             "Visa fee",
             "first half",

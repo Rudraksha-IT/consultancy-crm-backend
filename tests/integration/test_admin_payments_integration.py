@@ -200,12 +200,13 @@ class TestList:
 
         assert ids(listed(abc, q="-")) == [theirs.pk]
 
-    def test_search_by_receipt_number(self, abc: ConsultancyContext) -> None:
+    def test_never_searches_by_receipt_number(self, abc: ConsultancyContext) -> None:
         desk, student, first = desk_payment(abc)
         make_payment(abc, student, desk)
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, q=first.receipt_number)) == [first.pk]
+        # No receipt numbers are shown anywhere for now (asked 2026-11-20).
+        assert ids(listed(abc, q=first.receipt_number)) == []
 
     def test_by_fee_type(self, abc: ConsultancyContext) -> None:
         desk, student, visa = desk_payment(abc, fee_type="Visa fee")
@@ -405,7 +406,7 @@ class TestEdit:
         assert entry.by_name == "Maya Admin"
         assert entry.before == "Amount NPR 25,000; date 30 Oct 2026"
         assert entry.after == "Amount NPR 1,25,000; date 29 Oct 2026"
-        assert entry.detail == f"Receipt {payment.receipt_number}"
+        assert entry.detail == ""
 
     def test_method_and_fee_type_changes_are_named(self, abc: ConsultancyContext) -> None:
         _, student, payment = desk_payment(abc, method="cash", fee_type="PTE class")
@@ -628,7 +629,7 @@ class TestDelete:
         assert entry.by_name == "Maya Admin"
         assert entry.before == "NPR 25,000, Visa fee, eSewa, 30 Oct 2026"
         assert entry.after == ""
-        assert entry.detail == f"Receipt {payment.receipt_number}"
+        assert entry.detail == ""
         # The Payment's earlier History stays.
         assert abc.client.get(payment_url(payment)).status_code == status.HTTP_404_NOT_FOUND
 

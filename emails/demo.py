@@ -134,7 +134,7 @@ _READY_MADE: tuple[tuple[str, DraftContext, ReadyMade], ...] = (
     (
         "Payment received",
         _ONE,
-        PaymentReceived(40000, "Visa fee", None, "18 Nov 2026", "Bank transfer", "000483"),
+        PaymentReceived(40000, "Visa fee", None, "18 Nov 2026", "Bank transfer"),
     ),
     (
         "Fee reminder",

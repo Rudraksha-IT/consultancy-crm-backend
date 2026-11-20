@@ -202,7 +202,6 @@ class PaymentReceived:
     note: str | None
     paid_on: str
     method: str
-    receipt_number: str
 
 
 @dataclass(frozen=True)

@@ -181,7 +181,6 @@ def _payment_rows(payments: QuerySet[Any]) -> Iterator[Row]:
     for payment in payments.iterator(chunk_size=CHUNK_SIZE):
         yield [
             payment.paid_on.isoformat(),
-            payment.receipt_number,
             payment.student.name,
             payment.fee_type.name,
             payment.note,
@@ -366,7 +365,6 @@ LIST_EXPORTS: dict[ExportList, ListExport] = {
         query=PaymentListQuerySerializer,
         columns=(
             "Date",
-            "Receipt",
             "Student",
             "Fee Type",
             "Note",

@@ -199,7 +199,7 @@ def _batches(student: Student | None, _: Staff) -> list[Batch]:
 def _payment_label(payment: Payment) -> str:
     amount = format_npr(payment.amount)
     day = written_date(payment.paid_on)
-    return f"Receipt {payment.receipt_number}: {paid_for(payment)}, {amount}, {day}"
+    return f"{paid_for(payment)}, {amount}, {day}"
 
 
 def _offer_label(application: Application) -> str:
@@ -225,7 +225,6 @@ def _payment_email(payment: Payment) -> ReadyMade:
         note=payment.note or None,
         paid_on=written_date(payment.paid_on),
         method=PaymentMethod(payment.method).label,
-        receipt_number=payment.receipt_number,
     )
 
 

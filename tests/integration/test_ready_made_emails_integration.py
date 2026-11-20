@@ -308,11 +308,11 @@ class TestTheMenu:
         assert kinds["payment_received"]["records"] == [
             {
                 "id": newer.pk,
-                "label": f"Receipt {newer.receipt_number}: Other (Courier), NPR 25,000, 2 Nov 2026",
+                "label": "Other (Courier), NPR 25,000, 2 Nov 2026",
             },
             {
                 "id": older.pk,
-                "label": f"Receipt {older.receipt_number}: Visa fee, NPR 10,000, 1 Oct 2026",
+                "label": "Visa fee, NPR 10,000, 1 Oct 2026",
             },
         ]
         assert kinds["offer_received"]["records"] == [
@@ -461,12 +461,11 @@ class TestDrafts:
 
         answer = drafted(abc, sita, "payment_received", payment.pk)
 
-        number = payment.receipt_number
-        assert answer["subject"] == f"Payment received: receipt {number}"
+        assert answer["subject"] == "Payment received"
         assert (
-            "Amount: NPR 25,000\nFor: Visa fee (first half)\nDate: 2 Nov 2026\nPaid by: eSewa\n"
-            f"Receipt number: {number}"
+            "Amount: NPR 25,000\nFor: Visa fee (first half)\nDate: 2 Nov 2026\nPaid by: eSewa\n\n"
         ) in answer["body"]
+        assert "eceipt" not in answer["body"]
 
     def test_fee_reminder_gives_the_fees_what_was_paid_and_the_one_balance(
         self, abc: ConsultancyContext, admin: Staff, sita: Student

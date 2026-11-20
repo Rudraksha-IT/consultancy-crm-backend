@@ -269,13 +269,13 @@ class TestHistory:
         visa = fee_type_named(abc, "Visa fee").pk
         pay(abc, student, amount=125000, method="fonepay_qr", fee_type=visa)
 
-        [payment] = stored_payments(abc)
+        assert len(stored_payments(abc)) == 1
         [entry] = payment_entries(abc, student)
         assert entry.by_staff_id == desk.pk
         assert entry.by_name == "Sunita Shrestha"
         assert entry.before == ""
         assert entry.after == "NPR 1,25,000, Visa fee, Fonepay QR"
-        assert entry.detail == f"Receipt {payment.pk:06d}"
+        assert entry.detail == ""  # no receipt numbers shown for now (2026-11-20)
 
     def test_the_history_api_shows_it(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -494,7 +494,7 @@ class TestSeveralLines:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert stored_payments(abc) == []
 
-    def test_each_line_writes_its_own_history_entry_with_the_shared_receipt(
+    def test_each_line_writes_its_own_history_entry_naming_no_receipt(
         self, abc: ConsultancyContext
     ) -> None:
         abc.log_in_as(Role.FRONT_DESK)
@@ -502,11 +502,10 @@ class TestSeveralLines:
 
         split_visit(abc, student)
 
-        first = stored_payments(abc)[0]
         assert [(e.after, e.detail) for e in payment_entries(abc, student)] == [
-            ("NPR 40,000, Visa fee, Fonepay QR", f"Receipt {first.receipt_number}"),
-            ("NPR 10,000, IELTS class (first half), Fonepay QR", f"Receipt {first.receipt_number}"),
-            ("NPR 500, Other (Courier), Fonepay QR", f"Receipt {first.receipt_number}"),
+            ("NPR 40,000, Visa fee, Fonepay QR", ""),
+            ("NPR 10,000, IELTS class (first half), Fonepay QR", ""),
+            ("NPR 500, Other (Courier), Fonepay QR", ""),
         ]
 
     def test_the_receipt_of_any_line_shows_every_line_and_the_total(
@@ -682,7 +681,7 @@ class TestChangesAfterwards:
         ]
         assert receipt["total"] == 55500
         edits = [e for e in all_entries(abc, self.student) if e.kind == HistoryKind.PAYMENT_EDITED]
-        assert [e.detail for e in edits] == [f"Receipt {made['receipt_number']}"]
+        assert [e.detail for e in edits] == [""]
 
     def test_a_deleted_line_leaves_the_rest_on_the_same_receipt(
         self, abc: ConsultancyContext, made: dict[str, object]
@@ -700,19 +699,14 @@ class TestChangesAfterwards:
         deletions = [
             e for e in all_entries(abc, self.student) if e.kind == HistoryKind.PAYMENT_DELETED
         ]
-        assert [e.detail for e in deletions] == [f"Receipt {made['receipt_number']}"]
+        assert [e.detail for e in deletions] == [""]
 
-    def test_the_admin_list_finds_every_line_by_the_receipt_number(
+    def test_the_admin_list_lists_every_line_on_its_own(
         self, abc: ConsultancyContext, made: dict[str, object]
     ) -> None:
-        pay(abc, make_student(abc, phone="9841234567"))
-
-        rows = abc.client.get("/api/payments/", {"q": str(made["receipt_number"])}).json()[
-            "results"
-        ]
+        rows = abc.client.get("/api/payments/").json()["results"]
 
         assert sorted(row["id"] for row in rows) == sorted(self.line_ids(made))
-        assert {row["receipt_number"] for row in rows} == {made["receipt_number"]}
         assert all("lines" not in row for row in rows)
 
     @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])

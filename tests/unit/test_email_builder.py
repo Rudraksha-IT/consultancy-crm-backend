@@ -339,17 +339,18 @@ class TestDrafts:
                 note=None,
                 paid_on="18 Nov 2026",
                 method="Cash",
-                receipt_number="000483",
             ),
         )
-        assert draft.subject == "Payment received: receipt 000483"
-        for value in ["NPR 40,000", "Visa fee", "18 Nov 2026", "Cash", "000483"]:
+        # No receipt numbers are shown anywhere for now (asked 2026-11-20).
+        assert draft.subject == "Payment received"
+        for value in ["NPR 40,000", "Visa fee", "18 Nov 2026", "Cash"]:
             assert value in draft.text
+        assert "eceipt" not in draft.text
 
     def test_payment_note_follows_the_fee_type(self) -> None:
         draft = draft_email(
             CONTEXT,
-            PaymentReceived(1000, "Other", "Courier", "18 Nov 2026", "Cash", "000484"),
+            PaymentReceived(1000, "Other", "Courier", "18 Nov 2026", "Cash"),
         )
         assert "For: Other (Courier)" in draft.text
 

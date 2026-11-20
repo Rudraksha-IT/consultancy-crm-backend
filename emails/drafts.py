@@ -69,13 +69,13 @@ def _documents_needed(_: DraftContext, email: DocumentsNeeded) -> Draft:
 
 def _payment_received(_: DraftContext, email: PaymentReceived) -> Draft:
     return Draft(
-        f"Payment received: receipt {email.receipt_number}",
+        # No receipt numbers are shown anywhere for now (asked 2026-11-20).
+        "Payment received",
         "We have received your payment. Thank you.\n\n"
         f"Amount: {format_npr(email.amount)}\n"
         f"For: {_for(email.fee_type, email.note)}\n"
         f"Date: {email.paid_on}\n"
-        f"Paid by: {email.method}\n"
-        f"Receipt number: {email.receipt_number}\n\n"
+        f"Paid by: {email.method}\n\n"
         "Please keep this email as your record of the payment.",
     )
 

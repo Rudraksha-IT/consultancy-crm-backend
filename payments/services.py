@@ -27,9 +27,6 @@ from students.models import Student
 logger = logging.getLogger(__name__)
 
 PHONE_SEPARATORS = re.compile(r"[\s-]")
-DIGITS = re.compile(r"^[0-9]+\Z")
-# Larger numbers can't be a receipt number (and wouldn't fit the column).
-MAX_RECEIPT_DIGITS = 12
 
 
 def record_payments(student: Student, visit: NewPayments, by: Staff) -> list[Payment]:
@@ -57,7 +54,7 @@ def record_payments(student: Student, visit: NewPayments, by: Staff) -> list[Pay
                 student,
                 HistoryKind.PAYMENT_RECORDED,
                 by,
-                Change(after=describe_payment(payment), detail=_receipt(payment)),
+                Change(after=describe_payment(payment)),
             )
             made.append(payment)
     for payment in made:
@@ -170,7 +167,7 @@ def change_payment(payment_id: int, details: NewPayment, by: Staff) -> Payment:
             payment.student,
             HistoryKind.PAYMENT_EDITED,
             by,
-            Change(before=change[0], after=change[1], detail=_receipt(payment)),
+            Change(before=change[0], after=change[1]),
         )
     _log("Payment changed", payment.pk, payment.student_id, by)
     return payment
@@ -192,7 +189,7 @@ def delete_payment(payment_id: int, by: Staff) -> None:
             payment.student,
             HistoryKind.PAYMENT_DELETED,
             by,
-            Change(before=describe_deleted_payment(payment), detail=_receipt(payment)),
+            Change(before=describe_deleted_payment(payment)),
         )
         payment_id, student_id = payment.pk, payment.student_id
         payment.delete()
@@ -227,23 +224,17 @@ def _matching(filters: PaymentFilters) -> Q:
 
 
 def _search(query: str) -> Q:
-    """The Student's name, their phone's digits, or the receipt number."""
+    """The Student's name or their phone's digits (receipt numbers aren't shown, 2026-11-20)."""
     match = Q(student__name__icontains=query)
     phone = PHONE_SEPARATORS.sub("", query)
     if phone:
         match |= Q(student__phone__contains=phone)
-    if DIGITS.match(query) and len(query) <= MAX_RECEIPT_DIGITS:
-        match |= Q(receipt=int(query))
     return match
 
 
 def written_date(day: date) -> str:
     """e.g. "30 Oct 2026" (AD)."""
     return f"{day.day} {day:%b %Y}"
-
-
-def _receipt(payment: Payment) -> str:
-    return f"Receipt {payment.receipt_number}"
 
 
 def _log(what: str, payment_id: int, student_id: int, by: Staff) -> None:
