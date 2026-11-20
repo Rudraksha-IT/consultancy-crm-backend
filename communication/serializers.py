@@ -7,6 +7,7 @@ from typing import Any
 from rest_framework import serializers
 
 from communication.models import SUBJECT_MAX_LENGTH
+from communication.ready_made import Kind
 from communication.types import EmailText
 from config.serializers import StrictCharField, StrictSerializer
 from staff.serializers import CONTROL_CHARACTERS, CONTROL_CHARACTERS_MESSAGE
@@ -14,6 +15,7 @@ from students.serializers import (
     NOTE_CHARACTERS_MESSAGE,
     NOTE_CONTROL_CHARACTERS,
     SEARCH_MAX_LENGTH,
+    StrictChoiceField,
     StudentListQuerySerializer,
 )
 
@@ -27,6 +29,7 @@ BODY_TOO_LONG_MESSAGE = f"A message can be at most {BODY_MAX_LENGTH} characters.
 CHOOSE_SOMEONE_MESSAGE = "Choose at least one Student."
 CHOOSE_FROM_LIST_MESSAGE = "Choose Students from the list."
 BATCH_MESSAGE = "Choose a class."
+KIND_MESSAGE = "Choose one of the ready-made emails."
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "max_length")
 
 
@@ -154,3 +157,26 @@ class PreTickQuerySerializer(StudentListFiltersSerializer):
     def has_student_filters(self) -> bool:
         """Whether any of the Student list's filters were given."""
         return any(key != "batch" for key in self.validated_data)
+
+
+class DraftQuerySerializer(StrictSerializer[None]):
+    """A ready-made email to draft (`kind`), and the id of the record it is about, as typed.
+
+    Whether the record is one of those to pick is the service's to check, with the message for
+    that kind of record.
+    """
+
+    kind = StrictChoiceField(
+        choices=[kind.value for kind in Kind],
+        error_messages=_same_message(KIND_MESSAGE) | {"invalid_choice": KIND_MESSAGE},
+    )
+    record = StrictCharField(required=False, allow_blank=True, trim_whitespace=False)
+
+    def kind_chosen(self) -> Kind:
+        """The ready-made email asked for."""
+        return Kind(self.validated_data["kind"])
+
+    def record_typed(self) -> str | None:
+        """The record's id as typed, or None when none was given."""
+        record: str | None = self.validated_data.get("record")
+        return record

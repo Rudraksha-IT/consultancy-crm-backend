@@ -117,7 +117,7 @@ def fee_type_of_payment(payment_id: int) -> int | None:
 
 def describe_deleted_payment(payment: Payment) -> str:
     """The deleted Payment as History keeps it, e.g. "NPR 25,000, Visa fee, eSewa, 30 Oct 2026"."""
-    return f"{describe_payment(payment)}, {_written_date(payment.paid_on)}"
+    return f"{describe_payment(payment)}, {written_date(payment.paid_on)}"
 
 
 def describe_changes(payment: Payment, details: NewPayment) -> tuple[str, str] | None:
@@ -130,7 +130,7 @@ def describe_changes(payment: Payment, details: NewPayment) -> tuple[str, str] |
         (label, old, new)
         for label, old, new in (
             ("amount", format_npr(payment.amount), format_npr(details.amount)),
-            ("date", _written_date(payment.paid_on), _written_date(details.paid_on)),
+            ("date", written_date(payment.paid_on), written_date(details.paid_on)),
             ("method", PaymentMethod(payment.method).label, details.method.label),
             ("for", paid_for(payment), describe_for(details.fee_type.name, details.note)),
         )
@@ -237,7 +237,7 @@ def _search(query: str) -> Q:
     return match
 
 
-def _written_date(day: date) -> str:
+def written_date(day: date) -> str:
     """e.g. "30 Oct 2026" (AD)."""
     return f"{day.day} {day:%b %Y}"
 

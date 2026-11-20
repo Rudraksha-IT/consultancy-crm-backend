@@ -114,12 +114,12 @@ class StudentMessagesView(APIView):
 
     def get(self, request: Request, student_id: int) -> Response:
         """Return one page of the Student's emails, newest first."""
-        student = _student(student_id)
+        student = student_or_404(student_id)
         return _messages_page(Message.objects.filter(student=student), request)
 
     def post(self, request: Request, student_id: int) -> Response:
         """Send it, record it sent or failed, and return it."""
-        student = _student(student_id)
+        student = student_or_404(student_id)
         serializer = NewEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -134,7 +134,8 @@ class StudentMessagesView(APIView):
         return Response(message_answer(message), status=status.HTTP_201_CREATED)
 
 
-def _student(student_id: int) -> Student:
+def student_or_404(student_id: int) -> Student:
+    """The Student with this id, or 404."""
     try:
         return Student.objects.get(pk=student_id)
     except Student.DoesNotExist as error:

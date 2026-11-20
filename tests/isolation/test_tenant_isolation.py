@@ -3296,6 +3296,121 @@ class TestBulkMessageIsolation:
         assert mail.outbox == []
 
 
+class TestReadyMadeEmailIsolation:
+    """Ticket 09: a ready-made email is filled in only from this office's own records."""
+
+    def _office(
+        self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, records: int
+    ) -> tuple[ConsultancyContext, Student, dict[str, list[int]]]:
+        """An office (Admin in) with one Student who has `records` of each record kind."""
+        office = make_consultancy(name, subdomain)
+        switch_modules(office.consultancy, {Module.COMMUNICATION, Module.ACCOUNTS, Module.BATCHES})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
+        admin = office.log_in_as(Role.ADMIN)
+        teacher = office.add_staff(Role.TEACHER)
+        ids: dict[str, list[int]] = {"payment": [], "offer": [], "visa": [], "batch": []}
+        with tenant_context(office.consultancy):
+            student = Student.objects.create(
+                name=f"{name} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
+            )
+            university = University.objects.create(name=f"{name} University", country="uk")
+            for n in range(records):
+                ids["payment"].append(
+                    Payment.objects.create(
+                        student=student,
+                        amount=1000,
+                        paid_on=timezone.localdate(),
+                        method="cash",
+                        fee_type=FeeType.objects.get(name="Visa fee"),
+                        recorded_by=admin,
+                        recorded_by_name=admin.name,
+                    ).pk
+                )
+                course = Course.objects.create(university=university, name=f"{name} course {n}")
+                offer = Application.objects.create(
+                    student=student, course=course, intake="2027-02", status="offer"
+                )
+                ids["offer"].append(offer.pk)
+                ids["visa"].append(
+                    Visa.objects.create(student=student, application=offer, status="granted").pk
+                )
+                batch = Batch.objects.create(
+                    name=f"{name} class {n}",
+                    test_type="ielts",
+                    teacher=teacher,
+                    time_slot="7 AM",
+                    starts_on=timezone.localdate(),
+                    ends_on=timezone.localdate(),
+                )
+                BatchMembership.objects.create(batch=batch, student=student)
+                ids["batch"].append(batch.pk)
+        activate_public_schema()
+        return office, student, ids
+
+    def test_another_offices_records_are_never_offered_or_filled_in(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, _, abc_ids = self._office(make_consultancy, "ABC Education", "abcedu", records=3)
+        xyz, xyz_student, xyz_ids = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", records=1
+        )
+        menu_url = f"/api/students/{xyz_student.pk}/emails/ready-made/"
+        draft_url = f"/api/students/{xyz_student.pk}/emails/draft/"
+        kinds = {
+            "payment": "payment_received",
+            "offer": "offer_received",
+            "visa": "visa_result",
+            "batch": "class_details",
+        }
+
+        menu = {entry["kind"]: entry for entry in xyz.client.get(menu_url).json()["kinds"]}
+
+        for record, kind in kinds.items():
+            assert [r["id"] for r in menu[kind]["records"]] == xyz_ids[record]
+            assert "ABC" not in str(menu[kind]["records"])
+            theirs = xyz.client.get(draft_url, {"kind": kind, "record": str(abc_ids[record][-1])})
+            assert theirs.status_code == status.HTTP_400_BAD_REQUEST, kind
+            assert list(theirs.json()) == ["record"]
+        many = xyz.client.get("/api/messages/bulk/ready-made/").json()["kinds"][0]
+        assert [r["id"] for r in many["records"]] == xyz_ids["batch"]
+        other_class = xyz.client.get(
+            "/api/messages/bulk/draft/",
+            {"kind": "class_details", "record": str(abc_ids["batch"][-1])},
+        )
+        assert other_class.status_code == status.HTTP_400_BAD_REQUEST
+        signed = xyz.client.get(draft_url, {"kind": "plain"}).json()["body"]
+        assert signed.endswith("XYZ Overseas")
+        unknown = xyz.client.get(f"/api/students/{xyz_student.pk + 1000}/emails/ready-made/")
+        assert unknown.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_a_token_from_one_consultancy_is_refused_on_every_ready_made_endpoint(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, _, _ = self._office(make_consultancy, "ABC Education", "abcedu", records=1)
+        xyz, xyz_student, _ = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", records=1
+        )
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+        student = f"/api/students/{xyz_student.pk}/emails"
+
+        responses = [
+            intruder.get(f"{student}/ready-made/"),
+            intruder.get(f"{student}/draft/", {"kind": "plain"}),
+            intruder.get("/api/messages/bulk/ready-made/"),
+            intruder.get("/api/messages/bulk/draft/", {"kind": "plain"}),
+        ]
+
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
+
+
 class TestHomeIsolation:
     """Issue 33: the Homes' progress and pipeline count only this Consultancy's Students."""
 

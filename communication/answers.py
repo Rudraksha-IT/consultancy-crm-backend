@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from communication.models import Message
+from communication.ready_made import MenuEntry
 from communication.types import BulkResult
+from emails.types import Draft
 from students.models import Student
 
 
@@ -41,3 +43,23 @@ def choosable_answer(students: list[Student], count: int, limit: int) -> dict[st
         "count": count,
         "max": limit,
     }
+
+
+def menu_answer(entries: list[MenuEntry]) -> dict[str, object]:
+    """The ready-made emails offered, each with the records to pick and why it can't be used."""
+    return {
+        "kinds": [
+            {
+                "kind": entry.kind.value,
+                "record": None if entry.record is None else entry.record.value,
+                "records": [{"id": record.id, "label": record.label} for record in entry.records],
+                "unavailable": entry.unavailable,
+            }
+            for entry in entries
+        ]
+    }
+
+
+def draft_answer(draft: Draft) -> dict[str, object]:
+    """A ready-made email's starting subject line and message, as plain text."""
+    return {"subject": draft.subject, "body": draft.text}
