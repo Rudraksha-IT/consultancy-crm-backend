@@ -126,7 +126,7 @@ class TestAddingTypes:
 
         add_type(abc, name="Birth certificate", needed_by_everyone=True)
 
-        body = abc.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/documents/").json()
         assert body["items"][-1]["document_type"]["name"] == "Birth certificate"
         assert body["total"] == len(DEFAULT_TYPES) + 1
 
@@ -346,7 +346,7 @@ class TestDocumentsPage:
         assert names_in_order(body) == ["Asha Missing", "Bina Rejected", "Chandra Correct"]
         assert body["results"][1] == {
             "student": {
-                "id": one_rejected.pk,
+                "id": str(one_rejected.public_id),
                 "name": "Bina Rejected",
                 "stage": "applying",
                 "country": "australia",
@@ -361,7 +361,7 @@ class TestDocumentsPage:
         }
         assert body["totals"] == {"rejected": 1, "waiting": 0, "missing": 8, "verified": 15}
         assert (body["count"], body["page"], body["page_size"]) == (3, 1, 25)
-        assert missing_all.pk == body["results"][0]["student"]["id"]
+        assert str(missing_all.public_id) == body["results"][0]["student"]["id"]
 
     def test_rejected_weighs_more_than_waiting_which_weighs_more_than_missing(
         self, abc: ConsultancyContext

@@ -351,7 +351,7 @@ class TestPaymentsExport:
         filters = {
             "from": "2026-10-01",
             "to": "2026-10-31",
-            "student": str(sita.pk),
+            "student": str(sita.public_id),
             "fee_type": "999999",
             "q": "000",
         }

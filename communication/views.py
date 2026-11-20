@@ -6,6 +6,8 @@ and the data is kept.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.conf import settings
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
@@ -143,12 +145,12 @@ class StudentMessagesView(APIView):
     permission_classes = MESSAGING
     parser_classes = (JSONParser,)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return one page of the Student's emails, newest first."""
         student = student_or_404(student_id)
         return _messages_page(Message.objects.filter(student=student), request)
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Send it, record it sent or failed, and return it."""
         student = student_or_404(student_id)
         serializer = NewEmailSerializer(data=request.data)
@@ -169,10 +171,10 @@ class StudentMessagesView(APIView):
         return Response(message_answer(message), status=status.HTTP_201_CREATED)
 
 
-def student_or_404(student_id: int) -> Student:
+def student_or_404(student_id: UUID) -> Student:
     """The Student with this id, or 404."""
     try:
-        return Student.objects.get(pk=student_id)
+        return Student.objects.get(public_id=student_id)
     except Student.DoesNotExist as error:
         raise NotFound from error
 
@@ -230,7 +232,7 @@ class StudentAttachableView(APIView):
 
     permission_classes = MESSAGING
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the Course Files, Document Examples and the Student's Document files."""
         NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
         student = student_or_404(student_id)
@@ -248,7 +250,7 @@ class ManyAttachableView(APIView):
         return Response(attachable_answer(attachable_files(None)))
 
 
-def _chosen(ids: list[int]) -> list[Student]:
+def _chosen(ids: list[UUID]) -> list[Student]:
     """The Students chosen, in the order given.
 
     Raises:
@@ -259,7 +261,7 @@ def _chosen(ids: list[int]) -> list[Student]:
         raise ValidationError({"students": [CHOOSE_SOMEONE_MESSAGE]})
     if len(ids) > limit:
         raise ValidationError({"students": [TOO_MANY_MESSAGE.format(limit=limit)]})
-    found = Student.objects.in_bulk(ids)
+    found = Student.objects.in_bulk(ids, field_name="public_id")
     if len(found) != len(ids):
         raise ValidationError({"students": [NOT_FOUND_MESSAGE]})
     if any(student.stage == Stage.LOST for student in found.values()):

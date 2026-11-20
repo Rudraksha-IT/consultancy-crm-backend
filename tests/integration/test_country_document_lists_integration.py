@@ -117,7 +117,7 @@ def choose(office: ConsultancyContext, student: Student, application: Applicatio
 
 def checklist(office: ConsultancyContext, student: Student) -> dict[str, object]:
     """The Student's checklist as the API returns it."""
-    response = office.client.get(f"/api/students/{student.pk}/documents/")
+    response = office.client.get(f"/api/students/{student.public_id}/documents/")
     assert response.status_code == status.HTTP_200_OK
     body: dict[str, object] = response.json()
     return body
@@ -568,7 +568,7 @@ class TestWhichListsApply:
         student = own_student(abc, "australia")
         make_document(abc, student, "CV")
 
-        profile = abc.client.get(f"/api/students/{student.pk}/").json()
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()
         paperwork = abc.client.get("/api/documents/students/?scope=mine").json()
         home = abc.client.get("/api/home/progress/?counsellor=me").json()
 
@@ -576,5 +576,5 @@ class TestWhichListsApply:
         assert profile["documents"] == expected
         row = paperwork["results"][0]
         assert {"done": row["done"], "total": row["total"]} == expected
-        [mine] = [r for r in home["results"] if r["student"]["id"] == student.pk]
+        [mine] = [r for r in home["results"] if r["student"]["id"] == str(student.public_id)]
         assert {k: mine["documents"][k] for k in expected} == expected

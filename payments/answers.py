@@ -12,9 +12,9 @@ def payment_answer(payment: Payment) -> dict[str, object]:
     """One Payment: who paid, how much, when (AD), how, its Fee Type, and its receipt number."""
     student = payment.student
     return {
-        "id": payment.pk,
+        "id": payment.public_id,
         "receipt_number": payment.receipt_number,
-        "student": {"id": student.pk, "name": student.name, "phone": student.phone},
+        "student": {"id": student.public_id, "name": student.name, "phone": student.phone},
         "amount": payment.amount,
         "paid_on": payment.paid_on.isoformat(),
         "method": payment.method,
@@ -31,7 +31,7 @@ def receipt_answer(payment: Payment, lines: Sequence[Payment]) -> dict[str, obje
         **payment_answer(payment),
         "lines": [
             {
-                "id": line.pk,
+                "id": line.public_id,
                 "fee_type": fee_type_ref(line.fee_type),
                 "note": line.note,
                 "amount": line.amount,

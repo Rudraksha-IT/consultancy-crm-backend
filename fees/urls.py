@@ -11,8 +11,8 @@ from fees.views import (
 )
 
 urlpatterns: list[URLPattern] = [
-    path("students/<int:student_id>/fees/", StudentFeesView.as_view(), name="student-fees"),
-    path("fees/<int:fee_id>/", FeeView.as_view(), name="fee"),
+    path("students/<uuid:student_id>/fees/", StudentFeesView.as_view(), name="student-fees"),
+    path("fees/<uuid:fee_id>/", FeeView.as_view(), name="fee"),
     path("accounts/student-fees/", StudentFeesListView.as_view(), name="student-fees-list"),
     path("accounts/fees-by-type/", FeesByTypeView.as_view(), name="fees-by-type"),
     path(

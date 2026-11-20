@@ -48,14 +48,14 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 SVG_BYTES = b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'
 
 
-def student_messages_url(student: Student | int) -> str:
+def student_messages_url(student: Student | int | str) -> str:
     """One Student's emails."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/messages/"
 
 
 def send(
-    office: ConsultancyContext, student: Student | int, body: object
+    office: ConsultancyContext, student: Student | int | str, body: object
 ) -> _MonkeyPatchedResponse:
     """POST an email to one Student, as given."""
     return office.client.post(student_messages_url(student), body, format="json")
@@ -93,8 +93,8 @@ def html_of(message: EmailMultiAlternatives) -> str:
 def message_answer(message: Message, student: Student, staff: Staff) -> dict[str, Any]:
     """What the API says about one stored email."""
     return {
-        "id": message.pk,
-        "student": {"id": student.pk, "name": student.name},
+        "id": str(message.public_id),
+        "student": {"id": str(student.public_id), "name": student.name},
         "channel": message.channel,
         "subject": message.subject,
         "body": message.body,
@@ -455,7 +455,7 @@ class TestSeeingEmails:
         answer = response.json()
         assert [m["subject"] for m in answer["results"]] == ["Second", "To Hari", "First"]
         assert (answer["count"], answer["page"], answer["page_size"]) == (3, 1, 25)
-        assert answer["results"][1]["student"] == {"id": sent.pk, "name": "Hari Thapa"}
+        assert answer["results"][1]["student"] == {"id": str(sent.public_id), "name": "Hari Thapa"}
 
     def test_a_past_sms_stays_readable(
         self, abc: ConsultancyContext, admin: Staff, sita: Student

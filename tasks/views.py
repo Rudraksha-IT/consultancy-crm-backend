@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import UUID
 
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import QuerySet
@@ -148,12 +149,12 @@ class StudentTasksView(APIView):
 
     permission_classes = (IsAuthenticated, CanSeeStudents)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return one page of the Student's open Tasks, soonest first."""
         query = PageSerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         try:
-            student = Student.objects.get(pk=student_id)
+            student = Student.objects.get(public_id=student_id)
         except Student.DoesNotExist as error:
             raise NotFound from error
         return _page_answer(open_tasks_of(student), query.page_number(), get_request_staff(request))

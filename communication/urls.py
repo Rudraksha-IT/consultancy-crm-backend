@@ -25,22 +25,22 @@ urlpatterns: list[URLPattern] = [
         "messages/bulk/attachable/", ManyAttachableView.as_view(), name="messages-bulk-attachable"
     ),
     path(
-        "students/<int:student_id>/emails/attachable/",
+        "students/<uuid:student_id>/emails/attachable/",
         StudentAttachableView.as_view(),
         name="student-email-attachable",
     ),
     path(
-        "students/<int:student_id>/emails/ready-made/",
+        "students/<uuid:student_id>/emails/ready-made/",
         StudentReadyMadeView.as_view(),
         name="student-ready-made",
     ),
     path(
-        "students/<int:student_id>/emails/draft/",
+        "students/<uuid:student_id>/emails/draft/",
         StudentDraftView.as_view(),
         name="student-email-draft",
     ),
     path(
-        "students/<int:student_id>/messages/",
+        "students/<uuid:student_id>/messages/",
         StudentMessagesView.as_view(),
         name="student-messages",
     ),

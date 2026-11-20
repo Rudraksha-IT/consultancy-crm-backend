@@ -9,7 +9,7 @@ from typing import Any
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.serializers import StrictSerializer
+from config.serializers import RecordIdField, StrictSerializer
 from fee_types.serializers import FeeTypeField, NoteField, check_fee_type_and_note
 from payments.models import MAX_AMOUNT, MAX_RECEIPT_LINES, PaymentMethod
 from payments.money import format_npr
@@ -205,7 +205,7 @@ class PaymentListQuerySerializer(StrictSerializer[None]):
 
     to = FilterDateField()
     q = serializers.CharField(max_length=SEARCH_MAX_LENGTH, required=False, allow_blank=True)
-    student = serializers.IntegerField(min_value=1, max_value=2**31 - 1, required=False)
+    student = RecordIdField(required=False)
     fee_type = serializers.IntegerField(min_value=1, max_value=2**31 - 1, required=False)
     page = serializers.IntegerField(min_value=1, max_value=1_000_000, required=False)
 

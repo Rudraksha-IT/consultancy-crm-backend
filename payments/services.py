@@ -216,7 +216,7 @@ def _matching(filters: PaymentFilters) -> Q:
     conditions = {
         "paid_on__gte": filters.paid_from,
         "paid_on__lte": filters.paid_to,
-        "student_id": filters.student_id,
+        "student__public_id": filters.student_id,
         "fee_type_id": filters.fee_type_id,
     }
     match = Q(**{lookup: value for lookup, value in conditions.items() if value is not None})

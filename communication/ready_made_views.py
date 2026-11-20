@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from uuid import UUID
 
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.request import Request
@@ -60,7 +61,7 @@ class StudentReadyMadeView(APIView):
 
     permission_classes = MESSAGING
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return every ready-made email offered, and why any can't be used now."""
         NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
         student = student_or_404(student_id)
@@ -72,7 +73,7 @@ class StudentDraftView(APIView):
 
     permission_classes = MESSAGING
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the subject line and message to start from."""
         query = _draft_query(request)
         student = student_or_404(student_id)

@@ -12,7 +12,7 @@ ELLIPSIS = "…"
 def visit_answer(visit: Visit) -> dict[str, object]:
     """One Visit: when, New or Follow-up, why, and who logged it."""
     return {
-        "id": visit.pk,
+        "id": visit.public_id,
         "kind": visit.kind,
         "purpose": visit.purpose,
         "at": visit.at.isoformat(),
@@ -26,7 +26,7 @@ def timeline_answer(visit: Visit) -> dict[str, object]:
     return {
         **visit_answer(visit),
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "note_first_line": note_first_line(student.note),
         },

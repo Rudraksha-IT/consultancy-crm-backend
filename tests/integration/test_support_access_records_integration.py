@@ -295,7 +295,7 @@ class TestMoney:
         with tenant_context(abc.consultancy):
             pte = FeeType.objects.get(name="PTE class").pk
         response = visit.client.post(
-            f"/api/students/{student.pk}/payments/",
+            f"/api/students/{student.public_id}/payments/",
             {
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
@@ -413,7 +413,7 @@ class TestDocuments:
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
         response = visit.client.post(
-            f"/api/students/{student.pk}/documents/",
+            f"/api/students/{student.public_id}/documents/",
             {
                 "document_type": str(passport.pk),
                 "file": SimpleUploadedFile("passport.pdf", PDF_BYTES, "application/pdf"),
@@ -425,7 +425,7 @@ class TestDocuments:
             document = Document.objects.get()
         assert document.uploaded_by_id is None
         assert document.uploaded_by_name == MARKED_NAME
-        checklist = visit.client.get(f"/api/students/{student.pk}/documents/").json()
+        checklist = visit.client.get(f"/api/students/{student.public_id}/documents/").json()
         held = [item["document"] for item in checklist["items"] if item["document"]]
         assert held[0]["uploaded_by"] == {"id": None, "name": MARKED_NAME}
         assert held[0]["files"][0]["uploaded_by"] == {"id": None, "name": MARKED_NAME}
@@ -434,7 +434,7 @@ class TestDocuments:
         student = make_student(abc)
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
-        url = f"/api/students/{student.pk}/documents/"
+        url = f"/api/students/{student.public_id}/documents/"
         visit.client.post(
             url,
             {
@@ -447,7 +447,7 @@ class TestDocuments:
             document = Document.objects.get()
 
         response = visit.client.post(
-            f"{url}{document.pk}/files/",
+            f"{url}{document.public_id}/files/",
             {"file": SimpleUploadedFile("back.pdf", PDF_BYTES, "application/pdf")},
             format="multipart",
         )
@@ -482,7 +482,7 @@ class TestCommunication:
         set_office_details(abc.consultancy, OfficeDetails(contact_email="info@abcedu.test"))
         student = make_student(abc)
         sent = visit.client.post(
-            f"/api/students/{student.pk}/messages/",
+            f"/api/students/{student.public_id}/messages/",
             {"subject": "Your class", "body": "Your class starts tomorrow."},
             format="json",
         )

@@ -17,7 +17,7 @@ def transfer_request_answer(request: TransferRequest, viewer: Staff) -> dict[str
     answered = request.status in (TransferRequestStatus.APPROVED, TransferRequestStatus.DECLINED)
     return {
         "id": request.pk,
-        "student": {"id": student.pk, "name": student.name},
+        "student": {"id": student.public_id, "name": student.name},
         "asked_by": {"id": request.asked_by_id, "name": request.asked_by.name},
         "reason": request.reason,
         "asked_at": request.asked_at.isoformat(),

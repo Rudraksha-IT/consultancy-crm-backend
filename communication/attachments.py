@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from communication.exceptions import AttachmentRefusedError, AttachmentsUnreadableError
 from course_files.models import CourseFile
@@ -46,10 +47,14 @@ class AttachmentKind(StrEnum):
 
 @dataclass(frozen=True)
 class Chosen:
-    """One file as the composer names it: its kind and id."""
+    """One file as the composer names it: its kind and id.
+
+    A Document file is named by its UUID (ADR 0027); Course Files and Document Examples still
+    by number until ticket 18 switches them.
+    """
 
     kind: AttachmentKind
-    id: int
+    id: int | UUID
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,7 @@ class Attachable:
     """
 
     kind: AttachmentKind
-    id: int
+    id: int | UUID
     name: str
     file_name: str
     size: int
@@ -110,7 +115,7 @@ def example_attachable(example: DocumentExample, type_name: str) -> Attachable:
 def _document_file(file: DocumentFile) -> Attachable:
     return Attachable(
         AttachmentKind.DOCUMENT_FILE,
-        file.pk,
+        file.public_id,
         file.file_name,
         file.file_name,
         file.size,
@@ -184,7 +189,11 @@ def chosen_files(chosen: Sequence[Chosen], student: Student | None) -> list[Atta
 
 
 def _ids(wanted: Sequence[Chosen], kind: AttachmentKind) -> list[int]:
-    return [c.id for c in wanted if c.kind == kind]
+    return [c.id for c in wanted if c.kind == kind and isinstance(c.id, int)]
+
+
+def _uuids(wanted: Sequence[Chosen], kind: AttachmentKind) -> list[UUID]:
+    return [c.id for c in wanted if c.kind == kind and isinstance(c.id, UUID)]
 
 
 def _found(wanted: Sequence[Chosen], student: Student | None) -> dict[Chosen, Attachable]:
@@ -199,7 +208,7 @@ def _found(wanted: Sequence[Chosen], student: Student | None) -> dict[Chosen, At
     found += [example_attachable(example, example.document_type.name) for example in examples]
     if student is not None:
         documents = DocumentFile.objects.filter(
-            pk__in=_ids(wanted, AttachmentKind.DOCUMENT_FILE),
+            public_id__in=_uuids(wanted, AttachmentKind.DOCUMENT_FILE),
             document__student=student,
             binned_at__isnull=True,
             document__binned_at__isnull=True,

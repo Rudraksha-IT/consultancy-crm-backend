@@ -69,25 +69,25 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def files_url(student: Student | int, document: Document | int) -> str:
+def files_url(student: Student | int | str, document: Document | int | str) -> str:
     """Where files are added to one of a Student's Documents."""
-    pk = student if isinstance(student, int) else student.pk
-    document_pk = document if isinstance(document, int) else document.pk
+    pk = student if isinstance(student, int | str) else student.public_id
+    document_pk = document if isinstance(document, int | str) else document.public_id
     return f"/api/students/{pk}/documents/{document_pk}/files/"
 
 
 def file_link_url(
-    student: Student | int, document: Document | int, file: DocumentFile | int
+    student: Student | int | str, document: Document | int | str, file: DocumentFile | int | str
 ) -> str:
     """Where a link to one file of a Student's Document is asked for."""
-    file_pk = file if isinstance(file, int) else file.pk
+    file_pk = file if isinstance(file, int | str) else file.public_id
     return f"{files_url(student, document)}{file_pk}/link/"
 
 
 def add_files(
     office: ConsultancyContext,
-    student: Student | int,
-    document: Document | int,
+    student: Student | int | str,
+    document: Document | int | str,
     *files: object,
     **fields: object,
 ) -> _MonkeyPatchedResponse:
@@ -145,7 +145,7 @@ class TestUploadingSeveralFiles:
         [file] = files_of(abc, document)
         assert shown_document(body)["files"] == [
             {
-                "id": file.pk,
+                "id": str(file.public_id),
                 "file_name": "passport.pdf",
                 "content_type": "application/pdf",
                 "size": len(PDF_BYTES),
@@ -171,7 +171,7 @@ class TestUploadingSeveralFiles:
 
         [document] = stored_documents(abc, student)
         keys = [file.storage_key for file in files_of(abc, document)]
-        assert all(key.startswith(f"abcedu/documents/{student.pk}/") for key in keys)
+        assert all(key.startswith(f"abcedu/documents/{student.public_id}/") for key in keys)
         assert len(set(keys)) == len(keys)
 
     def test_the_most_files_at_once_are_accepted(self, abc: ConsultancyContext) -> None:
@@ -652,7 +652,7 @@ class TestOpeningEachFile:
         student = own_student(abc)
         document = make_document(abc, student)
 
-        response = abc.client.get(f"{documents_url(student)}{document.pk}/link/")
+        response = abc.client.get(f"{documents_url(student)}{document.public_id}/link/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -700,7 +700,7 @@ class TestOneJudgmentForTheWholeDocument:
         [document] = stored_documents(abc, student)
 
         response = abc.client.post(
-            f"{documents_url(student)}{document.pk}/verification/",
+            f"{documents_url(student)}{document.public_id}/verification/",
             {"verification": "verified"},
             format="json",
         )
@@ -718,7 +718,7 @@ class TestOneJudgmentForTheWholeDocument:
         add_files(abc, student, document)
 
         response = abc.client.post(
-            f"{documents_url(student)}{document.pk}/verification/",
+            f"{documents_url(student)}{document.public_id}/verification/",
             {"verification": "rejected", "reason": "Page 2 is blurred."},
             format="json",
         )

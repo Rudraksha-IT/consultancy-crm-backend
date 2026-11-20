@@ -8,6 +8,7 @@ email is read from Django's test mailbox; files from the in-memory storage.
 
 from __future__ import annotations
 
+import uuid
 from email.message import Message as Message_
 from typing import TYPE_CHECKING
 
@@ -86,25 +87,25 @@ def sita(abc: ConsultancyContext) -> Student:
     return make_student(abc, name="Sita Gurung", email="sita@example.com")
 
 
-def messages_url(student: Student | int) -> str:
+def messages_url(student: Student | int | str) -> str:
     """One Student's emails."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/messages/"
 
 
-def attachable_url(student: Student | int) -> str:
+def attachable_url(student: Student | int | str) -> str:
     """The files that can be attached to an email to one Student."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/emails/attachable/"
 
 
 def draft_url(student: Student) -> str:
     """One ready-made email's draft for one Student."""
-    return f"/api/students/{student.pk}/emails/draft/"
+    return f"/api/students/{student.public_id}/emails/draft/"
 
 
 def send(
-    office: ConsultancyContext, student: Student | int, attachments: object
+    office: ConsultancyContext, student: Student | int | str, attachments: object
 ) -> _MonkeyPatchedResponse:
     """POST an email with `attachments` to one Student."""
     body = {
@@ -122,7 +123,7 @@ def send_bulk(
     body = {
         "subject": "Office news",
         "body": "Dear Student,\n\nHave a look.",
-        "students": [student.pk for student in students],
+        "students": [str(student.public_id) for student in students],
         "attachments": attachments,
     }
     return office.client.post(BULK_URL, body, format="json")
@@ -204,7 +205,12 @@ def picked(*rows: CourseFile | DocumentExample | DocumentFile) -> list[dict[str,
         DocumentExample: "document_example",
         DocumentFile: "document_file",
     }
-    return [{"kind": kinds[type(row)], "id": row.pk} for row in rows]
+    return [{"kind": kinds[type(row)], "id": outside_id(row)} for row in rows]
+
+
+def outside_id(row: CourseFile | DocumentExample | DocumentFile) -> int | str:
+    """The id the picker gives a file: a Document file's UUID; the rest by number (ticket 18)."""
+    return str(row.public_id) if isinstance(row, DocumentFile) else row.pk
 
 
 def stored_messages(office: ConsultancyContext) -> list[Message]:
@@ -405,7 +411,8 @@ class TestAttachingToOneStudent:
     def test_an_unknown_id_is_refused(
         self, abc: ConsultancyContext, admin: Staff, sita: Student, kind: str
     ) -> None:
-        response = send(abc, sita, [{"kind": kind, "id": 999_999}])
+        unknown = str(uuid.uuid4()) if kind == "document_file" else 999_999
+        response = send(abc, sita, [{"kind": kind, "id": unknown}])
 
         assert response.json() == GONE
 
@@ -425,6 +432,8 @@ class TestAttachingToOneStudent:
             [{"kind": "course_file", "id": -1}],
             [{"kind": "course_file", "id": 2**63}],
             [{"kind": "course_file", "id": 1.5}],
+            [{"kind": "document_file", "id": 1}],
+            [{"kind": "document_file", "id": "not-a-uuid"}],
             [{"kind": "course_file", "id": 1, "path": "/etc/passwd"}],
             [{"kind": "course_file", "id": 1, "url": "https://evil.example/x.pdf"}],
             *[[{"kind": text, "id": 1}] for text in INJECTION_STRINGS],
@@ -563,7 +572,7 @@ def attachable_row(
     row: CourseFile | DocumentExample | DocumentFile, **expected: object
 ) -> dict[str, object]:
     """One file as the picker lists it."""
-    return {"id": row.pk, "size": row.size, **expected}
+    return {"id": outside_id(row), "size": row.size, **expected}
 
 
 class TestWhatCanBeAttached:

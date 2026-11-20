@@ -9,7 +9,7 @@ urlpatterns: list[URLPattern] = [
     path("home/pipeline/", PipelineView.as_view(), name="home-pipeline"),
     path("home/waiting/", WaitingView.as_view(), name="home-waiting"),
     path(
-        "students/<int:student_id>/progress/",
+        "students/<uuid:student_id>/progress/",
         StudentProgressView.as_view(),
         name="student-progress",
     ),

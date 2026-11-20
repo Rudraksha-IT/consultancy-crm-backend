@@ -11,12 +11,13 @@ The starting text itself is written in `emails.drafts`; this module finds what g
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
+from django.db.models import Model
 from django.utils import timezone
 
 from access.policy import StudentAction, can_act_on_student, why_cannot_see_payment
@@ -64,9 +65,6 @@ from students.models import Student
 from tenancy.models import Consultancy
 
 logger = logging.getLogger(__name__)
-
-LARGEST_ID = 2**63 - 1
-_RECORD_ID = re.compile(r"[1-9][0-9]{0,18}")
 
 
 class Kind(StrEnum):
@@ -140,7 +138,7 @@ class Asker:
 class Record:
     """A record a ready-made email can be about, as the picker shows it."""
 
-    id: int
+    id: int | UUID  # its UUID (ADR 0027); a class still by number until ticket 18
     label: str
 
 
@@ -393,7 +391,7 @@ def _student_entry(kind: Kind, student: Student, staff: Staff) -> MenuEntry:
 
 def _records(record_kind: RecordKind, student: Student | None, staff: Staff) -> tuple[Record, ...]:
     source = _SOURCES[record_kind]
-    return tuple(Record(row.pk, source.label(row)) for row in source.rows(student, staff))
+    return tuple(Record(_outside_id(row), source.label(row)) for row in source.rows(student, staff))
 
 
 def _none_message(record_kind: RecordKind, staff: Staff) -> str:
@@ -474,19 +472,16 @@ def _about(
 ) -> ReadyMade:
     """The email about the record with id `record`, if it is one of those to pick."""
     source = _SOURCES[record_kind]
-    wanted = _record_id(record)
     for row in source.rows(student, staff):
-        if row.pk == wanted:
+        if record is not None and str(_outside_id(row)) == record:
             return source.email(row)
     raise RecordNotChosenError(CHOOSE_MESSAGES[record_kind])
 
 
-def _record_id(record: str | None) -> int | None:
-    """The id typed, or None when it isn't one."""
-    if record is None or _RECORD_ID.fullmatch(record) is None:
-        return None
-    number = int(record)
-    return number if number <= LARGEST_ID else None
+def _outside_id(row: Model) -> int | UUID:
+    """The id the picker shows for a record: its UUID, or a class's number until ticket 18."""
+    public_id: UUID | None = getattr(row, "public_id", None)
+    return int(row.pk) if public_id is None else public_id
 
 
 def _context(asker: Asker, *, first_name: str | None) -> DraftContext:

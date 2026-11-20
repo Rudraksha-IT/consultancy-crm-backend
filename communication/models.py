@@ -9,6 +9,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 
@@ -34,6 +35,9 @@ class MessageStatus(models.TextChoices):
 
 class Message(models.Model):
     """One email to one Student, sent or failed. Never changed afterwards."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="messages")
     channel = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=Channel.choices)

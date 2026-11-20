@@ -19,7 +19,7 @@ def progress_row(row: StudentProgress) -> dict[str, object]:
     counts = row.checklist.counts
     return {
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "stage": student.stage,
             "country": student.country,
@@ -58,7 +58,7 @@ def waiting_answer(waiting: Waiting) -> dict[str, object]:
             "results": [
                 {
                     "visa_id": one.visa.pk,
-                    "student": {"id": one.visa.student.pk, "name": one.visa.student.name},
+                    "student": {"id": one.visa.student.public_id, "name": one.visa.student.name},
                     "kind": one.booked.kind.value,
                     "at": moment_text(one.booked.at),
                 }

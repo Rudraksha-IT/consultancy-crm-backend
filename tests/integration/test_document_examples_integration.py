@@ -915,7 +915,7 @@ class TestOnTheChecklist:
         example = make_example(abc, statement, "sample.pdf")
         make_example(abc, statement, "old.pdf", binned=True)
 
-        body = abc.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/documents/").json()
 
         items = {item["document_type"]["name"]: item for item in body["items"]}
         assert items["Bank Statement"]["instruction"] == "Six months"
@@ -929,7 +929,7 @@ class TestOnTheChecklist:
         student = make_student(abc, me, Stage.COUNSELLING)
         make_example(abc, type_of(abc))
 
-        body = abc.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/documents/").json()
 
         assert item_states(body) == [(name, "not_received") for name in DEFAULT_TYPES]
         assert (body["done"], body["total"]) == (0, len(DEFAULT_TYPES))
@@ -943,7 +943,7 @@ class TestOnTheChecklist:
             DocumentType.objects.filter(name="Passport").update(instruction="Every page")
         make_document(abc, student, "Passport")
 
-        body = abc.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/documents/").json()
 
         assert body["items"][0]["instruction"] == "Every page"
 
@@ -959,7 +959,7 @@ class TestInTheDocumentsNeededEmail:
             )
 
         response = abc.client.get(
-            f"/api/students/{student.pk}/emails/draft/", {"kind": "documents_needed"}
+            f"/api/students/{student.public_id}/emails/draft/", {"kind": "documents_needed"}
         )
 
         assert response.status_code == status.HTTP_200_OK

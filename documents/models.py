@@ -5,6 +5,7 @@ from django.db.models.functions import Lower
 
 from applications.models import Application, Visa
 from catalogue.models import Course
+from config.public_ids import public_id_field
 from documents.groups import DocumentGroup
 from documents.verification import Verification
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
@@ -79,6 +80,9 @@ class Document(InTheBin):
     Student's Applications or Visas, never both (spec 66).
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="documents")
     document_type = models.ForeignKey(
         DocumentType, on_delete=models.PROTECT, related_name="documents"
@@ -123,6 +127,9 @@ class DocumentFile(InTheBin):
     The file itself is in private storage under the Consultancy's own prefix (`storage_key`); it
     is reached only through a short-lived signed link issued after a permission check (spec 70).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="files")
     # The name shown and used for downloads; its extension always matches the real file type.

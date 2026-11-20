@@ -217,7 +217,7 @@ class TestOnlyMe:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me)
 
-        response = create(abc, me, only_me=True, student=student.pk)
+        response = create(abc, me, only_me=True, student=str(student.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ONLY_ME_STUDENT_MESSAGE
@@ -377,8 +377,8 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
         student = make_student(abc, owner)
         private_task(abc, owner)
 
-        tasks = abc.client.get(f"/api/students/{student.pk}/tasks/").json()
-        profile = abc.client.get(f"/api/students/{student.pk}/").json()
+        tasks = abc.client.get(f"/api/students/{student.public_id}/tasks/").json()
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert (tasks["count"], profile["open_tasks"]) == (0, 0)
 

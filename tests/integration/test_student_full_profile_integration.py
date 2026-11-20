@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import pytest
 from django.utils import timezone
@@ -77,7 +78,7 @@ def work_url(student: Student) -> str:
     return f"{profile_url(student)}work-experience/"
 
 
-def job_url(student: Student, job_id: int) -> str:
+def job_url(student: Student, job_id: int | str | UUID) -> str:
     """One job in the Student's work experience."""
     return f"{work_url(student)}{job_id}/"
 
@@ -450,7 +451,9 @@ class TestWhoCanChangeTheNewDetails:
             format="json",
         ).json()
         abc.client.post(
-            f"/api/batches/{batch['id']}/students/", {"student": student.pk}, format="json"
+            f"/api/batches/{batch['id']}/students/",
+            {"student": str(student.public_id)},
+            format="json",
         )
         use_access_token(abc.client, abc.tokens_for(teacher).access)
 
@@ -648,8 +651,8 @@ class TestWorkExperience:
 
         responses = [
             add_job(abc, student),
-            abc.client.patch(job_url(student, job.pk), {"employer": "X"}, format="json"),
-            abc.client.delete(job_url(student, job.pk)),
+            abc.client.patch(job_url(student, job.public_id), {"employer": "X"}, format="json"),
+            abc.client.delete(job_url(student, job.public_id)),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_403_FORBIDDEN] * 3

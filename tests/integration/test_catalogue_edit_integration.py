@@ -1055,7 +1055,7 @@ class TestPreferredIntake:
         self, office: ConsultancyContext, student: Student, value: object
     ) -> _MonkeyPatchedResponse:
         return office.client.patch(
-            f"/api/students/{student.pk}/", {"preferred_intake": value}, format="json"
+            f"/api/students/{student.public_id}/", {"preferred_intake": value}, format="json"
         )
 
     def test_one_of_the_catalogues_upcoming_intakes_can_be_chosen(

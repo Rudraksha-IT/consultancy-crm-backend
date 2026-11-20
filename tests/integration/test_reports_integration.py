@@ -229,7 +229,7 @@ class TestStudentsReport:
         student = make_student(abc, admin, Stage.LEAD)
         log_in(abc, admin)
         changed = abc.client.post(
-            f"/api/students/{student.pk}/stage/", {"stage": "counselling"}, format="json"
+            f"/api/students/{student.public_id}/stage/", {"stage": "counselling"}, format="json"
         )
 
         body = abc.client.get(STUDENTS_URL).json()
@@ -371,7 +371,9 @@ class TestCountries:
         visa = visa_for(abc, student, Country.CANADA, None, VisaStatus.APPLIED)
         log_in(abc, admin)
         changed = abc.client.patch(
-            f"/api/students/{student.pk}/visas/{visa.pk}/", {"status": "granted"}, format="json"
+            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
+            {"status": "granted"},
+            format="json",
         )
 
         body = abc.client.get(STUDENTS_URL).json()

@@ -49,9 +49,9 @@ TRANSFERRED_ANOTHER_WAY = "The Student was given to a counsellor another way."
 REQUESTER_LEFT = "The person who asked has left the office."
 
 
-def ask_url(student: Student | int) -> str:
+def ask_url(student: Student | int | str) -> str:
     """Where a Transfer Request for the Student is sent."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/transfer-requests/"
 
 
@@ -137,7 +137,7 @@ class TestAsking:
 
         assert response.status_code == status.HTTP_201_CREATED
         answer = response.json()
-        assert answer["student"] == {"id": people.sarina.pk, "name": "Sarina Khadka"}
+        assert answer["student"] == {"id": str(people.sarina.public_id), "name": "Sarina Khadka"}
         assert answer["asked_by"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
         assert answer["reason"] == REASON
         assert answer["status"] == "waiting"
@@ -249,7 +249,7 @@ class TestAsking:
         assert item["kind"] == "transfer_asked"
         assert item["task"] is None
         assert item["by"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
-        assert item["student"] == {"id": people.sarina.pk, "name": "Sarina Khadka"}
+        assert item["student"] == {"id": str(people.sarina.public_id), "name": "Sarina Khadka"}
         assert item["transfer_request"] == {"id": request_id, "status": "waiting"}
 
     def test_the_request_is_logged_without_the_reason(
@@ -386,8 +386,8 @@ class TestApproving:
         request_id = people.asked(people.anjali)
         people.act(people.bikash, request_id, "approve")
 
-        profile = people.as_(people.anjali).client.get(f"/api/students/{people.sarina.pk}/")
-        old = people.as_(people.bikash).client.get(f"/api/students/{people.sarina.pk}/")
+        profile = people.as_(people.anjali).client.get(f"/api/students/{people.sarina.public_id}/")
+        old = people.as_(people.bikash).client.get(f"/api/students/{people.sarina.public_id}/")
 
         assert profile.json()["can_change"] is True
         assert old.json()["can_change"] is False
@@ -666,7 +666,9 @@ class TestClosingByItself:
         request_id = people.asked(people.anjali, lead)
 
         people.as_(people.desk).client.post(
-            f"/api/students/{lead.pk}/assign/", {"counsellor": people.bikash.pk}, format="json"
+            f"/api/students/{lead.public_id}/assign/",
+            {"counsellor": people.bikash.pk},
+            format="json",
         )
 
         assert people.stored_request(request_id).status == TransferRequestStatus.CLOSED
@@ -823,7 +825,7 @@ class TestTheLists:
 
 class TestOnTheProfile:
     def _profile(self, people: Office, staff: Staff) -> dict[str, object]:
-        response = people.as_(staff).client.get(f"/api/students/{people.sarina.pk}/")
+        response = people.as_(staff).client.get(f"/api/students/{people.sarina.public_id}/")
         answer: dict[str, object] = response.json()
         return answer
 

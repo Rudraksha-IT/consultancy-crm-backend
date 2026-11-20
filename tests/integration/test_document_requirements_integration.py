@@ -59,16 +59,16 @@ def course_documents_url(course: Course | int) -> str:
     return f"/api/catalogue/courses/{pk}/documents/"
 
 
-def asked_url(student: Student | int, type_id: int | None = None) -> str:
+def asked_url(student: Student | int | str, type_id: int | None = None) -> str:
     """Where the documents asked for one Student are set, or one is taken off."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     one = "" if type_id is None else f"{type_id}/"
     return f"/api/students/{pk}/documents/asked/{one}"
 
 
 def checklist_url(student: Student) -> str:
     """The Student's checklist."""
-    return f"/api/students/{student.pk}/documents/"
+    return f"/api/students/{student.public_id}/documents/"
 
 
 def optional_type(office: ConsultancyContext, name: str) -> DocumentType:
@@ -397,7 +397,7 @@ class TestChecklistWithRequirements:
             DocumentRequirement.objects.create(document_type=cv, course=course)
         make_document(abc, student, "CV")
 
-        profile = abc.client.get(f"/api/students/{student.pk}/").json()
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()
         paperwork = abc.client.get("/api/documents/students/?scope=mine").json()
         home = abc.client.get("/api/home/progress/?counsellor=me").json()
 
@@ -412,7 +412,7 @@ def _home_documents(home: dict[str, object], student: Student) -> dict[str, obje
     """The documents count the Counsellor's Home shows for the Student."""
     progress = home["results"]
     assert isinstance(progress, list)
-    [row] = [row for row in progress if row["student"]["id"] == student.pk]
+    [row] = [row for row in progress if row["student"]["id"] == str(student.public_id)]
     documents = row["documents"]
     assert isinstance(documents, dict)
     return documents

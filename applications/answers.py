@@ -32,7 +32,7 @@ def _files_answer(document: Document) -> list[dict[str, object]]:
     Files in the Bin are left out: nobody opens or uses them here (issue 79).
     """
     return [
-        {"id": file.pk, "file_name": file.file_name}
+        {"id": file.public_id, "file_name": file.file_name}
         for file in document.files.all()
         if not file.is_in_bin
     ]
@@ -47,7 +47,7 @@ def _documents_answer(documents: Iterable[Document]) -> list[dict[str, object]]:
     """The Documents linked to an Application or Visa (spec 66), oldest first; none in the Bin."""
     return [
         {
-            "id": document.pk,
+            "id": document.public_id,
             "document_type": {"id": document.document_type_id, "name": document.document_type.name},
             "files": _files_answer(document),
             "verification": document.verification,
@@ -62,7 +62,7 @@ def _offer_letter(documents: Iterable[Document]) -> dict[str, object] | None:
     if not letters:
         return None
     newest = letters[-1]
-    return {"id": newest.pk, "files": _files_answer(newest)}
+    return {"id": newest.public_id, "files": _files_answer(newest)}
 
 
 def application_answer(application: Application) -> dict[str, object]:
@@ -76,7 +76,7 @@ def application_answer(application: Application) -> dict[str, object]:
     documents = list(application.documents.all())
     offered_on = application.offered_on
     return {
-        "id": application.pk,
+        "id": application.public_id,
         "university": {"id": university.pk, "name": university.name},
         "course": {"id": course.pk, "name": course.name, "level": course.level},
         "intake": application.intake,
@@ -95,8 +95,8 @@ def visa_answer(visa: Visa) -> dict[str, object]:
     course = visa.application.course
     university = course.university
     return {
-        "id": visa.pk,
-        "application_id": visa.application_id,
+        "id": visa.public_id,
+        "application_id": visa.application.public_id,
         "university": {"id": university.pk, "name": university.name},
         "course": {"id": course.pk, "name": course.name, "level": course.level},
         "status": visa.status,
@@ -138,9 +138,9 @@ def office_application_row(application: Application) -> dict[str, object]:
     university = course.university
     applied_on = application.applied_on
     return {
-        "id": application.pk,
+        "id": application.public_id,
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "phone": student.phone,
             "email": student.email,
@@ -172,9 +172,9 @@ def office_visa_row(visa: Visa, checklist: Checklist) -> dict[str, object]:
     university = course.university
     counts = checklist.counts
     return {
-        "id": visa.pk,
+        "id": visa.public_id,
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "phone": student.phone,
             "email": student.email,

@@ -201,7 +201,7 @@ class TestDatesStayInAd:
         line = {"amount": 5000, "fee_type": pte_id(abc)}
         body = {"paid_on": "2026-10-20", "method": "cash", "lines": [line]}
 
-        response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
+        response = abc.client.post(PAYMENTS_URL.format(id=student.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["paid_on"] == "2026-10-20"
@@ -216,7 +216,7 @@ class TestDatesStayInAd:
         line = {"amount": 5000, "fee_type": pte_id(abc)}
         body = {"paid_on": "2083-07-03", "method": "cash", "lines": [line]}
 
-        response = abc.client.post(PAYMENTS_URL.format(id=student.pk), body, format="json")
+        response = abc.client.post(PAYMENTS_URL.format(id=student.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "paid_on" in response.json()

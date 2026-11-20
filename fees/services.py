@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import (
@@ -142,7 +143,7 @@ class FeeTotals:
 class OwingStudent:
     """One Student who still owes: their Fees, what they paid, and what is still to pay."""
 
-    student_id: int
+    student_id: UUID  # the Student's public id (ADR 0027)
     name: str
     fees: int
     paid: int
@@ -153,10 +154,11 @@ class OwingStudent:
 class OwingStudents:
     """Students who still owe, most owed first, and the totals across everyone with Fees.
 
-    `rows` is a lazy query of (id, name, fees, paid, still to pay); `owing_rows` reads a slice.
+    `rows` is a lazy query of (public id, name, fees, paid, still to pay); `owing_rows`
+    reads a slice.
     """
 
-    rows: QuerySet[Student, tuple[int, str, int, int, int]]
+    rows: QuerySet[Student, tuple[UUID, str, int, int, int]]
     totals: FeeTotals
 
 
@@ -193,12 +195,12 @@ def owing_students(*, leave_out_lost: bool = False) -> OwingStudents:
     rows = (
         with_fees.filter(still_to_pay__gt=0)
         .order_by("-still_to_pay", "name", "pk")
-        .values_list("pk", "name", "fees_total", "paid_total", "still_to_pay")
+        .values_list("public_id", "name", "fees_total", "paid_total", "still_to_pay")
     )
     return OwingStudents(rows=rows, totals=totals)
 
 
-def owing_rows(rows: Iterable[tuple[int, str, int, int, int]]) -> list[OwingStudent]:
+def owing_rows(rows: Iterable[tuple[UUID, str, int, int, int]]) -> list[OwingStudent]:
     """The rows of `OwingStudents.rows` (or a page of them) as `OwingStudent`s."""
     return [OwingStudent(*row) for row in rows]
 
@@ -230,7 +232,7 @@ def fee_types_of(found: FeesByType) -> list[FeeType]:
 class FeeTypeStudent:
     """One Student under one Fee Type, with what the page shows about them."""
 
-    student_id: int
+    student_id: UUID  # the Student's public id (ADR 0027)
     name: str
     stage: str
     lost_reason: str
@@ -244,14 +246,14 @@ def fee_type_students(found: FeesByType, fee_type_id: int, *, lost: bool) -> lis
     counted, lost_lines = found.students_of(fee_type_id)
     lines: list[StudentLine] = lost_lines if lost else counted
     people = {
-        pk: (name, stage, reason)
-        for pk, name, stage, reason in Student.objects.filter(
+        pk: (name, stage, reason, public_id)
+        for pk, name, stage, reason, public_id in Student.objects.filter(
             pk__in=[line.student_id for line in lines]
-        ).values_list("pk", "name", "stage", "lost_reason")
+        ).values_list("pk", "name", "stage", "lost_reason", "public_id")
     }
     rows = [
         FeeTypeStudent(
-            student_id=line.student_id,
+            student_id=people[line.student_id][3],
             name=people[line.student_id][0],
             stage=people[line.student_id][1],
             lost_reason=people[line.student_id][2] if lost else "",

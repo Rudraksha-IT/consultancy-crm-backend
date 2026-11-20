@@ -105,7 +105,7 @@ class TestAppliedOn:
         self, office: ConsultancyContext, student: Student, application: Application, to: str
     ) -> None:
         response = office.client.patch(
-            f"/api/students/{student.pk}/applications/{application.pk}/",
+            f"/api/students/{student.public_id}/applications/{application.public_id}/",
             {"status": to},
             format="json",
         )
@@ -121,7 +121,7 @@ class TestAppliedOn:
         course = course_at(abc, "Deakin University")
 
         response = abc.client.post(
-            f"/api/students/{student.pk}/applications/",
+            f"/api/students/{student.public_id}/applications/",
             {"course": course.pk, "intake": "2027-02"},
             format="json",
         )
@@ -177,9 +177,9 @@ class TestRows:
         [row] = listed(abc).json()["results"]
 
         assert row == {
-            "id": application.pk,
+            "id": str(application.public_id),
             "student": {
-                "id": student.pk,
+                "id": str(student.public_id),
                 "name": "Sita Karki",
                 "phone": "9841234567",
                 "email": "sita@gmail.test",

@@ -21,7 +21,7 @@ from applications.statuses import ApplicationStatus, VisaStatus
 from applications.visa_list import checklists_for, find_visas
 from clock_in.serializers import ClockInExportQuerySerializer
 from clock_in.services import team_month_rows, team_staff
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from exports.models import ExportList
 from fee_types.models import FeeType
 from payments.models import PaymentMethod
@@ -172,8 +172,13 @@ def _fee_type_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a va
 
 
 def _student_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
-    """The Student's name."""
-    found = Student.objects.filter(pk=value).values_list("name", flat=True).first()
+    """The Student's name, from their UUID (ADR 0027)."""
+    public_id = parse_record_id(value)
+    found = (
+        None
+        if public_id is None
+        else Student.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
     return found or UNKNOWN_STUDENT_TEXT
 
 

@@ -22,7 +22,7 @@ ADRs 0001 to 0004 were written when the decisions were made. ADRs 0005 to 0022 w
 | [0012](0012-one-permission-policy-fixed-roles.md) | One permission policy with four fixed Roles | Accepted |
 | [0013](0013-append-only-history-written-by-services.md) | Append-only History written by services | Accepted |
 | [0014](0014-stage-engine-is-a-pure-function.md) | The Stage engine is a pure function | Accepted |
-| [0015](0015-private-documents-and-the-bin.md) | Private S3 documents, short signed links, and the Bin | Accepted |
+| [0015](0015-private-documents-and-the-bin.md) | Private S3 documents, short signed links, and the Bin | Accepted (storage paths use UUIDs: 0027) |
 | [0016](0016-secrets-sealed-and-codes-hashed.md) | Secrets sealed with their own keys; Codes stored as hashes | Accepted |
 | [0017](0017-support-access-as-the-platform-admin.md) | Support Access as the Platform Admin, never as Staff | Accepted |
 | [0018](0018-platform-admin-from-deploy-values.md) | First Platform Admin created from deploy values | Accepted |
@@ -31,3 +31,4 @@ ADRs 0001 to 0004 were written when the decisions were made. ADRs 0005 to 0022 w
 | [0021](0021-dates-stored-in-ad.md) | Dates stored in AD; BS for display | Accepted |
 | [0023](0023-all-email-through-the-product-smtp.md) | All email through the product's own SMTP account; no SMS | Accepted |
 | [0024](0024-safe-deploys-from-github.md) | Deploys keep logins, switch only when healthy, roll back by themselves, run from GitHub with a locked SSH key (no AWS) | Accepted |
+| [0027](0027-records-known-only-by-uuid.md) | Records are known outside the server only by a UUID | Accepted |

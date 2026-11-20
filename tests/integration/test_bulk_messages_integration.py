@@ -7,6 +7,7 @@ own copy. Sent email is read from Django's test mailbox.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -57,10 +58,10 @@ def send_bulk(office: ConsultancyContext, body: object) -> _MonkeyPatchedRespons
 
 
 def bulk(
-    *students: Student | int, subject: str = "Office closed", body: str = ""
+    *students: Student | str, subject: str = "Office closed", body: str = ""
 ) -> dict[str, object]:
-    """An email to the Students chosen."""
-    ids = [s if isinstance(s, int) else s.pk for s in students]
+    """An email to the Students chosen, by UUID (or any text, to try bad ones)."""
+    ids = [s if isinstance(s, str) else str(s.public_id) for s in students]
     text = body or "Dear Student,\n\nThe office is closed on Friday."
     return {"subject": subject, "body": text, "students": ids}
 
@@ -266,7 +267,7 @@ class TestRefusedBulkEmails:
     def test_an_unknown_student_is_refused(
         self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        assert self._refused(abc, bulk(students["sita"], 999_999)) == NOT_FOUND
+        assert self._refused(abc, bulk(students["sita"], str(uuid.uuid4()))) == NOT_FOUND
 
     @override_settings(BULK_MAX_STUDENTS=2)
     def test_too_many_students_are_refused(
@@ -294,6 +295,8 @@ class TestRefusedBulkEmails:
             ({"subject": "Hi", "body": "Hi", "students": [0]}, "students"),
             ({"subject": "Hi", "body": "Hi", "students": [2**63]}, "students"),
             ({"subject": "Hi", "body": "Hi", "students": [None]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": ["not-a-uuid"]}, "students"),
+            ({"subject": "Hi", "body": "Hi", "students": [str(uuid.uuid4()).upper()]}, "students"),
             ({"subject": "Hi", "body": "Hi", "students": None}, "students"),
         ],
     )

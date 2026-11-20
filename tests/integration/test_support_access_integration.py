@@ -68,7 +68,7 @@ def sign_out_url(staff: Staff) -> str:
 
 def note_url(student: Student) -> str:
     """Replace a Student's Note."""
-    return f"/api/students/{student.pk}/note/"
+    return f"/api/students/{student.public_id}/note/"
 
 
 @pytest.fixture
@@ -509,7 +509,7 @@ class TestInsideTheOffice:
         assert entry.by_staff_id is None
         assert entry.by_name == "Platform Ops"
         assert entry.by_platform_admin is True
-        history = visit.client.get(f"/api/students/{student.pk}/history/").json()
+        history = visit.client.get(f"/api/students/{student.public_id}/history/").json()
         assert history["results"][0]["by"] == {"name": "Platform Ops", "is_platform_admin": True}
 
     def test_can_change_a_past_due_or_suspended_office_that_staff_cant(

@@ -9,7 +9,7 @@ from typing import Any
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from staff.models import Staff
 from staff.serializers import PlainTextField
 from students.models import Student
@@ -116,8 +116,8 @@ class AssigneeField(serializers.Field[Staff, int, int, Any]):
         return value.pk
 
 
-class StudentLinkField(serializers.Field[Student | None, int | None, int | None, Any]):
-    """The Student the Task is about, by id; optional and nullable."""
+class StudentLinkField(serializers.Field[Student | None, str | None, str | None, Any]):
+    """The Student the Task is about, by UUID (ADR 0027); optional and nullable."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -126,15 +126,15 @@ class StudentLinkField(serializers.Field[Student | None, int | None, int | None,
 
     def to_internal_value(self, data: object) -> Student:
         """Return the Student; anything but a known Student's id is refused."""
-        pk = _an_id(data)
-        student = None if pk is None else Student.objects.filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        student = None if public_id is None else Student.objects.filter(public_id=public_id).first()
         if student is None:
             self.fail("invalid")
         return student
 
-    def to_representation(self, value: Student | None) -> int | None:
-        """Return the id (unused: answers are built by hand)."""
-        return None if value is None else value.pk
+    def to_representation(self, value: Student | None) -> str | None:
+        """Return the UUID (unused: answers are built by hand)."""
+        return None if value is None else str(value.public_id)
 
 
 class DoneField(serializers.Field[bool, bool, bool, Any]):

@@ -37,7 +37,7 @@ urlpatterns: list[URLPattern] = [
     path("batches/<int:batch_id>/", BatchView.as_view(), name="batch"),
     path("batches/<int:batch_id>/students/", BatchMembersView.as_view(), name="batch-members"),
     path(
-        "batches/<int:batch_id>/students/<int:student_id>/",
+        "batches/<int:batch_id>/students/<uuid:student_id>/",
         BatchMemberView.as_view(),
         name="batch-member",
     ),
@@ -47,6 +47,6 @@ urlpatterns: list[URLPattern] = [
         name="batch-attendance-day",
     ),
     path(
-        "students/<int:student_id>/batches/", StudentClassesView.as_view(), name="student-batches"
+        "students/<uuid:student_id>/batches/", StudentClassesView.as_view(), name="student-batches"
     ),
 ]

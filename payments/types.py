@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from uuid import UUID
 
 from fee_types.models import FeeType
 from payments.models import PaymentMethod
@@ -45,6 +46,6 @@ class PaymentFilters:
 
     paid_from: date | None = None
     paid_to: date | None = None
-    student_id: int | None = None
+    student_id: UUID | None = None  # the Student's public id (ADR 0027)
     fee_type_id: int | None = None
     query: str = ""

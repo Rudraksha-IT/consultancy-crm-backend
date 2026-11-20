@@ -110,7 +110,7 @@ class TestAddLead:
         student_id = add_lead(abc.client).json()["id"]
 
         with tenant_context(abc.consultancy):
-            stored = Student.objects.get(pk=student_id)
+            stored = Student.objects.get(public_id=student_id)
         assert stored.stage == Stage.LEAD
         assert stored.phone == "9819988776"
         assert stored.email == "anish@gmail.test"
@@ -209,7 +209,9 @@ class TestAddLead:
     ) -> None:
         desk = abc.log_in_as(Role.FRONT_DESK)
 
-        student_id = add_lead(abc.client).json()["id"]
+        public_id = add_lead(abc.client).json()["id"]
+        with tenant_context(abc.consultancy):
+            student_id = Student.objects.get(public_id=public_id).pk
 
         line = json_logs.only(f"Student added: student_id={student_id}, by_staff_id={desk.pk}")
         assert line["level"] == "INFO"
@@ -580,7 +582,7 @@ class TestStudentList:
         row = abc.client.get(STUDENTS_URL).json()["results"][0]
 
         assert row == {
-            "id": student.pk,
+            "id": str(student.public_id),
             "name": "Sita Karki",
             "phone": "9841234567",
             "email": "sita@x.test",

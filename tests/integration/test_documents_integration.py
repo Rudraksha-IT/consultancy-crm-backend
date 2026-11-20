@@ -55,17 +55,19 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def documents_url(student: Student | int) -> str:
+def documents_url(student: Student | int | str) -> str:
     """A Student's checklist, where Documents are uploaded too."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/documents/"
 
 
-def link_url(office: ConsultancyContext, student: Student | int, document: Document | int) -> str:
+def link_url(
+    office: ConsultancyContext, student: Student | int | str, document: Document | int | str
+) -> str:
     """Where a link to the first file of one of a Student's Documents is asked for."""
-    pk = student if isinstance(student, int) else student.pk
-    document_pk = document if isinstance(document, int) else document.pk
-    first = files_of(office, document)[0].pk if isinstance(document, Document) else 1
+    pk = student if isinstance(student, int | str) else student.public_id
+    document_pk = document if isinstance(document, int | str) else document.public_id
+    first = files_of(office, document)[0].public_id if isinstance(document, Document) else 1
     return f"/api/students/{pk}/documents/{document_pk}/files/{first}/link/"
 
 
@@ -81,7 +83,7 @@ def a_file(content: bytes = PDF_BYTES, name: str = "passport.pdf") -> SimpleUplo
 
 
 def upload(
-    office: ConsultancyContext, student: Student | int, **fields: object
+    office: ConsultancyContext, student: Student | int | str, **fields: object
 ) -> _MonkeyPatchedResponse:
     """POST a Document as a form, with a Passport PDF unless `fields` say otherwise."""
     body: dict[str, object] = {
@@ -92,7 +94,7 @@ def upload(
     return office.client.post(documents_url(student), body, format="multipart")
 
 
-def checklist(office: ConsultancyContext, student: Student | int) -> _MonkeyPatchedResponse:
+def checklist(office: ConsultancyContext, student: Student | int | str) -> _MonkeyPatchedResponse:
     """GET a Student's checklist."""
     return office.client.get(documents_url(student))
 
@@ -128,7 +130,7 @@ def add_stored_files(
     office: ConsultancyContext, document: Document, count: int = 1, first_name: str = "page.pdf"
 ) -> list[DocumentFile]:
     """Store `count` PDF files of a Document directly (not in storage); call in its schema."""
-    prefix = f"{office.consultancy.schema_name}/documents/{document.student_id}/"
+    prefix = f"{office.consultancy.schema_name}/documents/{document.student.public_id}/"
     start = DocumentFile.objects.count()
     return [
         DocumentFile.objects.create(
@@ -211,10 +213,10 @@ class TestChecklist:
         assert passport["state"] == "waiting"
         [file] = files_of(abc, newest)
         assert passport["document"] == {
-            "id": newest.pk,
+            "id": str(newest.public_id),
             "files": [
                 {
-                    "id": file.pk,
+                    "id": str(file.public_id),
                     "file_name": "passport.pdf",
                     "content_type": "application/pdf",
                     "size": len(PDF_BYTES),
@@ -282,7 +284,7 @@ class TestChecklist:
         student = own_student(abc)
         make_document(abc, student, "Passport")
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["documents"] == {"done": 1, "total": 8}
         assert body["can_change_documents"] is True
@@ -309,7 +311,7 @@ class TestUploading:
         assert (stored.content, stored.content_type) == (PDF_BYTES, "application/pdf")
         body = response.json()
         assert item_states(body)[0] == ("Passport", "waiting")
-        assert body["items"][0]["document"]["id"] == document.pk
+        assert body["items"][0]["document"]["id"] == str(document.public_id)
         assert body["done"] == 1
 
     def test_the_file_is_kept_under_the_consultancys_own_prefix(
@@ -321,7 +323,7 @@ class TestUploading:
 
         [document] = stored_documents(abc, student)
         [file] = files_of(abc, document)
-        assert file.storage_key.startswith(f"abcedu/documents/{student.pk}/")
+        assert file.storage_key.startswith(f"abcedu/documents/{student.public_id}/")
         assert file.storage_key.endswith(".pdf")
         assert "passport" not in file.storage_key
 

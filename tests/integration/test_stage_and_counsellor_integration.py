@@ -53,21 +53,21 @@ INJECTION_STRINGS = [
 ]
 
 
-def stage_url(student: Student | int) -> str:
+def stage_url(student: Student | int | str) -> str:
     """The Student's Stage endpoint."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/stage/"
 
 
-def assign_url(student: Student | int) -> str:
+def assign_url(student: Student | int | str) -> str:
     """The endpoint that assigns a Student their first counsellor."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/assign/"
 
 
-def transfer_url(student: Student | int) -> str:
+def transfer_url(student: Student | int | str) -> str:
     """The Student's Transfer endpoint."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/transfer/"
 
 
@@ -192,7 +192,7 @@ class TestSettingTheStageByHand:
         assert entry.kind == HistoryKind.STAGE_CHANGED
         assert (entry.before, entry.after, entry.detail) == ("lead", "counselling", "")
         assert entry.by_name == "Bikash Thapa"
-        page = abc.client.get(f"/api/students/{student.pk}/history/").json()
+        page = abc.client.get(f"/api/students/{student.public_id}/history/").json()
         assert page["results"][0]["kind"] == "stage_changed"
         assert page["results"][0]["detail"] == ""
 
@@ -486,7 +486,7 @@ class TestTheProfileSaysWhatTheViewerMayDo:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me, Stage.LOST, lost_reason="Moved away.")
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["lost_reason"] == "Moved away."
         assert (body["can_set_stage"], body["can_assign"], body["can_transfer"]) == (
@@ -501,7 +501,7 @@ class TestTheProfileSaysWhatTheViewerMayDo:
         student = make_student(abc)
         abc.log_in_as(Role.FRONT_DESK)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert (body["can_set_stage"], body["can_assign"], body["can_transfer"]) == (
             False,
@@ -516,7 +516,7 @@ class TestTheProfileSaysWhatTheViewerMayDo:
         abc.log_in_as(Role.COUNSELLOR)
 
         for student in (assigned, unassigned):
-            body = abc.client.get(f"/api/students/{student.pk}/").json()
+            body = abc.client.get(f"/api/students/{student.public_id}/").json()
             assert (body["can_set_stage"], body["can_assign"], body["can_transfer"]) == (
                 False,
                 False,
@@ -676,7 +676,9 @@ class TestTransfer:
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["assigned_counsellor"] == {"id": bikash.pk, "name": "Bikash Thapa"}
         assert response.json()["can_change"] is False
-        note = abc.client.put(f"/api/students/{student.pk}/note/", {"note": "x"}, format="json")
+        note = abc.client.put(
+            f"/api/students/{student.public_id}/note/", {"note": "x"}, format="json"
+        )
         assert note.status_code == status.HTTP_403_FORBIDDEN
         assert transfer(abc, student, nabin.pk).json() == NOT_YOUR_STUDENT
         log_in(abc, bikash)

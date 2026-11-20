@@ -15,5 +15,5 @@ urlpatterns: list[URLPattern] = [
     path("tasks/count/", TaskCountView.as_view(), name="task-count"),
     path("tasks/assignees/", TaskAssigneesView.as_view(), name="task-assignees"),
     path("tasks/<int:task_id>/", TaskView.as_view(), name="task"),
-    path("students/<int:student_id>/tasks/", StudentTasksView.as_view(), name="student-tasks"),
+    path("students/<uuid:student_id>/tasks/", StudentTasksView.as_view(), name="student-tasks"),
 ]

@@ -52,7 +52,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def letter_url(student: Student | int, visa: Visa | int) -> str:
+def letter_url(student: Student | int, visa: Visa | int | str) -> str:
     """Where one Visa's letter is uploaded."""
     return f"{visa_url(student, visa)}letter/"
 
@@ -63,7 +63,7 @@ def a_letter(content: bytes = PDF_BYTES, name: str = "visa-grant.pdf") -> Simple
 
 
 def upload(
-    office: ConsultancyContext, student: Student | int, visa: Visa | int, **fields: object
+    office: ConsultancyContext, student: Student | int, visa: Visa | int | str, **fields: object
 ) -> _MonkeyPatchedResponse:
     """POST a visa letter as a form: a PDF saying Granted unless `fields` say otherwise."""
     body: dict[str, object] = {"result": "granted", "file": a_letter(), **fields}
@@ -123,9 +123,9 @@ class TestUploadingWithTheResult:
         [file] = files_of(abc, document)
         assert answer["documents"] == [
             {
-                "id": document.pk,
+                "id": str(document.public_id),
                 "document_type": {"id": document.document_type_id, "name": "Visa letter"},
-                "files": [{"id": file.pk, "file_name": "visa-grant.pdf"}],
+                "files": [{"id": str(file.public_id), "file_name": "visa-grant.pdf"}],
                 "verification": "pending",
             }
         ]

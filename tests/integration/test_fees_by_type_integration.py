@@ -149,7 +149,7 @@ class TestTotals:
 
         assert home["totals"]["still_to_collect"] == totals["remaining"] == 30000
         assert home["totals"]["owing"] == totals["owing"] == 1
-        assert [row["student"]["id"] for row in home["results"]] == [found["aarav"].pk]
+        assert [row["student"]["id"] for row in home["results"]] == [str(found["aarav"].public_id)]
 
     def test_the_student_fees_list_still_shows_lost_students_unless_asked(
         self, abc: ConsultancyContext
@@ -204,14 +204,22 @@ class TestFeeTypeStudents:
             "page_size": 25,
             "results": [
                 {
-                    "student": {"id": found["aarav"].pk, "name": "Aarav Sharma", "stage": "lead"},
+                    "student": {
+                        "id": str(found["aarav"].public_id),
+                        "name": "Aarav Sharma",
+                        "stage": "lead",
+                    },
                     "lost_reason": "",
                     "fee": 40000,
                     "paid": 10000,
                     "still_to_pay": 30000,
                 },
                 {
-                    "student": {"id": found["sita"].pk, "name": "Sita Karki", "stage": "lead"},
+                    "student": {
+                        "id": str(found["sita"].public_id),
+                        "name": "Sita Karki",
+                        "stage": "lead",
+                    },
                     "lost_reason": "",
                     "fee": 40000,
                     "paid": 41000,
@@ -230,7 +238,11 @@ class TestFeeTypeStudents:
         assert response.json()["count"] == 1
         assert response.json()["results"] == [
             {
-                "student": {"id": found["hari"].pk, "name": "Hari Lama", "stage": "lost"},
+                "student": {
+                    "id": str(found["hari"].public_id),
+                    "name": "Hari Lama",
+                    "stage": "lost",
+                },
                 "lost_reason": "Went with another office",
                 "fee": 40000,
                 "paid": 15000,
@@ -245,7 +257,7 @@ class TestFeeTypeStudents:
         rows = abc.client.get(type_url(abc, "IELTS class")).json()["results"]
 
         assert [(r["student"]["id"], r["fee"], r["paid"]) for r in rows] == [
-            (found["sita"].pk, 0, 5000)
+            (str(found["sita"].public_id), 0, 5000)
         ]
 
     def test_names_order_the_same_still_to_pay(self, abc: ConsultancyContext) -> None:

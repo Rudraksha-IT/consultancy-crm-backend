@@ -88,7 +88,7 @@ def stored(office: ConsultancyContext) -> list[tuple[int, int, str, int, str]]:
 def body_for(student: Student, university: University, **fields: object) -> dict[str, object]:
     """A good body for a new Commission."""
     return {
-        "student": student.pk,
+        "student": str(student.public_id),
         "university": university.pk,
         "intake": "2027-02",
         "amount": 290000,
@@ -147,7 +147,7 @@ class TestList:
             "results": [
                 {
                     "id": received.pk,
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
                     "university": {"id": federation.pk, "name": "Federation University"},
                     "intake": "2027-01",
                     "amount": 340000,
@@ -156,7 +156,7 @@ class TestList:
                 },
                 {
                     "id": claimed.pk,
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
                     "university": {"id": deakin.pk, "name": "Deakin University"},
                     "intake": "2027-02",
                     "amount": 290000,
@@ -165,7 +165,7 @@ class TestList:
                 },
                 {
                     "id": waiting.pk,
-                    "student": {"id": student.pk, "name": "Aarav Sharma"},
+                    "student": {"id": str(student.public_id), "name": "Aarav Sharma"},
                     "university": {"id": federation.pk, "name": "Federation University"},
                     "intake": "2027-02",
                     "amount": 260000,
@@ -265,7 +265,7 @@ class TestAddCommission:
             commission = Commission.objects.get()
         assert response.json() == {
             "id": commission.pk,
-            "student": {"id": student.pk, "name": "Aarav Sharma"},
+            "student": {"id": str(student.public_id), "name": "Aarav Sharma"},
             "university": {"id": university.pk, "name": "Federation University"},
             "intake": "2027-02",
             "amount": 290000,

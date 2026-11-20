@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from rest_framework import serializers
 
@@ -10,7 +11,7 @@ from communication.attachments import MAX_ATTACHMENTS, AttachmentKind, Chosen
 from communication.models import SUBJECT_MAX_LENGTH
 from communication.ready_made import Kind
 from communication.types import EmailText
-from config.serializers import StrictCharField, StrictSerializer
+from config.serializers import StrictCharField, StrictSerializer, parse_record_id
 from staff.serializers import CONTROL_CHARACTERS, CONTROL_CHARACTERS_MESSAGE
 from students.serializers import (
     NOTE_CHARACTERS_MESSAGE,
@@ -87,10 +88,13 @@ def _chosen(item: object) -> Chosen | None:
     """One file named `{"kind": …, "id": …}` and nothing else, or None when it isn't."""
     if not isinstance(item, dict) or set(item) != _ATTACHMENT_KEYS:
         return None
-    kind, pk = item["kind"], item["id"]
-    if not isinstance(kind, str) or kind not in _ATTACHMENT_KINDS or not _is_id(pk):
+    kind, given = item["kind"], item["id"]
+    if not isinstance(kind, str) or kind not in _ATTACHMENT_KINDS:
         return None
-    return Chosen(AttachmentKind(kind), pk)
+    if kind == AttachmentKind.DOCUMENT_FILE:  # by UUID (ADR 0027); the rest until ticket 18
+        public_id = parse_record_id(given)
+        return None if public_id is None else Chosen(AttachmentKind.DOCUMENT_FILE, public_id)
+    return Chosen(AttachmentKind(kind), given) if _is_id(given) else None
 
 
 class AttachmentsField(serializers.Field[list[Chosen], list[Chosen], list[Chosen], Any]):
@@ -142,8 +146,8 @@ class NewEmailSerializer(StrictSerializer[None]):
         return chosen
 
 
-class StudentIdsField(serializers.Field[list[int], list[int], list[int], Any]):
-    """The ids of the Students chosen: whole numbers, each once, in the order given.
+class StudentIdsField(serializers.Field[list[UUID], list[str], list[str], Any]):
+    """The Students chosen, by UUID (ADR 0027): each once, in the order given.
 
     Whether they exist, and how many may be chosen, is the view's to check.
     """
@@ -157,20 +161,18 @@ class StudentIdsField(serializers.Field[list[int], list[int], list[int], Any]):
             }
         )
 
-    def to_internal_value(self, data: object) -> list[int]:
-        """Return the ids, each once; anything but a list of ids is refused."""
+    def to_internal_value(self, data: object) -> list[UUID]:
+        """Return the UUIDs, each once; anything but a list of them is refused."""
         if not isinstance(data, list):
             self.fail("invalid")
-        for value in data:
-            if isinstance(value, bool) or not isinstance(value, int):
-                self.fail("invalid")
-            if not 1 <= value <= LARGEST_ID:
-                self.fail("invalid")
-        return list(dict.fromkeys(int(value) for value in data))
+        chosen = [parse_record_id(value) for value in data]
+        if None in chosen:
+            self.fail("invalid")
+        return list(dict.fromkeys(one for one in chosen if one is not None))
 
-    def to_representation(self, value: list[int]) -> list[int]:
-        """The ids as they are."""
-        return value
+    def to_representation(self, value: list[UUID]) -> list[str]:
+        """The UUIDs as text."""
+        return [str(one) for one in value]
 
 
 class BulkEmailSerializer(NewEmailSerializer):
@@ -178,9 +180,9 @@ class BulkEmailSerializer(NewEmailSerializer):
 
     students = StudentIdsField()
 
-    def student_ids(self) -> list[int]:
-        """The ids chosen, each once."""
-        ids: list[int] = self.validated_data["students"]
+    def student_ids(self) -> list[UUID]:
+        """The Students chosen, each once."""
+        ids: list[UUID] = self.validated_data["students"]
         return ids
 
 

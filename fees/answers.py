@@ -15,7 +15,7 @@ from fees.services import FeeTypeStudent, OwingStudent
 def fee_answer(fee: Fee) -> dict[str, object]:
     """One Fee: its Fee Type and note, how much, and who added it when."""
     return {
-        "id": fee.pk,
+        "id": fee.public_id,
         "fee_type": fee_type_ref(fee.fee_type),
         "note": fee.note,
         "amount": fee.amount,

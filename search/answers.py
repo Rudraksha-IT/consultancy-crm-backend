@@ -12,7 +12,7 @@ def student_result(student: Student) -> dict[str, object]:
     counsellor: Staff | None = student.assigned_counsellor
     return {
         "kind": "student",
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "phone": student.phone,
         "stage": student.stage,
@@ -26,7 +26,7 @@ def class_student_result(student: Student) -> dict[str, object]:
     """A Student for their Teacher: only their name and the class they're in (spec 22)."""
     return {
         "kind": "class_student",
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "batch": {
             "id": getattr(student, "class_id", None),

@@ -25,9 +25,9 @@ from documents.views import (
     TakeOutOfBinView,
 )
 
-ONE_STUDENT = "students/<int:student_id>/"
-ONE_DOCUMENT = f"{ONE_STUDENT}documents/<int:document_id>/"
-ONE_FILE = f"{ONE_DOCUMENT}files/<int:file_id>/"
+ONE_STUDENT = "students/<uuid:student_id>/"
+ONE_DOCUMENT = f"{ONE_STUDENT}documents/<uuid:document_id>/"
+ONE_FILE = f"{ONE_DOCUMENT}files/<uuid:file_id>/"
 
 urlpatterns: list[URLPattern] = [
     path(
@@ -58,17 +58,17 @@ urlpatterns: list[URLPattern] = [
     ),
     path(f"{ONE_STUDENT}documents/", StudentDocumentsView.as_view(), name="student-documents"),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/files/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/files/",
         DocumentFilesView.as_view(),
         name="student-document-files",
     ),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/files/<int:file_id>/link/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/files/<uuid:file_id>/link/",
         DocumentLinkView.as_view(),
         name="student-document-file-link",
     ),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/verification/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/verification/",
         DocumentVerificationView.as_view(),
         name="student-document-verification",
     ),
@@ -94,7 +94,7 @@ urlpatterns: list[URLPattern] = [
     path(f"{ONE_FILE}restore/", RestoreFromBinView.as_view(), name="student-document-file-restore"),
     path("documents/bin/", BinView.as_view(), name="documents-bin"),
     path(
-        "documents/bin/files/<int:file_id>/link/", BinFileLinkView.as_view(), name="bin-file-link"
+        "documents/bin/files/<uuid:file_id>/link/", BinFileLinkView.as_view(), name="bin-file-link"
     ),
     path("documents/types/", PickableTypesView.as_view(), name="documents-types"),
     path(

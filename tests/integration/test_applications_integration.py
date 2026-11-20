@@ -53,16 +53,16 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def applications_url(student: Student | int) -> str:
+def applications_url(student: Student | int | str) -> str:
     """Where a Student's Applications are added."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/applications/"
 
 
-def application_url(student: Student | int, application: Application | int) -> str:
+def application_url(student: Student | int | str, application: Application | int | str) -> str:
     """One of a Student's Applications."""
-    pk = student if isinstance(student, int) else student.pk
-    app_pk = application if isinstance(application, int) else application.pk
+    pk = student if isinstance(student, int | str) else student.public_id
+    app_pk = application if isinstance(application, int | str) else application.public_id
     return f"/api/students/{pk}/applications/{app_pk}/"
 
 
@@ -101,14 +101,17 @@ def make_application(
 
 
 def add(
-    office: ConsultancyContext, student: Student | int, **body: object
+    office: ConsultancyContext, student: Student | int | str, **body: object
 ) -> _MonkeyPatchedResponse:
     """POST a new Application."""
     return office.client.post(applications_url(student), body, format="json")
 
 
 def change(
-    office: ConsultancyContext, student: Student, application: Application | int, **body: object
+    office: ConsultancyContext,
+    student: Student,
+    application: Application | int | str,
+    **body: object,
 ) -> _MonkeyPatchedResponse:
     """PATCH an Application's Status."""
     return office.client.patch(application_url(student, application), body, format="json")
@@ -147,11 +150,11 @@ class TestAddingAnApplication:
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
-        assert body["id"] == student.pk
+        assert body["id"] == str(student.public_id)
         assert body["stage"] == "applying"
         assert body["applications"] == [
             {
-                "id": stored_applications(abc, student)[0].pk,
+                "id": str(stored_applications(abc, student)[0].public_id),
                 "university": {"id": course.university_id, "name": "Deakin University"},
                 "course": {"id": course.pk, "name": "Master of IT", "level": "master"},
                 "intake": "2027-07",
@@ -234,7 +237,7 @@ class TestAddingAnApplication:
         me, student = counselled_student(abc)
         other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
         abc.client.post(
-            f"/api/students/{student.pk}/transfer/", {"counsellor": other.pk}, format="json"
+            f"/api/students/{student.public_id}/transfer/", {"counsellor": other.pk}, format="json"
         )
 
         response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
@@ -617,7 +620,7 @@ class TestTheStageFollows:
         _, student = counselled_student(abc)
         add(abc, student, course=make_course(abc).pk, intake="2027-03")
 
-        page = abc.client.get(f"/api/students/{student.pk}/history/").json()
+        page = abc.client.get(f"/api/students/{student.public_id}/history/").json()
 
         assert page["results"][0]["kind"] == "stage_changed"
         assert page["results"][0]["after"] == "applying"
@@ -637,7 +640,7 @@ class TestTheStageFollows:
         [entry] = stage_entries(abc, student)
         assert (entry.before, entry.after) == ("applying", "offer")
         assert entry.detail == "Automatic: offer letter from Deakin University added."
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
         assert body["applications"][0]["offer_kind"] == "unconditional"
 
     def test_a_second_offer_letter_on_the_same_application_is_refused(
@@ -733,7 +736,7 @@ class TestTheProfile:
         for application_status in statuses:
             make_application(abc, student, make_course(abc), application_status)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
         [home_row] = abc.client.get("/api/home/progress/", {"counsellor": "me"}).json()["results"]
 
         percent, next_step = expected
@@ -746,7 +749,7 @@ class TestTheProfile:
         make_application(abc, student, make_course(abc), ApplicationStatus.REJECTED)
         make_application(abc, student, make_course(abc, "RMIT University"))
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert [a["status"] for a in body["applications"]] == ["rejected", "applied"]
         assert body["can_change_applications"] is True
@@ -760,7 +763,7 @@ class TestTheProfile:
         make_application(abc, student, make_course(abc))
         abc.log_in_as(role)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert len(body["applications"]) == 1
         assert body["can_change_applications"] is False
@@ -775,7 +778,7 @@ class TestTheProfile:
             Course.objects.filter(pk=course.pk).update(archived=True)
             University.objects.filter(pk=course.university_id).update(archived=True)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["applications"][0]["course"]["name"] == "Master of IT"
         assert body["applications"][0]["university"]["name"] == "Deakin University"
@@ -790,7 +793,7 @@ class TestTheProfile:
         with tenant_context(abc.consultancy):
             change_course(course, CourseChange(intakes=("2027-07",)), by=admin)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["applications"][0]["intake"] == "2027-03"
 

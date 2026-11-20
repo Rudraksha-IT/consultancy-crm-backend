@@ -349,7 +349,7 @@ class TestChanging:
 
         change(abc, fee_type_id(abc, "Visa fee"), {"name": "Visa processing"})
 
-        receipt = abc.client.get(f"/api/payments/{payment.pk}/").json()
+        receipt = abc.client.get(f"/api/payments/{payment.public_id}/").json()
         assert receipt["fee_type"]["name"] == "Visa processing"
 
     def test_changing_only_the_capitals_of_its_own_name(self, abc: ConsultancyContext) -> None:
@@ -619,12 +619,14 @@ class TestPickingAFeeType:
     ) -> _MonkeyPatchedResponse:
         """Record `body` (as one Payment's fields) as a visit with that one line."""
         visit = {"paid_on": body.pop("paid_on"), "method": body.pop("method"), "lines": [body]}
-        return office.client.post(f"/api/students/{student.pk}/payments/", visit, format="json")
+        return office.client.post(
+            f"/api/students/{student.public_id}/payments/", visit, format="json"
+        )
 
     def add_fee(
         self, office: ConsultancyContext, student: Student, body: object
     ) -> _MonkeyPatchedResponse:
-        return office.client.post(f"/api/students/{student.pk}/fees/", body, format="json")
+        return office.client.post(f"/api/students/{student.public_id}/fees/", body, format="json")
 
     def test_a_payment_names_its_fee_type_and_note(
         self, abc: ConsultancyContext, student: Student

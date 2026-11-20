@@ -8,7 +8,7 @@ from history.models import HistoryEntry
 def history_entry_answer(entry: HistoryEntry) -> dict[str, object]:
     """One entry: what changed, when, who did it, and the value before and after."""
     return {
-        "id": entry.pk,
+        "id": entry.public_id,
         "kind": entry.kind,
         "at": entry.at.isoformat(),
         "by": {"name": entry.by_name, "is_platform_admin": entry.by_platform_admin},

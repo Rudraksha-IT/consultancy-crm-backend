@@ -24,7 +24,7 @@ urlpatterns: list[URLPattern] = [
     path(f"{ONE}decline/", DeclineView.as_view(), name="transfer-request-decline"),
     path(f"{ONE}cancel/", CancelView.as_view(), name="transfer-request-cancel"),
     path(
-        "students/<int:student_id>/transfer-requests/",
+        "students/<uuid:student_id>/transfer-requests/",
         StudentTransferRequestView.as_view(),
         name="student-transfer-requests",
     ),

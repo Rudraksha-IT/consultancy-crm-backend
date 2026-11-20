@@ -17,7 +17,7 @@ from students.profile_views import (
 )
 from students.views import StudentListView
 
-ONE = "students/<int:student_id>/"
+ONE = "students/<uuid:student_id>/"
 
 urlpatterns: list[URLPattern] = [
     path("students/", StudentListView.as_view(), name="students"),
@@ -34,19 +34,19 @@ urlpatterns: list[URLPattern] = [
         name="student-academic-records",
     ),
     path(
-        f"{ONE}academic-records/<int:entry_id>/",
+        f"{ONE}academic-records/<uuid:entry_id>/",
         AcademicRecordView.as_view(),
         name="student-academic-record",
     ),
     path(f"{ONE}test-scores/", TestScoreListView.as_view(), name="student-test-scores"),
-    path(f"{ONE}test-scores/<int:entry_id>/", TestScoreView.as_view(), name="student-test-score"),
+    path(f"{ONE}test-scores/<uuid:entry_id>/", TestScoreView.as_view(), name="student-test-score"),
     path(
         f"{ONE}work-experience/",
         WorkExperienceListView.as_view(),
         name="student-work-experience",
     ),
     path(
-        f"{ONE}work-experience/<int:entry_id>/",
+        f"{ONE}work-experience/<uuid:entry_id>/",
         WorkExperienceView.as_view(),
         name="student-job",
     ),

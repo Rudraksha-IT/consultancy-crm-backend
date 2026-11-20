@@ -44,15 +44,15 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def payments_url(student: Student | int) -> str:
+def payments_url(student: Student | int | str) -> str:
     """Where a Student's Payments are recorded."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/payments/"
 
 
-def payment_url(payment: Payment | int) -> str:
+def payment_url(payment: Payment | int | str) -> str:
     """One Payment's receipt."""
-    pk = payment if isinstance(payment, int) else payment.pk
+    pk = payment if isinstance(payment, int | str) else payment.public_id
     return f"/api/payments/{pk}/"
 
 
@@ -89,7 +89,7 @@ def line_error(error: dict[str, list[str]], at: int = 0, of: int = 1) -> dict[st
 
 
 def pay(
-    office: ConsultancyContext, student: Student | int, **changes: object
+    office: ConsultancyContext, student: Student | int | str, **changes: object
 ) -> _MonkeyPatchedResponse:
     """POST a Payment for the Student."""
     return office.client.post(payments_url(student), good_body(office, **changes), format="json")
@@ -147,9 +147,13 @@ class TestRecording:
             "name": "Application fee",
         }
         assert response.json() == {
-            "id": payment.pk,
+            "id": str(payment.public_id),
             "receipt_number": f"{payment.pk:06d}",
-            "student": {"id": student.pk, "name": "Aarav Sharma", "phone": "9841234567"},
+            "student": {
+                "id": str(student.public_id),
+                "name": "Aarav Sharma",
+                "phone": "9841234567",
+            },
             "amount": 25000,
             "paid_on": today(),
             "method": "esewa",
@@ -159,7 +163,7 @@ class TestRecording:
             "recorded_at": payment.recorded_at.isoformat(),
             "lines": [
                 {
-                    "id": payment.pk,
+                    "id": str(payment.public_id),
                     "fee_type": application_fee,
                     "note": "",
                     "amount": 25000,
@@ -282,7 +286,7 @@ class TestHistory:
         student = make_student(abc)
         pay(abc, student)
 
-        [entry] = abc.client.get(f"/api/students/{student.pk}/history/").json()["results"]
+        [entry] = abc.client.get(f"/api/students/{student.public_id}/history/").json()["results"]
 
         assert entry["kind"] == "payment_recorded"
         assert entry["after"] == "NPR 25,000, Application fee, eSewa"
@@ -467,14 +471,18 @@ class TestSeveralLines:
             (today(), "fonepay_qr", desk.pk)
         }
         body = response.json()
-        assert (body["id"], body["receipt_number"], body["total"]) == (visa.pk, number, 50500)
+        assert (body["id"], body["receipt_number"], body["total"]) == (
+            str(visa.public_id),
+            number,
+            50500,
+        )
         assert [
             (line["id"], line["fee_type"]["name"], line["note"], line["amount"])
             for line in body["lines"]
         ] == [
-            (visa.pk, "Visa fee", "", 40000),
-            (ielts.pk, "IELTS class", "first half", 10000),
-            (courier.pk, "Other", "Courier", 500),
+            (str(visa.public_id), "Visa fee", "", 40000),
+            (str(ielts.public_id), "IELTS class", "first half", 10000),
+            (str(courier.public_id), "Other", "Courier", 500),
         ]
 
     @pytest.mark.parametrize("role", STUDENT_ROLES)
@@ -656,10 +664,10 @@ class TestChangesAfterwards:
         body: dict[str, object] = split_visit(abc, self.student).json()
         return body
 
-    def line_ids(self, made: dict[str, object]) -> list[int]:
+    def line_ids(self, made: dict[str, object]) -> list[str]:
         lines = made["lines"]
         assert isinstance(lines, list)
-        return [int(line["id"]) for line in lines]
+        return [str(line["id"]) for line in lines]
 
     def test_an_edited_line_keeps_the_number_and_the_receipt_shows_it_now(
         self, abc: ConsultancyContext, made: dict[str, object]
@@ -844,7 +852,7 @@ class TestNoListsOrTotals:
         make_payment(abc, student, desk, amount=987654)
         abc.log_in_as(role)
 
-        body = abc.client.get(f"/api/students/{student.pk}/")
+        body = abc.client.get(f"/api/students/{student.public_id}/")
 
         assert "987654" not in body.content.decode()
         assert body.json()["can_record_payment"] is True

@@ -65,15 +65,15 @@ CHOOSE_A_KIND = {"kind": ["Choose one of the ready-made emails."]}
 SIGN_OFF = "Kind regards,\nAsha Admin\nABC Education"
 
 
-def menu_url(student: Student | int) -> str:
+def menu_url(student: Student | int | str) -> str:
     """The ready-made emails for one Student."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/emails/ready-made/"
 
 
-def draft_url(student: Student | int) -> str:
+def draft_url(student: Student | int | str) -> str:
     """One ready-made email's draft for one Student."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/emails/draft/"
 
 
@@ -85,7 +85,10 @@ def menu(office: ConsultancyContext, student: Student) -> dict[str, dict[str, An
 
 
 def draft(
-    office: ConsultancyContext, student: Student | int, kind: str, record: int | None = None
+    office: ConsultancyContext,
+    student: Student | int | str,
+    kind: str,
+    record: int | str | None = None,
 ) -> _MonkeyPatchedResponse:
     """GET a draft of `kind` (about `record`) for one Student."""
     query: dict[str, str | int] = {"kind": kind}
@@ -95,7 +98,7 @@ def draft(
 
 
 def drafted(
-    office: ConsultancyContext, student: Student, kind: str, record: int | None = None
+    office: ConsultancyContext, student: Student, kind: str, record: int | str | None = None
 ) -> dict[str, str]:
     """The draft's subject line and message, checking it answered 200."""
     response = draft(office, student, kind, record)
@@ -105,7 +108,7 @@ def drafted(
 
 
 def bulk_draft(
-    office: ConsultancyContext, kind: str, record: int | None = None
+    office: ConsultancyContext, kind: str, record: int | str | None = None
 ) -> _MonkeyPatchedResponse:
     """GET a draft of `kind` for an email to many Students."""
     query: dict[str, str | int] = {"kind": kind}
@@ -307,27 +310,30 @@ class TestTheMenu:
 
         assert kinds["payment_received"]["records"] == [
             {
-                "id": newer.pk,
+                "id": str(newer.public_id),
                 "label": "Other (Courier), NPR 25,000, 2 Nov 2026",
             },
             {
-                "id": older.pk,
+                "id": str(older.public_id),
                 "label": "Visa fee, NPR 10,000, 1 Oct 2026",
             },
         ]
         assert kinds["offer_received"]["records"] == [
             {
-                "id": waiting.application_id,
+                "id": str(waiting.application.public_id),
                 "label": "Deakin University, Course applied, Mar 2027 (Conditional)",
             },
             {
-                "id": granted.application_id,
+                "id": str(granted.application.public_id),
                 "label": "Deakin University, Course granted, Mar 2027 (Conditional)",
             },
-            {"id": offer.pk, "label": "Deakin University, Master of IT, Mar 2027 (Unconditional)"},
+            {
+                "id": str(offer.public_id),
+                "label": "Deakin University, Master of IT, Mar 2027 (Unconditional)",
+            },
         ]
         assert kinds["visa_result"]["records"] == [
-            {"id": granted.pk, "label": "Australia visa: Granted"}
+            {"id": str(granted.public_id), "label": "Australia visa: Granted"}
         ]
         assert kinds["class_details"]["records"] == [
             {"id": batch.pk, "label": "IELTS Morning, 7:00-8:30 AM"}
@@ -388,7 +394,9 @@ class TestTheMenu:
 
         kinds = menu(abc, sita)
 
-        assert [record["id"] for record in kinds["payment_received"]["records"]] == [mine.pk]
+        assert [record["id"] for record in kinds["payment_received"]["records"]] == [
+            str(mine.public_id)
+        ]
 
     def test_with_no_payment_of_their_own_others_are_told_so(
         self, abc: ConsultancyContext, admin: Staff, sita: Student
@@ -459,7 +467,7 @@ class TestDrafts:
             abc, sita, admin, note="first half", paid_on=date(2026, 11, 2), method="esewa"
         )
 
-        answer = drafted(abc, sita, "payment_received", payment.pk)
+        answer = drafted(abc, sita, "payment_received", str(payment.public_id))
 
         assert answer["subject"] == "Payment received"
         assert (
@@ -488,7 +496,7 @@ class TestDrafts:
     ) -> None:
         offer = make_offer(abc, sita)
 
-        answer = drafted(abc, sita, "offer_received", offer.pk)
+        answer = drafted(abc, sita, "offer_received", str(offer.public_id))
 
         assert answer["subject"] == "Good news: an offer from Deakin University"
         assert "has made you a conditional offer" in answer["body"]
@@ -503,8 +511,8 @@ class TestDrafts:
         granted = make_visa(abc, sita, VisaStatus.GRANTED)
         refused = make_visa(abc, sita, VisaStatus.REFUSED)
 
-        good = drafted(abc, sita, "visa_result", granted.pk)
-        bad = drafted(abc, sita, "visa_result", refused.pk)
+        good = drafted(abc, sita, "visa_result", str(granted.public_id))
+        bad = drafted(abc, sita, "visa_result", str(refused.public_id))
 
         assert good["subject"] == "Your visa has been granted"
         assert "Your visa for Australia has been granted." in good["body"]
@@ -577,7 +585,7 @@ class TestDrafts:
         student = make_student(abc, name=name, email="x@example.com")
         payment = make_payment(abc, student, admin, fee_type="Other", note=INJECTION_STRINGS[1])
 
-        answer = drafted(abc, student, "payment_received", payment.pk)
+        answer = drafted(abc, student, "payment_received", str(payment.public_id))
 
         assert answer["body"].startswith(f"Dear {name.split(' ')[0]},")
         assert f"For: Other ({INJECTION_STRINGS[1]})" in answer["body"]
@@ -648,10 +656,10 @@ class TestRefusedDrafts:
         self, abc: ConsultancyContext, admin: Staff, sita: Student, teacher: Staff
     ) -> None:
         ram = make_student(abc, name="Ram Thapa", email="ram@example.com")
-        theirs = {
-            "payment_received": make_payment(abc, ram, admin).pk,
-            "offer_received": make_offer(abc, ram).pk,
-            "visa_result": make_visa(abc, ram, VisaStatus.GRANTED).pk,
+        theirs: dict[str, int | str] = {
+            "payment_received": str(make_payment(abc, ram, admin).public_id),
+            "offer_received": str(make_offer(abc, ram).public_id),
+            "visa_result": str(make_visa(abc, ram, VisaStatus.GRANTED).public_id),
             "class_details": make_batch(abc, teacher, (ram,)).pk,
         }
 
@@ -666,10 +674,12 @@ class TestRefusedDrafts:
         applied = make_offer(abc, sita, status=ApplicationStatus.APPLIED)
         waiting = make_visa(abc, sita, VisaStatus.APPLIED)
 
-        assert draft(abc, sita, "offer_received", applied.pk).json() == {
+        assert draft(abc, sita, "offer_received", str(applied.public_id)).json() == {
             "record": ["Choose an Offer Letter."]
         }
-        assert draft(abc, sita, "visa_result", waiting.pk).json() == {"record": ["Choose a Visa."]}
+        assert draft(abc, sita, "visa_result", str(waiting.public_id)).json() == {
+            "record": ["Choose a Visa."]
+        }
 
     def test_someone_elses_old_payment_is_refused_to_front_desk(
         self, abc: ConsultancyContext, admin: Staff, sita: Student
@@ -677,7 +687,7 @@ class TestRefusedDrafts:
         payment = make_payment(abc, sita, admin)
         abc.log_in_as(Role.FRONT_DESK)
 
-        response = draft(abc, sita, "payment_received", payment.pk)
+        response = draft(abc, sita, "payment_received", str(payment.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"record": ["Choose a Payment."]}
@@ -911,7 +921,7 @@ class TestEditingAndSending:
         self, abc: ConsultancyContext, admin: Staff, sita: Student
     ) -> None:
         offer = make_offer(abc, sita)
-        answer = drafted(abc, sita, "offer_received", offer.pk)
+        answer = drafted(abc, sita, "offer_received", str(offer.public_id))
         edited = answer["body"].replace("Please get in touch", "Come on Sunday at 11")
 
         response = send(abc, sita, {"subject": answer["subject"] + "!", "body": edited})
@@ -927,7 +937,7 @@ class TestEditingAndSending:
         self, abc: ConsultancyContext, admin: Staff, sita: Student
     ) -> None:
         offer = make_offer(abc, sita, university=INJECTION_STRINGS[0])
-        answer = drafted(abc, sita, "offer_received", offer.pk)
+        answer = drafted(abc, sita, "offer_received", str(offer.public_id))
 
         send(abc, sita, {"subject": "Offer", "body": answer["body"]})
 
@@ -945,7 +955,11 @@ class TestEditingAndSending:
 
         response = abc.client.post(
             "/api/messages/bulk/",
-            {"subject": answer["subject"], "body": answer["body"], "students": [sita.pk, ram.pk]},
+            {
+                "subject": answer["subject"],
+                "body": answer["body"],
+                "students": [str(sita.public_id), str(ram.public_id)],
+            },
             format="json",
         )
 

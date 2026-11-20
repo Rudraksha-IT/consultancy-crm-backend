@@ -184,7 +184,7 @@ class EmployeeAssignedStudentsView(_AdminView):
         staff = get_object_or_404(Staff, pk=staff_id)
         return Response(
             [
-                {"id": student.pk, "name": student.name, "stage": student.stage}
+                {"id": student.public_id, "name": student.name, "stage": student.stage}
                 for student in students_still_assigned_to(staff)
             ]
         )

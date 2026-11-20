@@ -46,15 +46,15 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def fees_url(student: Student | int) -> str:
+def fees_url(student: Student | int | str) -> str:
     """One Student's Fees."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/fees/"
 
 
-def fee_url(fee: Fee | int) -> str:
+def fee_url(fee: Fee | int | str) -> str:
     """One Fee."""
-    pk = fee if isinstance(fee, int) else fee.pk
+    pk = fee if isinstance(fee, int | str) else fee.public_id
     return f"/api/fees/{pk}/"
 
 
@@ -133,7 +133,7 @@ class TestStudentFees:
         assert response.json() == {
             "fees": [
                 {
-                    "id": first.pk,
+                    "id": str(first.public_id),
                     "fee_type": {"id": first.fee_type_id, "name": "Application fee"},
                     "note": "",
                     "amount": 25000,
@@ -141,7 +141,7 @@ class TestStudentFees:
                     "added_at": first.added_at.isoformat(),
                 },
                 {
-                    "id": second.pk,
+                    "id": str(second.public_id),
                     "fee_type": {"id": second.fee_type_id, "name": "Visa fee"},
                     "note": "",
                     "amount": 40000,
@@ -617,13 +617,13 @@ class TestStudentFeesList:
             },
             "results": [
                 {
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
                     "fees": 80000,
                     "paid": 0,
                     "still_to_pay": 80000,
                 },
                 {
-                    "student": {"id": aarav.pk, "name": "Aarav Sharma"},
+                    "student": {"id": str(aarav.public_id), "name": "Aarav Sharma"},
                     "fees": 65000,
                     "paid": 15000,
                     "still_to_pay": 50000,
@@ -717,10 +717,14 @@ class TestProfileFlag:
     def test_the_profile_says_who_may_change_fees(self, abc: ConsultancyContext) -> None:
         counsellor, student = counsellor_and_student(abc)
         log_in(abc, counsellor)
-        assert abc.client.get(f"/api/students/{student.pk}/").json()["can_change_fees"] is True
+        assert (
+            abc.client.get(f"/api/students/{student.public_id}/").json()["can_change_fees"] is True
+        )
 
         abc.log_in_as(Role.FRONT_DESK)
-        assert abc.client.get(f"/api/students/{student.pk}/").json()["can_change_fees"] is False
+        assert (
+            abc.client.get(f"/api/students/{student.public_id}/").json()["can_change_fees"] is False
+        )
 
 
 class TestAccountsModuleOff:

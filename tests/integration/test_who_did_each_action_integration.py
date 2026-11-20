@@ -81,7 +81,7 @@ def counsellor_with_student(
 
 def activity(office: ConsultancyContext, student: Student) -> list[dict[str, Any]]:
     """The Student's History through the API, newest first, only the kinds this ticket adds."""
-    response = office.client.get(f"/api/students/{student.pk}/history/")
+    response = office.client.get(f"/api/students/{student.public_id}/history/")
     assert response.status_code == status.HTTP_200_OK, response.json()
     entries: list[dict[str, Any]] = response.json()["results"]
     return [entry for entry in entries if entry["kind"] in NEW_KINDS]

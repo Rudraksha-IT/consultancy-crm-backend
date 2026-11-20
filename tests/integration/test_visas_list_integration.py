@@ -114,9 +114,9 @@ class TestRows:
         [row] = listed(abc).json()["results"]
 
         assert row == {
-            "id": visa.pk,
+            "id": str(visa.public_id),
             "student": {
-                "id": student.pk,
+                "id": str(student.public_id),
                 "name": "Sita Karki",
                 "phone": "9841234567",
                 "email": "sita@gmail.test",

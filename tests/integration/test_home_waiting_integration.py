@@ -189,13 +189,13 @@ class TestVisaAppointments:
             "results": [
                 {
                     "visa_id": visa.pk,
-                    "student": {"id": soon.pk, "name": "Sita Gurung"},
+                    "student": {"id": str(soon.public_id), "name": "Sita Gurung"},
                     "kind": "interview",
                     "at": f"{day.isoformat()}T14:00",
                 },
                 {
                     "visa_id": edge.pk,
-                    "student": {"id": last_day.pk, "name": "Maya Tamang"},
+                    "student": {"id": str(last_day.public_id), "name": "Maya Tamang"},
                     "kind": "interview",
                     "at": f"{(today() + timedelta(days=6)).isoformat()}T09:00",
                 },

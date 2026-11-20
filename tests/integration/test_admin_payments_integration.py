@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -44,9 +45,9 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def payment_url(payment: Payment | int) -> str:
+def payment_url(payment: Payment | int | str) -> str:
     """One Payment."""
-    pk = payment if isinstance(payment, int) else payment.pk
+    pk = payment if isinstance(payment, int | str) else payment.public_id
     return f"/api/payments/{pk}/"
 
 
@@ -60,7 +61,7 @@ def listed(office: ConsultancyContext, **query: object) -> _MonkeyPatchedRespons
     return office.client.get(LIST_URL, {key: str(value) for key, value in query.items()})
 
 
-def ids(response: _MonkeyPatchedResponse) -> list[int]:
+def ids(response: _MonkeyPatchedResponse) -> list[str]:
     """The listed Payments' ids, in order."""
     return [row["id"] for row in response.json()["results"]]
 
@@ -133,11 +134,11 @@ class TestList:
             "page_size": 25,
             "total": 58000,
         }
-        assert ids(response) == [newer.pk, older.pk]
+        assert ids(response) == [str(newer.public_id), str(older.public_id)]
         assert body["results"][0] == {
-            "id": newer.pk,
+            "id": str(newer.public_id),
             "receipt_number": f"{newer.pk:06d}",
-            "student": {"id": sita.pk, "name": "Sita Karki", "phone": "9841000002"},
+            "student": {"id": str(sita.public_id), "name": "Sita Karki", "phone": "9841000002"},
             "amount": 40000,
             "paid_on": days_ago(1).isoformat(),
             "method": "esewa",
@@ -164,7 +165,7 @@ class TestList:
 
         response = listed(abc, **{"from": days_ago(7), "to": days_ago(3)})
 
-        assert ids(response) == [last.pk, first.pk]
+        assert ids(response) == [str(last.public_id), str(first.public_id)]
         assert response.json()["total"] == 36000
 
     def test_only_from_or_only_to(self, abc: ConsultancyContext) -> None:
@@ -172,8 +173,8 @@ class TestList:
         new = make_payment(abc, student, desk, paid_on=days_ago(1))
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, **{"from": days_ago(2)})) == [new.pk]
-        assert ids(listed(abc, to=days_ago(2))) == [old.pk]
+        assert ids(listed(abc, **{"from": days_ago(2)})) == [str(new.public_id)]
+        assert ids(listed(abc, to=days_ago(2))) == [str(old.public_id)]
 
     def test_by_student(self, abc: ConsultancyContext) -> None:
         desk, aarav, theirs = desk_payment(abc)
@@ -181,8 +182,11 @@ class TestList:
         make_payment(abc, sita, desk)
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, student=aarav.pk)) == [theirs.pk]
-        assert ids(listed(abc, student=999_999)) == []
+        assert ids(listed(abc, student=str(aarav.public_id))) == [str(theirs.public_id)]
+        assert ids(listed(abc, student=uuid.uuid4())) == []
+        refused = listed(abc, student=aarav.pk)
+        assert refused.status_code == status.HTTP_400_BAD_REQUEST
+        assert refused.json() == {"student": ["Not a valid id."]}
 
     @pytest.mark.parametrize("query", ["aarav", "SHARMA", "9841234567", "984-123"])
     def test_search_by_student_name_or_phone(self, abc: ConsultancyContext, query: str) -> None:
@@ -190,7 +194,7 @@ class TestList:
         make_payment(abc, make_student(abc, name="Sita Karki", phone="9800000000"), desk)
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, q=query)) == [theirs.pk]
+        assert ids(listed(abc, q=query)) == [str(theirs.public_id)]
 
     def test_a_search_of_only_dashes_looks_at_names(self, abc: ConsultancyContext) -> None:
         desk, _, _ = desk_payment(abc)
@@ -198,7 +202,7 @@ class TestList:
         theirs = make_payment(abc, hyphenated, desk)
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, q="-")) == [theirs.pk]
+        assert ids(listed(abc, q="-")) == [str(theirs.public_id)]
 
     def test_never_searches_by_receipt_number(self, abc: ConsultancyContext) -> None:
         desk, student, first = desk_payment(abc)
@@ -215,7 +219,7 @@ class TestList:
 
         response = listed(abc, fee_type=type_id(abc, "Visa fee"))
 
-        assert ids(response) == [visa.pk]
+        assert ids(response) == [str(visa.public_id)]
         assert response.json()["total"] == visa.amount
 
     def test_a_hidden_fee_type_still_filters(self, abc: ConsultancyContext) -> None:
@@ -224,7 +228,7 @@ class TestList:
             FeeType.objects.filter(name="PTE class").update(hidden=True)
         abc.log_in_as(Role.ADMIN)
 
-        assert ids(listed(abc, fee_type=type_id(abc, "PTE class"))) == [pte.pk]
+        assert ids(listed(abc, fee_type=type_id(abc, "PTE class"))) == [str(pte.public_id)]
 
     def test_an_unknown_fee_type_finds_nothing(self, abc: ConsultancyContext) -> None:
         desk_payment(abc)
@@ -250,9 +254,9 @@ class TestList:
         abc.log_in_as(Role.ADMIN)
         visa = type_id(abc, "Visa fee")
 
-        response = listed(abc, student=aarav.pk, fee_type=visa, **{"from": days_ago(5)})
+        response = listed(abc, student=str(aarav.public_id), fee_type=visa, **{"from": days_ago(5)})
 
-        assert ids(response) == [wanted.pk]
+        assert ids(response) == [str(wanted.public_id)]
 
     def test_pages_of_25(self, abc: ConsultancyContext) -> None:
         desk, student, _ = desk_payment(abc)
@@ -373,8 +377,12 @@ class TestEdit:
 
         assert response.status_code == status.HTTP_200_OK
         body = response.json()
-        assert body["id"] == payment.pk
-        assert body["student"] == {"id": student.pk, "name": "Aarav Sharma", "phone": "9841234567"}
+        assert body["id"] == str(payment.public_id)
+        assert body["student"] == {
+            "id": str(student.public_id),
+            "name": "Aarav Sharma",
+            "phone": "9841234567",
+        }
         assert (body["amount"], body["paid_on"], body["method"], body["fee_type"]["name"]) == (
             30000,
             days_ago(1).isoformat(),
@@ -447,7 +455,9 @@ class TestEdit:
         abc.log_in_as(Role.ADMIN)
         edit(abc, payment)
 
-        [entry, *_] = abc.client.get(f"/api/students/{student.pk}/history/").json()["results"]
+        [entry, *_] = abc.client.get(f"/api/students/{student.public_id}/history/").json()[
+            "results"
+        ]
 
         assert entry["kind"] == "payment_edited"
 
@@ -641,7 +651,7 @@ class TestDelete:
         abc.client.delete(payment_url(gone))
 
         response = listed(abc)
-        assert ids(response) == [kept.pk]
+        assert ids(response) == [str(kept.public_id)]
         assert response.json()["total"] == 7000
 
     def test_logs_carry_ids_only(self, abc: ConsultancyContext, json_logs: JsonLogs) -> None:
@@ -723,7 +733,7 @@ class TestAccountsModule:
         student = make_student(abc)
 
         made = abc.client.post(
-            f"/api/students/{student.pk}/payments/",
+            f"/api/students/{student.public_id}/payments/",
             {
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
@@ -741,7 +751,7 @@ class TestAccountsModule:
         switch_modules(abc.consultancy, set())
         switch_modules(abc.consultancy, {Module.ACCOUNTS})
 
-        assert ids(listed(abc)) == [payment.pk]
+        assert ids(listed(abc)) == [str(payment.public_id)]
 
 
 class TestFields:

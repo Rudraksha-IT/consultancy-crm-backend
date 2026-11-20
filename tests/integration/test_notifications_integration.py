@@ -99,7 +99,9 @@ class TestGivenATask:
         counsellor = named_staff(abc, "Bikash Thapa")
         student = make_student(abc, counsellor, name="Manisha Rai")
         log_in(abc, desk)
-        abc.client.post(TASKS_URL, good_body(counsellor, student=student.pk), format="json")
+        abc.client.post(
+            TASKS_URL, good_body(counsellor, student=str(student.public_id)), format="json"
+        )
         log_in(abc, counsellor)
 
         body = bell(abc)
@@ -122,7 +124,7 @@ class TestGivenATask:
                         "due_on": day(1).isoformat(),
                     },
                     "by": {"id": desk.pk, "name": "Ramesh KC"},
-                    "student": {"id": student.pk, "name": "Manisha Rai"},
+                    "student": {"id": str(student.public_id), "name": "Manisha Rai"},
                     "transfer_request": None,
                     "bin": None,
                     "work_from_home": None,
@@ -159,7 +161,9 @@ class TestGivenATask:
         admin = abc.log_in_as(Role.ADMIN)
         teacher = named_staff(abc, "Sunita Shrestha", Role.TEACHER)
         student = make_student(abc)
-        abc.client.post(TASKS_URL, good_body(teacher, student=student.pk), format="json")
+        abc.client.post(
+            TASKS_URL, good_body(teacher, student=str(student.public_id)), format="json"
+        )
         log_in(abc, teacher)
 
         [item] = results(abc)

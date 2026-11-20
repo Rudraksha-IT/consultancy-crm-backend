@@ -12,8 +12,8 @@ from students.models import Student
 def message_answer(message: Message) -> dict[str, object]:
     """One email (or a past SMS), sent or failed."""
     return {
-        "id": message.pk,
-        "student": {"id": message.student.pk, "name": message.student.name},
+        "id": message.public_id,
+        "student": {"id": message.student.public_id, "name": message.student.name},
         "channel": message.channel,
         "subject": message.subject,
         "body": message.body,
@@ -39,7 +39,8 @@ def choosable_answer(students: list[Student], count: int, limit: int) -> dict[st
     """The Students to pre-tick, how many could be chosen in all, and the most at once."""
     return {
         "students": [
-            {"id": s.pk, "name": s.name, "email": s.email, "stage": s.stage} for s in students
+            {"id": s.public_id, "name": s.name, "email": s.email, "stage": s.stage}
+            for s in students
         ],
         "count": count,
         "max": limit,

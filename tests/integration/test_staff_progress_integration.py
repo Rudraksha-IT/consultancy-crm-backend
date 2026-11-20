@@ -371,7 +371,7 @@ class TestDayByDayList:
             ("2026-11-02", "visit_logged", "Counselling session"),
         ]
         first = answer["days"][0]["entries"][0]
-        assert first["student"] == {"id": sita.pk, "name": "Sita Gurung"}
+        assert first["student"] == {"id": str(sita.public_id), "name": "Sita Gurung"}
         assert set(first) == {"kind", "at", "before", "after", "detail", "student"}
         assert answer["more"] is False
 

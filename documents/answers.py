@@ -62,10 +62,14 @@ def _link_answer(document: Document) -> dict[str, object] | None:
     """The Application or Visa the Document is for, with the University it is about."""
     if document.application is not None:
         university = document.application.course.university
-        return {"kind": "application", "id": document.application.pk, "university": university.name}
+        return {
+            "kind": "application",
+            "id": document.application.public_id,
+            "university": university.name,
+        }
     if document.visa is not None:
         university = document.visa.application.course.university
-        return {"kind": "visa", "id": document.visa.pk, "university": university.name}
+        return {"kind": "visa", "id": document.visa.public_id, "university": university.name}
     return None
 
 
@@ -76,7 +80,7 @@ def _uploader(name: str, staff_id: int | None) -> dict[str, object] | None:
 def file_answer(file: DocumentFile) -> dict[str, object]:
     """One file of a Document: its shown name, type and size, and who added it when."""
     return {
-        "id": file.pk,
+        "id": file.public_id,
         "file_name": file.file_name,
         "content_type": file.content_type,
         "size": file.size,
@@ -87,7 +91,7 @@ def file_answer(file: DocumentFile) -> dict[str, object]:
 
 def _binned_file_answer(file: DocumentFile) -> dict[str, object]:
     """A file in the Bin: only its name and why; it can't be opened from here (issue 79)."""
-    return {"id": file.pk, "file_name": file.file_name, "bin": bin_answer(file)}
+    return {"id": file.public_id, "file_name": file.file_name, "bin": bin_answer(file)}
 
 
 def document_answer(document: Document) -> dict[str, object]:
@@ -98,7 +102,7 @@ def document_answer(document: Document) -> dict[str, object]:
     """
     files = list(document.files.all())
     return {
-        "id": document.pk,
+        "id": document.public_id,
         "files": [file_answer(file) for file in files if not file.is_in_bin],
         "binned_files": [_binned_file_answer(file) for file in files if file.is_in_bin],
         "verification": document.verification,
@@ -112,8 +116,10 @@ def document_answer(document: Document) -> dict[str, object]:
 def _in_bin_answer(document: Document) -> dict[str, object]:
     """A whole Document in the Bin: its file names and why; nothing can be opened (issue 79)."""
     return {
-        "id": document.pk,
-        "files": [{"id": file.pk, "file_name": file.file_name} for file in document.files.all()],
+        "id": document.public_id,
+        "files": [
+            {"id": file.public_id, "file_name": file.file_name} for file in document.files.all()
+        ],
         "bin": bin_answer(document),
     }
 
@@ -171,7 +177,7 @@ def paperwork_answer(one: Paperwork) -> dict[str, object]:
     counts = one.checklist.counts
     return {
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "stage": student.stage,
             "country": student.country,
@@ -203,8 +209,8 @@ def bin_item_answer(item: BinItem) -> dict[str, object]:
     student = document.student
     return {
         "kind": "document" if item.file is None else "file",
-        "document": {"id": document.pk, "name": document.document_type.name},
-        "student": {"id": student.pk, "name": student.name},
-        "files": [{"id": file.pk, "file_name": file.file_name} for file in files],
+        "document": {"id": document.public_id, "name": document.document_type.name},
+        "student": {"id": student.public_id, "name": student.name},
+        "files": [{"id": file.public_id, "file_name": file.file_name} for file in files],
         **bin_answer(item.held),
     }

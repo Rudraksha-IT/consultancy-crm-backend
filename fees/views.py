@@ -5,6 +5,8 @@ Every endpoint answers 404 while Accounts is off, for every Role, before any oth
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.core.paginator import EmptyPage, Paginator
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -20,6 +22,7 @@ from access.policy import (
     can_act_on_student,
     why_cannot,
 )
+from config.public_ids import pk_for
 from fee_types.models import FeeType
 from fees.answers import (
     by_type_fee_type,
@@ -93,21 +96,21 @@ class StudentFeesView(APIView):
     permission_classes = (IsAuthenticated, AccountsModuleIsOn)
     parser_classes = (JSONParser,)
 
-    def _student(self, request: Request, student_id: int) -> Student:
+    def _student(self, request: Request, student_id: UUID) -> Student:
         try:
-            student = Student.objects.get(pk=student_id)
+            student = Student.objects.get(public_id=student_id)
         except Student.DoesNotExist as error:
             raise NotFound from error
         _check_may_change_fees(get_request_staff(request), student)
         return student
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the Student's Fees, their total and (for Admins) the Balance."""
         NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
         student = self._student(request, student_id)
         return Response(_fees_answer(get_request_staff(request), student))
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add a Fee and return the Student's Fees."""
         student = self._student(request, student_id)
         serializer = NewFeeSerializer(data=request.data)
@@ -123,15 +126,15 @@ class FeeView(APIView):
     permission_classes = (IsAuthenticated, AccountsModuleIsOn)
     parser_classes = (JSONParser,)
 
-    def _fee(self, request: Request, fee_id: int) -> Fee:
+    def _fee(self, request: Request, fee_id: UUID) -> Fee:
         try:
-            fee = fee_with_student(fee_id)
+            fee = fee_with_student(pk_for(Fee.objects.all(), fee_id))
         except Fee.DoesNotExist as error:
             raise NotFound from error
         _check_may_change_fees(get_request_staff(request), fee.student)
         return fee
 
-    def put(self, request: Request, fee_id: int) -> Response:
+    def put(self, request: Request, fee_id: UUID) -> Response:
         """Replace the Fee Type, note and amount, and return the Student's Fees."""
         fee = self._fee(request, fee_id)
         serializer = NewFeeSerializer(data=request.data, kept_type_id=fee.fee_type_id)
@@ -140,7 +143,7 @@ class FeeView(APIView):
         change_fee(fee.pk, serializer.to_new_fee(), by=staff)
         return Response(_fees_answer(staff, fee.student))
 
-    def delete(self, request: Request, fee_id: int) -> Response:
+    def delete(self, request: Request, fee_id: UUID) -> Response:
         """Delete it; the Student's History keeps it."""
         fee = self._fee(request, fee_id)
         delete_fee(fee.pk, by=get_request_staff(request))

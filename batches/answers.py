@@ -41,7 +41,11 @@ def batch_with_students_answer(
     return {
         **batch_answer(batch, viewer, today),
         "students": [
-            {"id": student.pk, "name": student.name, "attended_percent": shares.get(student.pk)}
+            {
+                "id": student.public_id,
+                "name": student.name,
+                "attended_percent": shares.get(student.pk),
+            }
             for student in students
         ],
     }
@@ -51,7 +55,7 @@ def enrolled_student_answer(student: Student, attended: int | None) -> dict[str,
     """One Student with the classes they're in and their share attended across them (spec 86a)."""
     memberships: Iterable[BatchMembership] = student.memberships.all()
     return {
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "batches": [{"id": m.batch.pk, "name": m.batch.name} for m in memberships],
         "attended_percent": attended,
@@ -66,7 +70,9 @@ def attendance_day_answer(
     return {
         "day": day.isoformat(),
         "can_mark": why_cannot_take_attendance(viewer, batch.teacher_id) is None,
-        "marks": [{"student": student.pk, "mark": marks.get(student.pk)} for student in students],
+        "marks": [
+            {"student": student.public_id, "mark": marks.get(student.pk)} for student in students
+        ],
     }
 
 

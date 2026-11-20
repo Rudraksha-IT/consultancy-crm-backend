@@ -762,7 +762,7 @@ class TestUnderAStudentsApplications:
         make_application(abc, student, course)
         log_in(abc, staff)
 
-        response = abc.client.get(f"/api/students/{student.pk}/")
+        response = abc.client.get(f"/api/students/{student.public_id}/")
 
         [application] = response.json()["applications"]
         assert [f["name"] for f in application["course_files"]] == ["Brochure"]
@@ -772,6 +772,6 @@ class TestUnderAStudentsApplications:
         student = make_student(abc, None, Stage.APPLYING)
         make_application(abc, student, make_course(abc))
 
-        response = abc.client.get(f"/api/students/{student.pk}/")
+        response = abc.client.get(f"/api/students/{student.public_id}/")
 
         assert response.json()["applications"][0]["course_files"] == []

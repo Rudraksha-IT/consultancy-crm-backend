@@ -143,7 +143,7 @@ class TestFindingStudents:
         assert rows == [
             {
                 "kind": "student",
-                "id": sita.pk,
+                "id": str(sita.public_id),
                 "name": "Sita Karki",
                 "phone": "9841000001",
                 "stage": "counselling",
@@ -259,7 +259,7 @@ class TestTeachers:
         assert rows == [
             {
                 "kind": "class_student",
-                "id": mine.pk,
+                "id": str(mine.public_id),
                 "name": "Sita Mine",
                 "batch": {"id": first.pk, "name": "IELTS Morning"},
             }

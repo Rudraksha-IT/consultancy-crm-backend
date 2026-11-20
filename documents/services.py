@@ -265,7 +265,7 @@ def _store_files(document: Document, files: tuple[NewFile, ...], by: Staff) -> N
     If one can't be stored, those already stored are removed too, and the error is raised so the
     transaction leaves no row pointing at nothing.
     """
-    prefix = f"{get_active_schema_name()}/documents/{document.student_id}/"
+    prefix = f"{get_active_schema_name()}/documents/{document.student.public_id}/"
     stored: list[str] = []
     try:
         for file in files:

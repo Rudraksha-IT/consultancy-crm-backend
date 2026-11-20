@@ -7,6 +7,7 @@ from typing import Any
 from django.db import connection, models
 from django.db.models import Q
 
+from config.public_ids import public_id_field
 from fee_types.models import NOTE_MAX_LENGTH, FeeType
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import CHOICE_MAX_LENGTH, Student
@@ -36,6 +37,9 @@ class Payment(models.Model):
     them. A Payment saved on its own gets its own id as its receipt. Balances are calculated
     from Payments and Fees (issue 35); nothing here is an invoice.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="payments")
     amount = models.PositiveBigIntegerField()

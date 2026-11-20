@@ -14,7 +14,7 @@ from rest_framework import serializers
 
 from applications.models import Application, Visa
 from applications.statuses import OfferKind, VisaStatus
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from documents.files import (
     MAX_DOCUMENT_BYTES,
     MAX_FILES_AT_ONCE,
@@ -171,8 +171,8 @@ class DocumentTypeField(serializers.Field[DocumentType, int, int, Any]):
         return int(value.pk)
 
 
-class StudentRecordField[M: Model](serializers.Field[M, int, int, Any]):
-    """One of the uploading Student's own Applications or Visas, by id (spec 66). Optional.
+class StudentRecordField[M: Model](serializers.Field[M, str, str, Any]):
+    """One of the uploading Student's own Applications or Visas, by UUID (spec 66). Optional.
 
     The Student comes from the serializer's context; anyone else's record is refused.
     """
@@ -184,19 +184,19 @@ class StudentRecordField[M: Model](serializers.Field[M, int, int, Any]):
     def to_internal_value(self, data: object) -> M:
         """Return the record, if it is this Student's."""
         student: Student = self.context["student"]
-        pk = _form_id(data)
+        public_id = parse_record_id(data)
         found = (
             None
-            if pk is None
-            else self.model._default_manager.filter(pk=pk, student=student).first()
+            if public_id is None
+            else self.model._default_manager.filter(public_id=public_id, student=student).first()
         )
         if found is None:
             self.fail("invalid")
         return found
 
-    def to_representation(self, value: M) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return int(value.pk)
+    def to_representation(self, value: M) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.serializable_value("public_id"))
 
 
 class DocumentFileField(serializers.Field[Upload, Upload, None, Any]):

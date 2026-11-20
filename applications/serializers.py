@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -21,7 +22,7 @@ from applications.types import (
     VisaSort,
 )
 from catalogue.models import Course
-from config.serializers import UNKNOWN_FIELD_KEY, StrictSerializer
+from config.serializers import UNKNOWN_FIELD_KEY, RecordIdField, StrictSerializer
 from students.models import Country
 from students.profile_serializers import INTAKE_MESSAGE, INTAKE_PATTERN
 from students.serializers import (
@@ -112,41 +113,26 @@ class StatusChangeSerializer(StrictSerializer[None]):
         return ApplicationStatus(self.validated_data["status"])
 
 
-class IdField(serializers.Field[int, int, int, Any]):
-    """A positive whole-number id; anything else (text, decimals, true/false) is refused."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(error_messages=_same_message(message))
-
-    def to_internal_value(self, data: object) -> int:
-        """Return the id."""
-        if isinstance(data, bool) or not isinstance(data, int) or data < 1:
-            self.fail("invalid")
-        return data
-
-    def to_representation(self, value: int) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return value
-
-
 class NewVisaSerializer(StrictSerializer[None]):
     """A new Visa: which of the Student's Applications it is for. Always starts as Applied."""
 
-    application = IdField(CHOOSE_APPLICATION_MESSAGE)
+    application = RecordIdField(CHOOSE_APPLICATION_MESSAGE)
 
-    def application_id(self) -> int:
+    def application_id(self) -> UUID:
         """The Application asked for; the service checks it is the Student's, at Offer."""
-        return int(self.validated_data["application"])
+        application: UUID = self.validated_data["application"]
+        return application
 
 
 class ChosenOfferSerializer(StrictSerializer[None]):
     """The offer the Student goes ahead with: one of their Applications at Offer (spec 115)."""
 
-    application = IdField(CHOOSE_APPLICATION_MESSAGE)
+    application = RecordIdField(CHOOSE_APPLICATION_MESSAGE)
 
-    def application_id(self) -> int:
+    def application_id(self) -> UUID:
         """The Application asked for; the service checks it is the Student's, at Offer."""
-        return int(self.validated_data["application"])
+        application: UUID = self.validated_data["application"]
+        return application
 
 
 class VisaStatusChangeSerializer(StrictSerializer[None]):

@@ -26,7 +26,9 @@ def task_answer(task: Task, viewer: Staff, today: date) -> dict[str, object]:
         "assignee": _person(task.assignee),
         # No id when a Platform Admin gave it (Support Access); the name says who.
         "created_by": {"id": task.created_by_id, "name": task.created_by_name},
-        "student": {"id": student.pk, "name": student.name} if shows_student and student else None,
+        "student": {"id": student.public_id, "name": student.name}
+        if shows_student and student
+        else None,
         "can_mark_done": why_cannot_mark_task_done(viewer, task.assignee_id, task.created_by_id)
         is None,
     }
