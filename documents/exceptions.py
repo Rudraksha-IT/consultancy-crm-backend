@@ -99,3 +99,7 @@ class OnlyFileError(Exception):
 
 class DocumentInBinError(Exception):
     """The Document is in the Bin, so it can't be checked or added to."""
+
+
+class KeepsExamplesError(Exception):
+    """The Document Type has Document Examples (even in the Bin), so it is never removed."""

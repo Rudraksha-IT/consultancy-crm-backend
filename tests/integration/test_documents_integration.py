@@ -180,6 +180,8 @@ class TestChecklist:
             "state": "not_received",
             "document": None,
             "in_bin": [],
+            "instruction": "",
+            "examples": [],
         }
         assert body["asked"] == []
 

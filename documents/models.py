@@ -15,6 +15,8 @@ FILE_NAME_MAX_LENGTH = 150
 CONTENT_TYPE_MAX_LENGTH = 50
 STORAGE_KEY_MAX_LENGTH = 300
 REJECTION_REASON_MAX_LENGTH = 500
+# A Document Type's Document Example instruction (spec 62).
+INSTRUCTION_MAX_LENGTH = 500
 # Why a Document or a file was put in the Bin (a quick pick or a few words; issue 79).
 BIN_REASON_MAX_LENGTH = 200
 
@@ -57,6 +59,8 @@ class DocumentType(models.Model):
     usual_group = models.CharField(
         max_length=CHOICE_MAX_LENGTH, choices=DocumentGroup.choices, default=DocumentGroup.APPLYING
     )
+    # How the Document should look, for Students (Document Example, spec 62); empty when none.
+    instruction = models.CharField(max_length=INSTRUCTION_MAX_LENGTH, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

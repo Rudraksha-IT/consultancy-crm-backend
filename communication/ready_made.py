@@ -33,6 +33,7 @@ from communication.exceptions import (
     RecordNotChosenError,
 )
 from communication.models import SUBJECT_MAX_LENGTH
+from document_examples.services import TypeGuide
 from documents.checklist import DocumentState
 from documents.services import checklist_of
 from emails.drafts import draft_email
@@ -272,19 +273,24 @@ def _welcome(student: Student, _: Staff) -> ReadyMade:
 
 
 def _documents_needed(student: Student, _: Staff) -> ReadyMade:
-    """The required Documents not in yet, or Rejected, in checklist order.
+    """The required Documents not in yet, or Rejected, in checklist order, with instructions.
 
-    Their Document Example instructions and files come with ticket 11.
+    Each carries its Document Example instruction (spec 34). Attaching the examples comes with
+    ticket 12.
     """
-    items = checklist_of(student).checklist.items
+    found = checklist_of(student)
     missing = tuple(
-        MissingDocument(name=item.name, instruction=None)
-        for item in items
+        MissingDocument(name=item.name, instruction=_instruction(found.guides.get(item.type_id)))
+        for item in found.checklist.items
         if item.is_required and item.state in _STILL_NEEDED
     )
     if not missing:
         raise ReadyMadeUnavailableError(EVERYTHING_IN_MESSAGE)
     return DocumentsNeeded(documents=missing, has_examples=False)
+
+
+def _instruction(guide: TypeGuide | None) -> str | None:
+    return None if guide is None or not guide.instruction else guide.instruction
 
 
 def _fee_reminder(student: Student, staff: Staff) -> ReadyMade:

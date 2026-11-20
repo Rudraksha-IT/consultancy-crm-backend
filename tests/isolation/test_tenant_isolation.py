@@ -5887,3 +5887,130 @@ class TestCourseFileIsolation:
         ]
 
         assert [answer.status_code for answer in answers] == [401] * 4
+
+
+def _type_with_example(office: ConsultancyContext, name: str = "Bank Statement") -> tuple[int, int]:
+    """A Document Type of `office` with one example uploaded by its Admin: (type id, example id)."""
+    types = office.client.get("/api/configuration/document-types/").json()["results"]
+    type_id = next(int(t["id"]) for t in types if t["name"] == name)
+    upload = SimpleUploadedFile("sample.pdf", _COURSE_PDF, content_type="application/pdf")
+    example = office.client.post(
+        f"/api/configuration/document-types/{type_id}/examples/",
+        {"file": upload},
+        format="multipart",
+    )
+    assert example.status_code == status.HTTP_201_CREATED
+    return type_id, int(example.json()["id"])
+
+
+class TestDocumentExampleIsolation:
+    """Ticket 11: Document Examples are kept, opened and binned only in their own office."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext]:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        return abc, xyz
+
+    def test_examples_are_kept_under_each_offices_own_prefix(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+
+        _type_with_example(abc)
+        _type_with_example(xyz)
+
+        keys = sorted(FakeDocumentStorage.files)
+        assert [key.split("/", 2)[:2] for key in keys] == [
+            ["abcedu", "document-examples"],
+            ["xyzoverseas", "document-examples"],
+        ]
+
+    def test_another_offices_example_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, example_id = _type_with_example(abc)
+        one = f"/api/configuration/document-examples/{example_id}/"
+
+        answers = [
+            xyz.client.get(f"/api/documents/examples/{example_id}/link/"),
+            xyz.client.delete(one),
+            xyz.client.post(
+                f"{one}replace/",
+                {"file": SimpleUploadedFile("x.pdf", _COURSE_PDF, "application/pdf")},
+                format="multipart",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        mine = abc.client.get(f"/api/documents/examples/{example_id}/link/")
+        assert mine.status_code == status.HTTP_200_OK
+
+    def test_the_same_ids_change_only_their_own_office(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        abc_type, abc_example = _type_with_example(abc)
+        xyz_type, xyz_example = _type_with_example(xyz)
+        assert (abc_type, abc_example) == (xyz_type, xyz_example)
+
+        xyz.client.put(
+            f"/api/configuration/document-types/{xyz_type}/instruction/",
+            {"instruction": "XYZ only"},
+            format="json",
+        )
+        xyz.client.delete(f"/api/configuration/document-examples/{xyz_example}/")
+
+        abc_types = abc.client.get("/api/configuration/document-types/").json()["results"]
+        [abc_statement] = [t for t in abc_types if t["id"] == abc_type]
+        assert abc_statement["instruction"] == ""
+        assert [e["id"] for e in abc_statement["examples"]] == [abc_example]
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 0
+        xyz_bin = xyz.client.get("/api/documents/bin/").json()
+        assert [row["kind"] for row in xyz_bin["results"]] == ["document_example"]
+
+    def test_another_offices_bin_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, example_id = _type_with_example(abc)
+        abc.client.delete(f"/api/configuration/document-examples/{example_id}/")
+        bin_url = f"/api/documents/bin/document-examples/{example_id}/"
+
+        answers = [
+            xyz.client.get(f"{bin_url}link/"),
+            xyz.client.post(f"{bin_url}restore/", {}, format="json"),
+            xyz.client.delete(bin_url),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 1
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        type_id, example_id = _type_with_example(abc)
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+        bin_url = f"/api/documents/bin/document-examples/{example_id}/"
+
+        answers = [
+            intruder.put(
+                f"/api/configuration/document-types/{type_id}/instruction/",
+                {"instruction": "x"},
+                format="json",
+            ),
+            intruder.post(
+                f"/api/configuration/document-types/{type_id}/examples/", {}, format="multipart"
+            ),
+            intruder.delete(f"/api/configuration/document-examples/{example_id}/"),
+            intruder.get(f"/api/documents/examples/{example_id}/link/"),
+            intruder.post(f"{bin_url}restore/", {}, format="json"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 5

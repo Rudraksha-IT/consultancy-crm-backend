@@ -11,7 +11,7 @@ import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
@@ -19,6 +19,7 @@ from django.db.models.functions import Lower
 
 from applications.models import Application
 from applications.statuses import ApplicationStatus
+from document_examples.services import TypeGuide, guides_for
 from documents.checklist import (
     AppliedCourse,
     Checklist,
@@ -74,6 +75,8 @@ class StudentChecklist:
     documents: Mapping[int, Document]
     # The Document Types asked for this Student alone (spec 63b), by id.
     asked: tuple[int, ...] = ()
+    # Each listed type's instruction and example files (Document Examples, spec 64), by type id.
+    guides: Mapping[int, TypeGuide] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -171,7 +174,10 @@ def checklist_of(student: Student) -> StudentChecklist:
         "document_type_id", flat=True
     )
     return StudentChecklist(
-        checklist, {document.pk: document for document in documents}, tuple(asked)
+        checklist,
+        {document.pk: document for document in documents},
+        tuple(asked),
+        guides_for(item.type_id for item in checklist.items),
     )
 
 

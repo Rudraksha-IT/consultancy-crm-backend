@@ -22,6 +22,9 @@ from catalogue.services import course_by_id
 from course_files.answers import binned_course_file_answer
 from course_files.models import CourseFile
 from course_files.services import binned_course_files
+from document_examples.answers import binned_example_answer
+from document_examples.models import DocumentExample
+from document_examples.services import binned_examples
 from documents.answers import (
     bin_item_answer,
     checklist_answer,
@@ -50,6 +53,7 @@ from documents.exceptions import (
     DocumentTypeInUseError,
     DuplicateDocumentTypeError,
     EveryoneNeedsTypeError,
+    KeepsExamplesError,
     NotAskedError,
     NotInBinError,
     NotNewestCopyError,
@@ -123,6 +127,9 @@ NOT_STORED_MESSAGE = "We couldn't store the file. Try again."
 ALREADY_CHECKED_MESSAGE = "This document has already been checked."
 NOT_NEWEST_MESSAGE = "A newer copy of this document has been uploaded."
 TYPE_IN_USE_MESSAGE = "This document is asked for or has files, so it can't be removed."
+KEEPS_EXAMPLES_MESSAGE = (
+    "This document has example files (counting the Bin), so it can't be removed."
+)
 EVERYONE_NEEDS_TYPE_MESSAGE = "Every Student needs this document, so it can't be removed."
 TOO_MANY_FILES_MESSAGE = f"A document can have at most {MAX_FILES_PER_DOCUMENT} files."
 REJECTED_NEEDS_NEW_COPY_MESSAGE = (
@@ -244,6 +251,9 @@ class DocumentTypeView(APIView):
         except DocumentTypeInUseError:
             # expected refusal, answered with its status; the request line logs it
             return _refused(TYPE_IN_USE_MESSAGE)
+        except KeepsExamplesError:
+            # expected refusal, answered with its status; the request line logs it
+            return _refused(KEEPS_EXAMPLES_MESSAGE)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -744,22 +754,32 @@ class BinView(APIView):
         )
 
 
-def _everything_in_bin() -> list[BinItem | CourseFile]:
-    """Documents and their files, and Course Files (spec 56), newest first, each with its kind."""
-    items: list[BinItem | CourseFile] = [*bin_items(), *binned_course_files()]
+type _InTheBin = BinItem | CourseFile | DocumentExample
+
+
+def _everything_in_bin() -> list[_InTheBin]:
+    """Everything in the Bin, newest first, each with its kind.
+
+    Documents and their files, Course Files (spec 56) and Document Examples (spec 63).
+    """
+    items: list[_InTheBin] = [*bin_items(), *binned_course_files(), *binned_examples()]
     return sorted(items, key=_binned_at, reverse=True)
 
 
-def _binned_at(item: BinItem | CourseFile) -> tuple[datetime, int, int]:
+def _binned_at(item: _InTheBin) -> tuple[datetime, int, int]:
     if isinstance(item, BinItem):
         return item.binned_at, 0, item.document.pk
     at = item.binned_at
-    assert at is not None  # noqa: S101  # only Course Files in the Bin are listed
-    return at, 1, item.pk
+    assert at is not None  # noqa: S101  # only files in the Bin are listed
+    return at, 1 if isinstance(item, CourseFile) else 2, item.pk
 
 
-def _bin_row(item: BinItem | CourseFile) -> dict[str, object]:
-    return bin_item_answer(item) if isinstance(item, BinItem) else binned_course_file_answer(item)
+def _bin_row(item: _InTheBin) -> dict[str, object]:
+    if isinstance(item, BinItem):
+        return bin_item_answer(item)
+    if isinstance(item, CourseFile):
+        return binned_course_file_answer(item)
+    return binned_example_answer(item)
 
 
 class BinFileLinkView(APIView):

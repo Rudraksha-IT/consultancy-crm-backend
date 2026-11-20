@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from course_files.models import CourseFile
-from documents.answers import bin_answer
+from documents.bin_answers import bin_answer
 
 
 def course_file_answer(file: CourseFile) -> dict[str, object]:

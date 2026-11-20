@@ -72,6 +72,9 @@ class TestNewDocumentFromACountrysList:
             "needed_by_everyone": False,
             "usual_group": "statements",
             "used_by": {"countries": 1, "courses": 0, "students": 0, "documents": 0},
+            "instruction": "",
+            "examples": [],
+            "example_count": 0,
         }
         assert body["list"] == {
             "country": "uk",

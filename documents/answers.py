@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from document_examples.answers import examples_answer
 from documents.bin import BinItem
+from documents.bin_answers import bin_answer
 from documents.checklist import Checklist, ChecklistItem
-from documents.models import Document, DocumentFile, DocumentType, InTheBin
+from documents.models import Document, DocumentFile, DocumentType
 from documents.requirements import CountryDocuments, uses_of
 from documents.services import Paperwork, StudentChecklist
 from staff.models import Staff
@@ -25,6 +27,10 @@ def configured_type_answer(document_type: DocumentType) -> dict[str, object]:
     uses = uses_of(document_type)
     return {
         **document_type_answer(document_type),
+        "instruction": document_type.instruction,
+        "examples": examples_answer(getattr(document_type, "live_examples", ())),
+        # Every example file, counting the Bin: a type with any is never removed.
+        "example_count": getattr(document_type, "example_count", 0),
         "used_by": {
             "countries": uses.countries,
             "courses": uses.courses,
@@ -79,17 +85,6 @@ def file_answer(file: DocumentFile) -> dict[str, object]:
     }
 
 
-def bin_answer(held: InTheBin) -> dict[str, object]:
-    """Who put it in the Bin (as named then; no id for a Platform Admin), when and why."""
-    at = held.binned_at
-    assert at is not None  # noqa: S101  # asked only of what is in the Bin
-    return {
-        "by": {"id": held.binned_by_id, "name": held.binned_by_name},
-        "at": at.isoformat(),
-        "reason": held.bin_reason,
-    }
-
-
 def _binned_file_answer(file: DocumentFile) -> dict[str, object]:
     """A file in the Bin: only its name and why; it can't be opened from here (issue 79)."""
     return {"id": file.pk, "file_name": file.file_name, "bin": bin_answer(file)}
@@ -126,6 +121,7 @@ def _in_bin_answer(document: Document) -> dict[str, object]:
 def _item_answer(item: ChecklistItem, documents: StudentChecklist) -> dict[str, object]:
     current = None if item.document is None else documents.documents[item.document.id]
     in_bin = [documents.documents[one.id] for one in item.in_bin]
+    guide = documents.guides.get(item.type_id)
     return {
         "document_type": {"id": item.type_id, "name": item.name},
         "reason": item.reason,
@@ -135,6 +131,9 @@ def _item_answer(item: ChecklistItem, documents: StudentChecklist) -> dict[str, 
         "state": item.state.value,
         "document": None if current is None else document_answer(current),
         "in_bin": [_in_bin_answer(document) for document in in_bin],
+        # The type's Document Example: what it should look like (spec 64). Never the Student's.
+        "instruction": "" if guide is None else guide.instruction,
+        "examples": [] if guide is None else examples_answer(guide.examples),
     }
 
 

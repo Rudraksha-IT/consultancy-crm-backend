@@ -72,7 +72,16 @@ class TestListingTypes:
         assert [(t["name"], t["needed_by_everyone"]) for t in results] == [
             (name, True) for name in DEFAULT_TYPES
         ]
-        assert set(results[0]) == {"id", "name", "needed_by_everyone", "usual_group", "used_by"}
+        assert set(results[0]) == {
+            "id",
+            "name",
+            "needed_by_everyone",
+            "usual_group",
+            "used_by",
+            "instruction",
+            "examples",
+            "example_count",
+        }
 
     @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])
     def test_only_admins_may_manage_them(self, abc: ConsultancyContext, role: Role) -> None:
@@ -106,6 +115,9 @@ class TestAddingTypes:
             "needed_by_everyone": False,
             "usual_group": "applying",
             "used_by": {"countries": 0, "courses": 0, "students": 0, "documents": 0},
+            "instruction": "",
+            "examples": [],
+            "example_count": 0,
         }
 
     def test_one_needed_by_everyone_joins_every_checklist(self, abc: ConsultancyContext) -> None:
@@ -242,6 +254,9 @@ class TestMovingTypes:
             "needed_by_everyone": False,
             "usual_group": "visa",
             "used_by": {"countries": 0, "courses": 0, "students": 0, "documents": 0},
+            "instruction": "",
+            "examples": [],
+            "example_count": 0,
         }
         assert ("Sponsor Letter", False) in stored_types(abc)
 
