@@ -34,9 +34,8 @@ class StaffStatus(models.TextChoices):
 
 
 class ColourMode(models.TextChoices):
-    """A Staff member's own light or dark choice; until they choose, the device's."""
+    """A Staff member's own light or dark choice: light until they pick dark (2026-11-20)."""
 
-    DEVICE = "device", "Same as this device"
     LIGHT = "light", "Light"
     DARK = "dark", "Dark"
 
@@ -65,7 +64,7 @@ class Staff(AbstractBaseUser):
     )
     # Personal Settings (issue 38): light/dark and which emails the app sends this person.
     colour_mode = models.CharField(
-        max_length=COLOUR_MODE_MAX_LENGTH, choices=ColourMode.choices, default=ColourMode.DEVICE
+        max_length=COLOUR_MODE_MAX_LENGTH, choices=ColourMode.choices, default=ColourMode.LIGHT
     )
     email_on_task_given = models.BooleanField(default=True)
     email_on_task_due_tomorrow = models.BooleanField(default=True)

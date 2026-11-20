@@ -4346,7 +4346,7 @@ class TestMySettingsIsolation:
         assert xyz.client.get(ME_URL).status_code == status.HTTP_200_OK
         with tenant_context(xyz.consultancy):
             kept = Staff.objects.get(pk=xyz_staff.pk)
-        assert (kept.name, kept.colour_mode) == (xyz_staff.name, "device")
+        assert (kept.name, kept.colour_mode) == (xyz_staff.name, "light")
         assert kept.check_password(TEST_PASSWORD)
 
     def test_signed_in_devices_never_include_another_consultancys(

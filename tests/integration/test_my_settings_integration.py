@@ -6,10 +6,12 @@ Everyone can use them, whatever their Role; nobody can change their own Role, em
 
 from __future__ import annotations
 
+import importlib
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from django.apps import apps as django_apps
 from django.utils import timezone
 from django_tenants.utils import tenant_context
 from rest_framework import status
@@ -135,7 +137,7 @@ class TestMyDetails:
             "job_title": "Senior Counsellor",
             "role": "counsellor",
             "joined_on": counsellor.joined_on.isoformat(),
-            "colour_mode": "device",
+            "colour_mode": "light",
             "page_swipe": False,
             "notifications": {
                 "task_given": True,
@@ -247,6 +249,8 @@ class TestMyDetails:
             ({"mobile": "+977 98abc"}, "mobile"),
             ({"colour_mode": "blue"}, "colour_mode"),
             ({"colour_mode": True}, "colour_mode"),
+            # Following the device was removed (2026-11-20): light unless the person picks dark.
+            ({"colour_mode": "device"}, "colour_mode"),
             ({"notifications": {"task_given": "yes"}}, "notifications"),
             ({"notifications": {"task_given": 1}}, "notifications"),
             ({"notifications": {"task_given": None}}, "notifications"),
@@ -320,7 +324,7 @@ class TestNotifications:
 
 
 class TestColourMode:
-    @pytest.mark.parametrize("mode", ["light", "dark", "device"])
+    @pytest.mark.parametrize("mode", ["light", "dark"])
     def test_remembers_light_or_dark_per_person(
         self, abc: ConsultancyContext, counsellor: Staff, mode: str
     ) -> None:
@@ -336,12 +340,27 @@ class TestColourMode:
 
         patch_me(abc.client, {"colour_mode": "dark"})
 
-        assert stored(abc, other).colour_mode == "device"
+        assert stored(abc, other).colour_mode == "light"
 
-    def test_the_context_starts_with_the_device(
+    def test_the_context_starts_light(self, abc: ConsultancyContext, counsellor: Staff) -> None:
+        assert abc.client.get(CONTEXT_URL).json()["staff"]["colour_mode"] == "light"
+
+
+class TestDeviceBecomesLight:
+    """Staff who followed their device are light after the migration; a dark choice stays."""
+
+    def test_device_becomes_light_and_dark_stays(
         self, abc: ConsultancyContext, counsellor: Staff
     ) -> None:
-        assert abc.client.get(CONTEXT_URL).json()["staff"]["colour_mode"] == "device"
+        dark = abc.add_staff(Role.FRONT_DESK)
+        with tenant_context(abc.consultancy):
+            Staff.objects.filter(pk=counsellor.pk).update(colour_mode="device")
+            Staff.objects.filter(pk=dark.pk).update(colour_mode="dark")
+            migration = importlib.import_module("staff.migrations.0008_light_by_default")
+            migration.device_to_light(django_apps, None)
+
+        assert stored(abc, counsellor).colour_mode == "light"
+        assert stored(abc, dark).colour_mode == "dark"
 
 
 class TestChangePassword:

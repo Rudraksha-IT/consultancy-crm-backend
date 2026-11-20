@@ -56,7 +56,7 @@ class TestStaffContext:
                 "name": staff.name,
                 "email": staff.email,
                 "role": expected_role,
-                "colour_mode": "device",
+                "colour_mode": "light",
             },
             "consultancy": {
                 "name": "ABC Education",
