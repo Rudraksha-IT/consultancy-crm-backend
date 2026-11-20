@@ -10,6 +10,13 @@ from config.serializers import StrictSerializer
 from fee_types.serializers import FeeTypeField, NoteField, check_fee_type_and_note
 from fees.types import NewFee
 from payments.serializers import AmountField
+from students.serializers import StrictChoiceField
+
+PAGE_FIELD_LIMIT = 1_000_000
+# What the Student fees list may leave out: Lost Students, as Fees by type does (spec 87, 91).
+LEAVE_OUT_LOST = "lost"
+# The two parts of one Fee Type's Students (spec 82, 89).
+COUNTED, LOST = "counted", "lost"
 
 
 class NewFeeSerializer(StrictSerializer[None]):
@@ -44,9 +51,40 @@ class NoQuerySerializer(StrictSerializer[None]):
 class StudentFeesListQuerySerializer(StrictSerializer[None]):
     """The Student fees list's page (spec 76b)."""
 
-    page = serializers.IntegerField(min_value=1, max_value=1_000_000, required=False)
+    page = serializers.IntegerField(min_value=1, max_value=PAGE_FIELD_LIMIT, required=False)
+    leave_out = StrictChoiceField(
+        choices=(LEAVE_OUT_LOST,),
+        required=False,
+        error_messages={"invalid_choice": "Only Lost Students can be left out."},
+    )
 
     def page_number(self) -> int:
         """The page asked for; the first if none."""
         number: int = self.validated_data.get("page", 1)
         return number
+
+    def leaves_out_lost(self) -> bool:
+        """Whether Lost Students are left out (the Admin Home's figure and list)."""
+        leave_out: str | None = self.validated_data.get("leave_out")
+        return leave_out == LEAVE_OUT_LOST
+
+
+class FeeTypeStudentsQuerySerializer(StrictSerializer[None]):
+    """One Fee Type's Students: which part (counted or Lost) and which page."""
+
+    part = StrictChoiceField(
+        choices=(COUNTED, LOST),
+        required=False,
+        error_messages={"invalid_choice": "Choose the counted or the Lost Students."},
+    )
+    page = serializers.IntegerField(min_value=1, max_value=PAGE_FIELD_LIMIT, required=False)
+
+    def page_number(self) -> int:
+        """The page asked for; the first if none."""
+        number: int = self.validated_data.get("page", 1)
+        return number
+
+    def part_asked(self) -> str:
+        """The part asked for; the counted Students if none."""
+        part: str = self.validated_data.get("part", COUNTED)
+        return part

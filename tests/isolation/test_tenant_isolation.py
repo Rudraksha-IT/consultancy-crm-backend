@@ -5556,3 +5556,84 @@ class TestPageSwipeIsolation:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         xyz.log_in_as(Role.ADMIN)
         assert xyz.client.get("/api/context/").json()["page_swipe"] is False
+
+
+class TestFeesByTypeIsolation:
+    """Ticket 08: Fees by type adds up only this office's money, and its Fee Types only."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext, int]:
+        """Both offices with an Admin in; ABC has a Fee Type XYZ hasn't, with money on it."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            switch_modules(office.consultancy, {Module.ACCOUNTS})
+            office.log_in_as(Role.ADMIN)
+        abc_only = int(
+            abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json").json()["id"]
+        )
+        student = abc.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        for fee_type in (abc_only, _fee_type_id(abc)):
+            created = abc.client.post(
+                f"/api/students/{student['id']}/fees/",
+                {"fee_type": fee_type, "amount": 40000},
+                format="json",
+            )
+            assert created.status_code == status.HTTP_201_CREATED
+        return abc, xyz, abc_only
+
+    def test_each_office_adds_up_only_its_own_money(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+
+        mine = abc.client.get("/api/accounts/fees-by-type/").json()
+        theirs = xyz.client.get("/api/accounts/fees-by-type/").json()
+
+        assert mine["totals"]["remaining"] == 80000
+        assert theirs == {
+            "totals": {
+                "to_collect": 0,
+                "received": 0,
+                "remaining": 0,
+                "lost_not_counted": 0,
+                "owing": 0,
+            },
+            "fee_types": [],
+        }
+
+    def test_another_offices_fee_type_is_not_found(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, xyz, abc_only = self._two_offices(make_consultancy)
+
+        response = xyz.client.get(f"/api/accounts/fees-by-type/{abc_only}/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_the_same_fee_type_id_lists_only_this_offices_students(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        url = f"/api/accounts/fees-by-type/{_fee_type_id(xyz)}/"
+
+        assert xyz.client.get(url).json()["results"] == []
+        assert [row["student"]["name"] for row in abc.client.get(url).json()["results"]] == [
+            "Ram Thapa"
+        ]
+
+    def test_a_token_from_one_consultancy_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+
+        answers = [
+            intruder.get("/api/accounts/fees-by-type/"),
+            intruder.get(f"/api/accounts/fees-by-type/{_fee_type_id(xyz)}/"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401, 401]

@@ -22,8 +22,10 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Greatest
 
+from fee_types.models import FeeType
 from fee_types.services import describe_for
 from fees.balance import Balance, balance_of
+from fees.by_type import FeesByType, StudentLine, TypeSum, fees_by_type
 from fees.models import Fee
 from fees.types import NewFee
 from history.models import HistoryKind
@@ -32,7 +34,7 @@ from payments.models import Payment
 from payments.money import format_npr
 from staff.actors import actor_name, stored_staff
 from staff.models import Staff
-from students.models import Student
+from students.models import Stage, Student
 
 logger = logging.getLogger(__name__)
 
@@ -158,10 +160,11 @@ class OwingStudents:
     totals: FeeTotals
 
 
-def owing_students() -> OwingStudents:
+def owing_students(*, leave_out_lost: bool = False) -> OwingStudents:
     """Every Student who still owes, most first then by name, with the office's totals (76b).
 
     Students with no Fees are left out; an overpaid Student counts only their Fees as collected.
+    With `leave_out_lost`, Lost Students are left out too, as Fees by type counts (spec 87, 91).
     """
     money = BigIntegerField()
     # Subqueries, not joins, so Fees and Payments never multiply each other's sums.
@@ -174,6 +177,8 @@ def owing_students() -> OwingStudents:
         )
         .filter(fees_total__gt=0)
     )
+    if leave_out_lost:
+        with_fees = with_fees.exclude(stage=Stage.LOST)
     balances = [
         balance_of(fees=fees, paid=paid)
         for fees, paid in with_fees.values_list("fees_total", "paid_total")
@@ -196,6 +201,79 @@ def owing_students() -> OwingStudents:
 def owing_rows(rows: Iterable[tuple[int, str, int, int, int]]) -> list[OwingStudent]:
     """The rows of `OwingStudents.rows` (or a page of them) as `OwingStudent`s."""
     return [OwingStudent(*row) for row in rows]
+
+
+def office_fees_by_type() -> FeesByType:
+    """Fees by type for the whole office, for all time (spec 79-93).
+
+    The database adds up each Student's Fees and Payments per Fee Type; the calculator does
+    the rest.
+    """
+    sums = [
+        TypeSum(student_id=student, fee_type_id=fee_type, fees=total, paid=0)
+        for student, fee_type, total in _sums_per_student_and_type(Fee.objects.all())
+    ] + [
+        TypeSum(student_id=student, fee_type_id=fee_type, fees=0, paid=total)
+        for student, fee_type, total in _sums_per_student_and_type(Payment.objects.all())
+    ]
+    lost = set(Student.objects.filter(stage=Stage.LOST).values_list("pk", flat=True))
+    return fees_by_type(sums, lost=lost)
+
+
+def fee_types_of(found: FeesByType) -> list[FeeType]:
+    """The Fee Types that have money in `found`, in the office's own order."""
+    ids = [row.fee_type_id for row in found.types]
+    return list(FeeType.objects.filter(pk__in=ids).order_by("position", "pk"))
+
+
+@dataclass(frozen=True)
+class FeeTypeStudent:
+    """One Student under one Fee Type, with what the page shows about them."""
+
+    student_id: int
+    name: str
+    stage: str
+    lost_reason: str
+    fee: int
+    paid: int
+    still_to_pay: int
+
+
+def fee_type_students(found: FeesByType, fee_type_id: int, *, lost: bool) -> list[FeeTypeStudent]:
+    """One Fee Type's counted (or Lost) Students, most still to pay first, then by name."""
+    counted, lost_lines = found.students_of(fee_type_id)
+    lines: list[StudentLine] = lost_lines if lost else counted
+    people = {
+        pk: (name, stage, reason)
+        for pk, name, stage, reason in Student.objects.filter(
+            pk__in=[line.student_id for line in lines]
+        ).values_list("pk", "name", "stage", "lost_reason")
+    }
+    rows = [
+        FeeTypeStudent(
+            student_id=line.student_id,
+            name=people[line.student_id][0],
+            stage=people[line.student_id][1],
+            lost_reason=people[line.student_id][2] if lost else "",
+            fee=line.fee,
+            paid=line.paid,
+            still_to_pay=line.still_to_pay,
+        )
+        for line in lines
+    ]
+    return sorted(rows, key=lambda row: (-row.still_to_pay, row.name, row.student_id))
+
+
+def _sums_per_student_and_type(
+    amounts: QuerySet[Fee] | QuerySet[Payment],
+) -> Iterable[tuple[int, int, int]]:
+    """(Student, Fee Type, sum of `amount`) for every pair that has any."""
+    return (
+        amounts.order_by()
+        .values("student_id", "fee_type_id")
+        .annotate(total=Sum("amount"))
+        .values_list("student_id", "fee_type_id", "total")
+    )
 
 
 def _sum_per_student(amounts: QuerySet[Fee] | QuerySet[Payment]) -> Subquery:

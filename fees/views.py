@@ -20,9 +20,19 @@ from access.policy import (
     can_act_on_student,
     why_cannot,
 )
-from fees.answers import owing_student_answer, student_fees_answer
+from fee_types.models import FeeType
+from fees.answers import (
+    by_type_fee_type,
+    fee_type_row,
+    fee_type_student_answer,
+    fees_by_type_answer,
+    owing_student_answer,
+    student_fees_answer,
+)
 from fees.models import Fee
 from fees.serializers import (
+    LOST,
+    FeeTypeStudentsQuerySerializer,
     NewFeeSerializer,
     NoQuerySerializer,
     StudentFeesListQuerySerializer,
@@ -32,8 +42,11 @@ from fees.services import (
     balance_of_student,
     change_fee,
     delete_fee,
+    fee_type_students,
+    fee_types_of,
     fee_with_student,
     fees_of,
+    office_fees_by_type,
     owing_rows,
     owing_students,
 )
@@ -43,7 +56,7 @@ from staff.context import get_request_staff
 from staff.models import Staff
 from students.models import Student
 
-# Students per page of the Student fees list.
+# Students per page of the Student fees list, and of one Fee Type's Students.
 OWING_PER_PAGE = 25
 AccountsModuleIsOn = requires_module(Module.ACCOUNTS)
 
@@ -143,7 +156,7 @@ class StudentFeesListView(APIView):
         """Return one page of Students who owe, and the totals across everyone with Fees."""
         query = StudentFeesListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
-        found = owing_students()
+        found = owing_students(leave_out_lost=query.leaves_out_lost())
         try:
             page = Paginator(found.rows, OWING_PER_PAGE).page(query.page_number())
         except EmptyPage as error:
@@ -162,5 +175,52 @@ class StudentFeesListView(APIView):
                     "owing": totals.owing,
                 },
                 "results": [owing_student_answer(row) for row in owing_rows(page)],
+            }
+        )
+
+
+class FeesByTypeView(APIView):
+    """To collect, Received and Remaining, and one row per Fee Type (GET; spec 79-81, 84)."""
+
+    permission_classes = (IsAuthenticated, AccountsModuleIsOn, CanSeeBalances)
+
+    def get(self, request: Request) -> Response:
+        """Return the totals and the Fee Types that have money, for all time."""
+        NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
+        found = office_fees_by_type()
+        return Response(fees_by_type_answer(found, fee_types_of(found)))
+
+
+class FeeTypeStudentsView(APIView):
+    """One Fee Type's Students, counted or Lost, most still to pay first (GET; spec 82, 89)."""
+
+    permission_classes = (IsAuthenticated, AccountsModuleIsOn, CanSeeBalances)
+
+    def get(self, request: Request, fee_type_id: int) -> Response:
+        """Return the Fee Type's totals and one page of one part of its Students."""
+        query = FeeTypeStudentsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        try:
+            fee_type = FeeType.objects.get(pk=fee_type_id)
+        except FeeType.DoesNotExist as error:
+            raise NotFound from error
+        found = office_fees_by_type()
+        part = query.part_asked()
+        rows = fee_type_students(found, fee_type.pk, lost=part == LOST)
+        try:
+            page = Paginator(rows, OWING_PER_PAGE).page(query.page_number())
+        except EmptyPage as error:
+            raise NotFound from error
+        totals = fee_type_row(found, fee_type.pk)
+        return Response(
+            {
+                "fee_type": by_type_fee_type(fee_type),
+                "fees": totals.fees,
+                "received": totals.received,
+                "part": part,
+                "count": page.paginator.count,
+                "page": page.number,
+                "page_size": OWING_PER_PAGE,
+                "results": [fee_type_student_answer(row) for row in page],
             }
         )
