@@ -279,5 +279,9 @@ class TestStartup:
     def test_settings_logging_is_json_at_info_by_default(self) -> None:
         assert settings.LOGGING["root"] == {"handlers": ["json_handler"], "level": "INFO"}
 
-    def test_the_request_log_runs_first(self) -> None:
-        assert settings.MIDDLEWARE[0] == "config.middleware.RequestLogMiddleware"
+    def test_the_request_log_runs_first_after_the_unlogged_health_check(self) -> None:
+        # The health check (ticket 14) is answered before it, so it is never logged per request.
+        assert settings.MIDDLEWARE[:2] == [
+            "config.health.HealthMiddleware",
+            "config.middleware.RequestLogMiddleware",
+        ]

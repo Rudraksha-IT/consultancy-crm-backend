@@ -130,7 +130,9 @@ TENANT_MODEL = "tenancy.Consultancy"
 TENANT_DOMAIN_MODEL = "tenancy.Domain"
 
 MIDDLEWARE = [
-    # First, so every request (even a refused one) is logged with its correlation ID.
+    # The health check (ticket 14), called every few seconds: answered first, never logged.
+    "config.health.HealthMiddleware",
+    # Then every request (even a refused one) is logged with its correlation ID.
     "config.middleware.RequestLogMiddleware",
     "tenancy.middleware.InternalTokenMiddleware",
     "tenancy.middleware.ConsultancyHostMiddleware",
@@ -158,6 +160,10 @@ DATABASES = {
     }
 }
 DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
+
+# How long a deploy's migration waits for a table the running app holds (ticket 14), then fails
+# before the switch, leaving the old version running. Fixed, not a deploy value.
+MIGRATION_LOCK_TIMEOUT_MS = 5000
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
