@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 
 from django.conf import settings
 
+from communication.attachments import Attachable, read_files
 from communication.exceptions import NoContactEmailError
 from communication.models import Channel, Message, MessageStatus
 from communication.types import BulkResult, EmailText
@@ -19,7 +21,7 @@ from emails.builder import build_email
 from emails.exceptions import SendFailedError
 from emails.office import office_look
 from emails.sender import send_email
-from emails.types import BuiltEmail
+from emails.types import BuiltEmail, FileAttachment
 from emails.types import Message as EmailMessage
 from staff.actors import actor_name, stored_staff
 from staff.models import Staff
@@ -33,33 +35,53 @@ NO_EMAIL_MESSAGE = "This Student has no email address."
 TOO_SLOW_MESSAGE = "Not sent: sending took too long. Send again to this Student."
 
 
-def _built(consultancy: Consultancy, text: EmailText) -> BuiltEmail:
-    """The email in the office's look.
+@dataclass(frozen=True)
+class _Ready:
+    """An email ready to go: built in the office's look, with its files read."""
+
+    text: EmailText
+    email: BuiltEmail
+    files: list[FileAttachment]
+
+
+def _ready(consultancy: Consultancy, text: EmailText, files: Sequence[Attachable]) -> _Ready:
+    """The email in the office's look, with the files' bytes.
 
     Raises:
         NoContactEmailError: the office has no contact email yet.
+        AttachmentsUnreadableError: a file couldn't be read from storage.
     """
     if get_office_details(consultancy).contact_email == "":
         raise NoContactEmailError
-    return build_email(office_look(consultancy), EmailMessage(text.subject, text.body))
+    email = build_email(office_look(consultancy), EmailMessage(text.subject, text.body))
+    return _Ready(text, email, read_files(files))
 
 
 def send_to_student(
-    student: Student, text: EmailText, by: Staff, consultancy: Consultancy
+    student: Student,
+    text: EmailText,
+    by: Staff,
+    consultancy: Consultancy,
+    files: Sequence[Attachable] = (),
 ) -> Message:
-    """Email `student` and record it, sent or failed.
+    """Email `student`, with `files` attached (already checked), and record it, sent or failed.
 
     A missing email address, or a mail server that doesn't take it, is recorded as failed with
     its reason.
 
     Raises:
         NoContactEmailError: the office has no contact email; nothing is recorded.
+        AttachmentsUnreadableError: a file couldn't be read; nothing is sent or recorded.
     """
-    return _deliver(student, text, by, _built(consultancy, text))
+    return _deliver(student, by, _ready(consultancy, text, files))
 
 
 def send_to_students(
-    students: Iterable[Student], text: EmailText, by: Staff, consultancy: Consultancy
+    students: Iterable[Student],
+    text: EmailText,
+    by: Staff,
+    consultancy: Consultancy,
+    files: Sequence[Attachable] = (),
 ) -> BulkResult:
     """Email each of `students` their own copy, one by one, recording each, sent or failed.
 
@@ -69,13 +91,14 @@ def send_to_students(
 
     Raises:
         NoContactEmailError: the office has no contact email; nothing is recorded.
+        AttachmentsUnreadableError: a file couldn't be read; nothing is sent or recorded.
     """
-    email = _built(consultancy, text)
+    ready = _ready(consultancy, text, files)
     deadline = time.monotonic() + settings.BULK_SEND_SECONDS
     messages = [
-        _deliver(student, text, by, email)
+        _deliver(student, by, ready)
         if time.monotonic() < deadline
-        else _record(student, text, by, ("", TOO_SLOW_MESSAGE))
+        else _record(student, by, ready, ("", TOO_SLOW_MESSAGE))
         for student in students
     ]
     result = BulkResult(
@@ -91,26 +114,27 @@ def send_to_students(
     return result
 
 
-def _deliver(student: Student, text: EmailText, by: Staff, email: BuiltEmail) -> Message:
-    """Send `email` to `student` and record it, sent or failed."""
+def _deliver(student: Student, by: Staff, ready: _Ready) -> Message:
+    """Send the email to `student` and record it, sent or failed."""
     if student.email == "":
-        return _record(student, text, by, ("", NO_EMAIL_MESSAGE))
+        return _record(student, by, ready, ("", NO_EMAIL_MESSAGE))
     try:
-        send_email(email, student.email)
+        send_email(ready.email, student.email, files=ready.files)
     except SendFailedError as failure:
         # silent: the outside call logged it; stored as failed
-        return _record(student, text, by, (student.email, failure.reason))
-    return _record(student, text, by, (student.email, ""))
+        return _record(student, by, ready, (student.email, failure.reason))
+    return _record(student, by, ready, (student.email, ""))
 
 
-def _record(student: Student, text: EmailText, by: Staff, outcome: tuple[str, str]) -> Message:
+def _record(student: Student, by: Staff, ready: _Ready, outcome: tuple[str, str]) -> Message:
     """Store one email; `outcome` is where it went and why it failed ("" when sent)."""
     sent_to, error = outcome
     message = Message.objects.create(
         student=student,
         channel=Channel.EMAIL,
-        subject=text.subject,
-        body=text.body,
+        subject=ready.text.subject,
+        body=ready.text.body,
+        attachments=[file.file_name for file in ready.files],
         status=MessageStatus.FAILED if error else MessageStatus.SENT,
         error=error,
         sent_to=sent_to,
@@ -118,9 +142,10 @@ def _record(student: Student, text: EmailText, by: Staff, outcome: tuple[str, st
         sent_by_name=actor_name(by),
     )
     logger.info(
-        "Email sent: message_id=%s, student_id=%s, status=%s",
+        "Email sent: message_id=%s, student_id=%s, status=%s, attachments=%s",
         message.pk,
         student.pk,
         message.status,
+        len(ready.files),
     )
     return message

@@ -26,6 +26,7 @@ from batches.models import Batch
 from catalogue.intakes import intake_label
 from clock_in.models import WeeklyOff
 from clock_in.services import weekly_off
+from communication.attachments import Attachable, suggested_examples
 from communication.exceptions import (
     ReadyMadeOffError,
     ReadyMadeRefusedError,
@@ -141,6 +142,14 @@ class Record:
 
     id: int
     label: str
+
+
+@dataclass(frozen=True)
+class DraftWithFiles:
+    """A ready-made email's starting text, and the files it suggests attaching (each can go)."""
+
+    draft: Draft
+    files: tuple[Attachable, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,20 +282,39 @@ def _welcome(student: Student, _: Staff) -> ReadyMade:
 
 
 def _documents_needed(student: Student, _: Staff) -> ReadyMade:
-    """The required Documents not in yet, or Rejected, in checklist order, with instructions.
+    email, __ = _documents_needed_with_examples(student)
+    return email
 
-    Each carries its Document Example instruction (spec 34). Attaching the examples comes with
-    ticket 12.
+
+def _documents_needed_with_examples(
+    student: Student,
+) -> tuple[DocumentsNeeded, tuple[Attachable, ...]]:
+    """The required Documents not in yet, or Rejected, in checklist order, and their examples.
+
+    Each carries its Document Example instruction; the examples are suggested as attachments,
+    and the email says so only when there are some (spec 34).
+
+    Raises:
+        ReadyMadeUnavailableError: every required Document is in.
     """
     found = checklist_of(student)
-    missing = tuple(
-        MissingDocument(name=item.name, instruction=_instruction(found.guides.get(item.type_id)))
-        for item in found.checklist.items
-        if item.is_required and item.state in _STILL_NEEDED
-    )
-    if not missing:
+    items = [
+        item for item in found.checklist.items if item.is_required and item.state in _STILL_NEEDED
+    ]
+    if not items:
         raise ReadyMadeUnavailableError(EVERYTHING_IN_MESSAGE)
-    return DocumentsNeeded(documents=missing, has_examples=False)
+    guides = [found.guides.get(item.type_id) for item in items]
+    missing = tuple(
+        MissingDocument(name=item.name, instruction=_instruction(guide))
+        for item, guide in zip(items, guides, strict=True)
+    )
+    files = tuple(
+        suggested_examples(
+            [guide for guide in guides if guide is not None],
+            [item.name for item, guide in zip(items, guides, strict=True) if guide is not None],
+        )
+    )
+    return DocumentsNeeded(documents=missing, has_examples=bool(files)), files
 
 
 def _instruction(guide: TypeGuide | None) -> str | None:
@@ -380,7 +408,7 @@ def _none_message(record_kind: RecordKind, staff: Staff) -> str:
 # ---- The drafts --------------------------------------------------------------------------------
 
 
-def student_draft(student: Student, kind: Kind, record: str | None, asker: Asker) -> Draft:
+def student_draft(student: Student, kind: Kind, record: str | None, asker: Asker) -> DraftWithFiles:
     """The ready-made email `kind` for this Student, about `record` (an id as typed), filled in.
 
     Raises:
@@ -391,16 +419,27 @@ def student_draft(student: Student, kind: Kind, record: str | None, asker: Asker
     """
     _check_module_on(kind, asker)
     record_kind = _RECORD_OF.get(kind)
-    if record_kind is None:
+    files: tuple[Attachable, ...] = ()
+    email: ReadyMade
+    if kind == Kind.DOCUMENTS_NEEDED:
+        _check_no_record(record)
+        email, files = _documents_needed_with_examples(student)
+    elif record_kind is None:
         _check_no_record(record)
         email = _ABOUT_THE_STUDENT[kind](student, asker.staff)
     else:
         email = _about(record_kind, student, record, asker.staff)
-    logger.info("Email draft made: kind=%s, student_id=%s", kind.value, student.pk)
-    return _fitting(draft_email(_context(asker, first_name=_first_name(student)), email))
+    logger.info(
+        "Email draft made: kind=%s, student_id=%s, attachments=%s",
+        kind.value,
+        student.pk,
+        len(files),
+    )
+    draft = draft_email(_context(asker, first_name=_first_name(student)), email)
+    return DraftWithFiles(_fitting(draft), files)
 
 
-def many_draft(kind: Kind, record: str | None, asker: Asker) -> Draft:
+def many_draft(kind: Kind, record: str | None, asker: Asker) -> DraftWithFiles:
     """The ready-made email `kind` for many Students, starting "Dear Student,".
 
     Raises:
@@ -417,7 +456,7 @@ def many_draft(kind: Kind, record: str | None, asker: Asker) -> Draft:
         _check_no_record(record)
         email = PlainEmail()
     logger.info("Email draft made for many: kind=%s, staff_id=%s", kind.value, asker.staff.pk)
-    return _fitting(draft_email(_context(asker, first_name=None), email))
+    return DraftWithFiles(_fitting(draft_email(_context(asker, first_name=None), email)))
 
 
 def _check_module_on(kind: Kind, asker: Asker) -> None:

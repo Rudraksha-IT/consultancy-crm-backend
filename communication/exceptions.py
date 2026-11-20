@@ -31,3 +31,15 @@ class RecordNotChosenError(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class AttachmentRefusedError(Exception):
+    """The files named can't go with this email; `reason` is safe to show."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class AttachmentsUnreadableError(Exception):
+    """Storage couldn't give back a file to attach, so nothing was sent."""

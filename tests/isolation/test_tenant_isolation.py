@@ -60,7 +60,7 @@ from tests.conftest import (
     run_queued_jobs,
     use_access_token,
 )
-from tests.fakes import FakeDocumentStorage
+from tests.fakes import FakeDocumentStorage, StoredFile
 from tests.support_access import open_as_platform_admin
 from tests.support_access import start as start_visit
 from transfer_requests.models import TransferRequest, TransferRequestStatus
@@ -6014,3 +6014,132 @@ class TestDocumentExampleIsolation:
         ]
 
         assert [answer.status_code for answer in answers] == [401] * 5
+
+
+_OTHER_PDF = b"%PDF-1.7\n% from the other office\n%%EOF\n"
+
+
+class TestEmailAttachmentIsolation:
+    """Ticket 12: an email carries only this office's files, and only that Student's Documents."""
+
+    def _office(
+        self, make_consultancy: ConsultancyFactory, name: str, subdomain: str
+    ) -> tuple[ConsultancyContext, Student]:
+        """An office (Admin in, Email on, a contact email) with one Student who has an email."""
+        office = make_consultancy(name, subdomain)
+        switch_modules(office.consultancy, {Module.COMMUNICATION})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
+        office.log_in_as(Role.ADMIN)
+        with tenant_context(office.consultancy):
+            student = Student.objects.create(
+                name=f"{name} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
+            )
+        return office, student
+
+    def _passport_file(self, office: ConsultancyContext, student: Student, content: bytes) -> int:
+        """A file of the Student's Passport, with its bytes in storage: its id."""
+        with tenant_context(office.consultancy):
+            document = Document.objects.create(
+                student=student, document_type=DocumentType.objects.get(name="Passport")
+            )
+            file = DocumentFile.objects.create(
+                document=document,
+                file_name="passport.pdf",
+                content_type="application/pdf",
+                size=len(content),
+                storage_key=f"{office.consultancy.schema_name}/documents/{student.pk}/p.pdf",
+            )
+        FakeDocumentStorage.files[file.storage_key] = StoredFile(content, "application/pdf")
+        return int(file.pk)
+
+    def _send(
+        self, office: ConsultancyContext, student_id: int, attachments: list[dict[str, object]]
+    ) -> int:
+        body = {"subject": "Files", "body": "Dear Student,\n\nHere.", "attachments": attachments}
+        response = office.client.post(f"{STUDENTS_URL}{student_id}/messages/", body, format="json")
+        return int(response.status_code)
+
+    def test_another_offices_files_are_never_attached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _, file_id = _course_with_file(abc, "Deakin")
+        _, example_id = _type_with_example(abc)
+        document_file = self._passport_file(abc, abc_student, _COURSE_PDF)
+
+        statuses = [
+            self._send(xyz, xyz_student.pk, [{"kind": "course_file", "id": file_id}]),
+            self._send(xyz, xyz_student.pk, [{"kind": "document_example", "id": example_id}]),
+            self._send(xyz, xyz_student.pk, [{"kind": "document_file", "id": document_file}]),
+        ]
+
+        assert statuses == [400] * 3
+        assert mail.outbox == []
+        with tenant_context(xyz.consultancy):
+            assert not Message.objects.exists()
+
+    def test_the_same_ids_attach_only_this_offices_own_files(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        abc_file = self._passport_file(abc, abc_student, _COURSE_PDF)
+        xyz_file = self._passport_file(xyz, xyz_student, _OTHER_PDF)
+        assert abc_file == xyz_file
+
+        status_code = self._send(xyz, xyz_student.pk, [{"kind": "document_file", "id": xyz_file}])
+
+        assert status_code == status.HTTP_201_CREATED
+        [sent] = mail.outbox
+        [part] = [p for p in sent.message().walk() if p.get_content_disposition() == "attachment"]
+        assert part.get_payload(decode=True) == _OTHER_PDF
+
+    def test_each_office_lists_only_its_own_files(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _course_with_file(abc, "Deakin")
+        _type_with_example(abc)
+        self._passport_file(abc, abc_student, _COURSE_PDF)
+
+        mine = xyz.client.get(f"{STUDENTS_URL}{xyz_student.pk}/emails/attachable/").json()
+        many = xyz.client.get("/api/messages/bulk/attachable/").json()
+        theirs = xyz.client.get(f"{STUDENTS_URL}{abc_student.pk + 1000}/emails/attachable/")
+
+        assert (mine["course_files"], mine["document_examples"], mine["documents"]) == ([], [], [])
+        assert (many["course_files"], many["document_examples"]) == ([], [])
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, _ = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _, file_id = _course_with_file(abc, "Deakin")
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+
+        answers = [
+            intruder.get(f"{STUDENTS_URL}{abc_student.pk}/emails/attachable/"),
+            intruder.get("/api/messages/bulk/attachable/"),
+            intruder.post(
+                f"{STUDENTS_URL}{abc_student.pk}/messages/",
+                {
+                    "subject": "x",
+                    "body": "y",
+                    "attachments": [{"kind": "course_file", "id": file_id}],
+                },
+                format="json",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 3
+        assert mail.outbox == []

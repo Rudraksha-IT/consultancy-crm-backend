@@ -101,6 +101,7 @@ def message_answer(message: Message, student: Student, staff: Staff) -> dict[str
         "status": message.status,
         "error": message.error,
         "sent_to": message.sent_to,
+        "attachments": message.attachments,
         "sent_at": message.sent_at.isoformat(),
         "sent_by": {"id": staff.pk, "name": staff.name},
     }
@@ -333,7 +334,7 @@ class TestSendingToOneStudent:
         [message] = stored_messages(abc)
         [line] = json_logs.with_message("Email sent")
         assert line["message"] == (
-            f"Email sent: message_id={message.pk}, student_id={sita.pk}, status=sent"
+            f"Email sent: message_id={message.pk}, student_id={sita.pk}, status=sent, attachments=0"
         )
         for private in ("Secret subject", "Namaste secret words", "sita@example.com"):
             assert private not in json_logs.text()

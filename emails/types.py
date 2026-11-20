@@ -138,6 +138,15 @@ class InlineImage:
 
 
 @dataclass(frozen=True)
+class FileAttachment:
+    """A file sent with the email, taken from the app (never from a Staff member's computer)."""
+
+    file_name: str
+    content_type: str
+    content: bytes
+
+
+@dataclass(frozen=True)
 class BuiltEmail:
     """A finished email, ready for the sender: one-line subject, HTML and a plain-text copy."""
 

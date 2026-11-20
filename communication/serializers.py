@@ -6,6 +6,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from communication.attachments import MAX_ATTACHMENTS, AttachmentKind, Chosen
 from communication.models import SUBJECT_MAX_LENGTH
 from communication.ready_made import Kind
 from communication.types import EmailText
@@ -30,6 +31,10 @@ CHOOSE_SOMEONE_MESSAGE = "Choose at least one Student."
 CHOOSE_FROM_LIST_MESSAGE = "Choose Students from the list."
 BATCH_MESSAGE = "Choose a class."
 KIND_MESSAGE = "Choose one of the ready-made emails."
+CHOOSE_FILES_MESSAGE = "Choose files from the list."
+TOO_MANY_FILES_MESSAGE = f"Attach at most {MAX_ATTACHMENTS} files."
+_ATTACHMENT_KEYS = frozenset({"kind", "id"})
+_ATTACHMENT_KINDS = frozenset(kind.value for kind in AttachmentKind)
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "max_length")
 
 
@@ -74,15 +79,67 @@ class MessageBodyField(StrictCharField):
         return value
 
 
+def _is_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= LARGEST_ID
+
+
+def _chosen(item: object) -> Chosen | None:
+    """One file named `{"kind": …, "id": …}` and nothing else, or None when it isn't."""
+    if not isinstance(item, dict) or set(item) != _ATTACHMENT_KEYS:
+        return None
+    kind, pk = item["kind"], item["id"]
+    if not isinstance(kind, str) or kind not in _ATTACHMENT_KINDS or not _is_id(pk):
+        return None
+    return Chosen(AttachmentKind(kind), pk)
+
+
+class AttachmentsField(serializers.Field[list[Chosen], list[Chosen], list[Chosen], Any]):
+    """The files to attach, each named `{"kind": …, "id": …}`; nothing else is taken.
+
+    Whether each file is in use, and may go with this email, is the service's to check.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            required=False,
+            error_messages={"null": CHOOSE_FILES_MESSAGE, "invalid": CHOOSE_FILES_MESSAGE},
+        )
+
+    def get_default(self) -> list[Chosen]:
+        """No files unless some are named."""
+        return []
+
+    def to_internal_value(self, data: object) -> list[Chosen]:
+        """Return the files named, in order; anything but a short list of them is refused."""
+        if not isinstance(data, list):
+            self.fail("invalid")
+        if len(data) > MAX_ATTACHMENTS:
+            raise serializers.ValidationError(TOO_MANY_FILES_MESSAGE)
+        chosen = [_chosen(item) for item in data]
+        if None in chosen:
+            self.fail("invalid")
+        return [item for item in chosen if item is not None]
+
+    def to_representation(self, value: list[Chosen]) -> list[Chosen]:
+        """The files as they are."""
+        return value
+
+
 class NewEmailSerializer(StrictSerializer[None]):
-    """An email to one Student: the subject line and message Staff wrote."""
+    """An email to one Student: the subject line and message Staff wrote, and files to attach."""
 
     subject = SubjectField()
     body = MessageBodyField()
+    attachments = AttachmentsField()
 
     def email_text(self) -> EmailText:
         """The trimmed subject line and message."""
         return EmailText(self.validated_data["subject"], self.validated_data["body"])
+
+    def attachments_chosen(self) -> list[Chosen]:
+        """The files named, in order (none when none were named)."""
+        chosen: list[Chosen] = self.validated_data["attachments"]
+        return chosen
 
 
 class StudentIdsField(serializers.Field[list[int], list[int], list[int], Any]):

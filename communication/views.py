@@ -26,8 +26,23 @@ from rest_framework.views import APIView
 from access.policy import BatchAction, why_cannot_on_batches
 from batches.models import Batch
 from batches.services import members_of
-from communication.answers import bulk_answer, choosable_answer, message_answer
-from communication.exceptions import NoContactEmailError
+from communication.answers import (
+    attachable_answer,
+    bulk_answer,
+    choosable_answer,
+    message_answer,
+)
+from communication.attachments import (
+    Attachable,
+    Chosen,
+    attachable_files,
+    chosen_files,
+)
+from communication.exceptions import (
+    AttachmentRefusedError,
+    AttachmentsUnreadableError,
+    NoContactEmailError,
+)
 from communication.models import Message
 from communication.permissions import CanMessageStudents, CommunicationModuleIsOn
 from communication.serializers import (
@@ -43,7 +58,7 @@ from staff.context import get_request_staff
 from students.models import Stage, Student
 from students.services import find_students
 from students.types import StudentFilters
-from tasks.serializers import PageSerializer
+from tasks.serializers import NoQuerySerializer, PageSerializer
 from tenancy.context import get_request_consultancy
 
 # Rows per page of a list.
@@ -56,6 +71,7 @@ NO_CONTACT_EMAIL_MESSAGE = (
     "Your Admin needs to add the office's contact email in Configuration first."
 )
 NO_CONTACT_EMAIL_CODE = "no_contact_email"
+NOT_FETCHED_MESSAGE = "We couldn't get the attached files. Try again."
 
 # Logged in first, so a logged-out caller can't learn whether the Module is on.
 MESSAGING: tuple[type[BasePermission], ...] = (
@@ -76,6 +92,21 @@ class NoContactEmail(APIException):
             "detail": ErrorDetail(NO_CONTACT_EMAIL_MESSAGE),
             "code": ErrorDetail(NO_CONTACT_EMAIL_CODE),
         }
+
+
+class FilesNotFetched(APIException):
+    """Storage couldn't give back a file to attach; nothing was sent (503)."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = NOT_FETCHED_MESSAGE
+
+
+def _files(chosen: list[Chosen], student: Student | None) -> list[Attachable]:
+    """The files named, checked for an email to `student` (None: to many), or 400."""
+    try:
+        return chosen_files(chosen, student)
+    except AttachmentRefusedError as error:
+        raise ValidationError({"attachments": [error.reason]}) from error
 
 
 def _messages_page(rows: QuerySet[Message], request: Request) -> Response:
@@ -122,15 +153,19 @@ class StudentMessagesView(APIView):
         student = student_or_404(student_id)
         serializer = NewEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        files = _files(serializer.attachments_chosen(), student)
         try:
             message = send_to_student(
                 student,
                 serializer.email_text(),
                 by=get_request_staff(request),
                 consultancy=get_request_consultancy(request),
+                files=files,
             )
         except NoContactEmailError as error:
             raise NoContactEmail from error
+        except AttachmentsUnreadableError as error:
+            raise FilesNotFetched from error
         return Response(message_answer(message), status=status.HTTP_201_CREATED)
 
 
@@ -174,16 +209,43 @@ class BulkMessagesView(APIView):
         serializer = BulkEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         students = _chosen(serializer.student_ids())
+        files = _files(serializer.attachments_chosen(), None)
         try:
             result = send_to_students(
                 students,
                 serializer.email_text(),
                 by=get_request_staff(request),
                 consultancy=get_request_consultancy(request),
+                files=files,
             )
         except NoContactEmailError as error:
             raise NoContactEmail from error
+        except AttachmentsUnreadableError as error:
+            raise FilesNotFetched from error
         return Response(bulk_answer(result), status=status.HTTP_201_CREATED)
+
+
+class StudentAttachableView(APIView):
+    """What can be attached to an email to one Student (GET): their own Documents too."""
+
+    permission_classes = MESSAGING
+
+    def get(self, request: Request, student_id: int) -> Response:
+        """Return the Course Files, Document Examples and the Student's Document files."""
+        NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
+        student = student_or_404(student_id)
+        return Response(attachable_answer(attachable_files(student)))
+
+
+class ManyAttachableView(APIView):
+    """What can be attached to an email to many Students (GET): never a Student's Documents."""
+
+    permission_classes = MESSAGING
+
+    def get(self, request: Request) -> Response:
+        """Return the Course Files and Document Examples."""
+        NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
+        return Response(attachable_answer(attachable_files(None)))
 
 
 def _chosen(ids: list[int]) -> list[Student]:

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from communication.attachments import MAX_EMAIL_BYTES, Attachable, AttachableFiles
 from communication.models import Message
-from communication.ready_made import MenuEntry
+from communication.ready_made import DraftWithFiles, MenuEntry
 from communication.types import BulkResult
-from emails.types import Draft
 from students.models import Student
 
 
@@ -20,6 +20,7 @@ def message_answer(message: Message) -> dict[str, object]:
         "status": message.status,
         "error": message.error,
         "sent_to": message.sent_to,
+        "attachments": list(message.attachments),
         "sent_at": message.sent_at.isoformat(),
         "sent_by": {"id": message.sent_by_id, "name": message.sent_by_name},
     }
@@ -60,6 +61,32 @@ def menu_answer(entries: list[MenuEntry]) -> dict[str, object]:
     }
 
 
-def draft_answer(draft: Draft) -> dict[str, object]:
-    """A ready-made email's starting subject line and message, as plain text."""
-    return {"subject": draft.subject, "body": draft.text}
+def attachable_row(file: Attachable) -> dict[str, object]:
+    """One file that can be attached, as the picker shows it."""
+    return {
+        "kind": file.kind.value,
+        "id": file.id,
+        "name": file.name,
+        "file_name": file.file_name,
+        "size": file.size,
+        "group": file.group,
+    }
+
+
+def attachable_answer(files: AttachableFiles) -> dict[str, object]:
+    """Everything that can be attached, by where it comes from, and the most one email carries."""
+    return {
+        "course_files": [attachable_row(file) for file in files.course_files],
+        "document_examples": [attachable_row(file) for file in files.document_examples],
+        "documents": [attachable_row(file) for file in files.documents],
+        "max_bytes": MAX_EMAIL_BYTES,
+    }
+
+
+def draft_answer(draft: DraftWithFiles) -> dict[str, object]:
+    """A ready-made email's starting subject line and message, and the files it suggests."""
+    return {
+        "subject": draft.draft.subject,
+        "body": draft.draft.text,
+        "attachments": [attachable_row(file) for file in draft.files],
+    }

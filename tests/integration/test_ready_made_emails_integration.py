@@ -549,6 +549,7 @@ class TestDrafts:
         assert drafted(abc, sita, "plain") == {
             "subject": "",
             "body": f"Dear Sita,\n\n\n\n{SIGN_OFF}",
+            "attachments": [],
         }
 
     def test_it_is_signed_by_whoever_asks(self, abc: ConsultancyContext, sita: Student) -> None:
@@ -741,7 +742,9 @@ class TestRefusedDrafts:
         drafted(abc, sita, "welcome")
 
         [line] = json_logs.with_message("Email draft made")
-        assert line["message"] == f"Email draft made: kind=welcome, student_id={sita.pk}"
+        assert line["message"] == (
+            f"Email draft made: kind=welcome, student_id={sita.pk}, attachments=0"
+        )
         for private in ("Sita", "sita@example.com", "Ram Bahadur"):
             assert private not in json_logs.text()
 
@@ -855,7 +858,11 @@ class TestEmailToMany:
         plain = bulk_draft(abc, "plain").json()
         details = bulk_draft(abc, "class_details", batch.pk).json()
 
-        assert plain == {"subject": "", "body": f"Dear Student,\n\n\n\n{SIGN_OFF}"}
+        assert plain == {
+            "subject": "",
+            "body": f"Dear Student,\n\n\n\n{SIGN_OFF}",
+            "attachments": [],
+        }
         assert details["subject"] == "Your class: IELTS Morning"
         assert details["body"].startswith("Dear Student,\n\nHere are the details of your class")
 

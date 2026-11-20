@@ -45,6 +45,8 @@ class Message(models.Model):
     error = models.CharField(max_length=ERROR_MAX_LENGTH, blank=True, default="")
     # The address (or, for a past SMS, the number) it went to, as it was then.
     sent_to = models.CharField(max_length=SENT_TO_MAX_LENGTH, blank=True, default="")
+    # The names of the files sent with it, in order (spec story 51); the files stay where they are.
+    attachments = models.JSONField(default=list, blank=True)
     # None when a Platform Admin did it during Support Access; the name says who (issue 27).
     sent_by = models.ForeignKey(Staff, on_delete=models.PROTECT, null=True, related_name="+")
     # Who sent it, as they were named then.
