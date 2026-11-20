@@ -11,7 +11,7 @@ from documents.bin_answers import bin_answer
 def example_answer(example: DocumentExample) -> dict[str, object]:
     """One example file in use: its name, what it is, its size and when it was added."""
     return {
-        "id": example.pk,
+        "id": example.public_id,
         "file_name": example.file_name,
         "content_type": example.content_type,
         "size": example.size,
@@ -29,7 +29,7 @@ def binned_example_answer(example: DocumentExample) -> dict[str, object]:
     document_type = example.document_type
     return {
         "kind": "document_example",
-        "document_example": {"id": example.pk, "file_name": example.file_name},
-        "document_type": {"id": document_type.pk, "name": document_type.name},
+        "document_example": {"id": example.public_id, "file_name": example.file_name},
+        "document_type": {"id": document_type.public_id, "name": document_type.name},
         **bin_answer(example),
     }

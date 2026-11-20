@@ -82,7 +82,7 @@ def with_ids(office: ConsultancyContext, body: object) -> object:
     if isinstance(body, dict) and isinstance(body.get("fee_type"), str):
         with tenant_context(office.consultancy):
             found = FeeType.objects.filter(name=body["fee_type"]).first()
-        return {**body, "fee_type": found.pk if found else body["fee_type"]}
+        return {**body, "fee_type": str(found.public_id) if found else body["fee_type"]}
     return body
 
 
@@ -134,7 +134,7 @@ class TestStudentFees:
             "fees": [
                 {
                     "id": str(first.public_id),
-                    "fee_type": {"id": first.fee_type_id, "name": "Application fee"},
+                    "fee_type": {"id": str(first.fee_type.public_id), "name": "Application fee"},
                     "note": "",
                     "amount": 25000,
                     "added_by": {"name": "Anita Admin"},
@@ -142,7 +142,7 @@ class TestStudentFees:
                 },
                 {
                     "id": str(second.public_id),
-                    "fee_type": {"id": second.fee_type_id, "name": "Visa fee"},
+                    "fee_type": {"id": str(second.fee_type.public_id), "name": "Visa fee"},
                     "note": "",
                     "amount": 40000,
                     "added_by": {"name": "Anita Admin"},

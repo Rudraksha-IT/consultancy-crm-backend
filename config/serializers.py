@@ -14,7 +14,8 @@ UNKNOWN_FIELD_KEY = "detail"
 NOT_TEXT_MESSAGE = "Not a valid string."
 NOT_A_RECORD_ID_MESSAGE = "Not a valid id."
 # A UUID as the server writes it (ADR 0027): lower-case hex in 8-4-4-4-12.
-_RECORD_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+RECORD_ID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_RECORD_ID = re.compile(RECORD_ID_PATTERN)
 
 
 def parse_record_id(data: object) -> uuid.UUID | None:

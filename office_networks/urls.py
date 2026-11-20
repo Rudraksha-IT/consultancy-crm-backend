@@ -8,7 +8,7 @@ urlpatterns: list[URLPattern] = [
     path("office-networks/", OfficeNetworksView.as_view(), name="office-networks"),
     path("office-networks/current/", CurrentNetworkView.as_view(), name="office-networks-current"),
     path(
-        "office-networks/<int:office_network_id>/",
+        "office-networks/<office_network:office_network_id>/",
         OfficeNetworkView.as_view(),
         name="office-network",
     ),

@@ -11,6 +11,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from django.db import migrations, models
+from django.urls import register_converter
 
 if TYPE_CHECKING:
     from django.apps.registry import Apps
@@ -60,3 +61,32 @@ def pk_for[Record: models.Model](records: QuerySet[Record], public_id: uuid.UUID
     """
     found = records.filter(public_id=public_id).values_list("pk", flat=True).first()
     return 0 if found is None else int(found)
+
+
+class RecordConverter:
+    """An address part naming a record by UUID, handed to the view as its number.
+
+    Only a UUID in the server's spelling matches (anything else is 404 at once). A UUID that
+    names no record of `model` in this office (the schema chosen from the host) reaches the view
+    as 0, which no record has: the view checks the login and Role first, then answers 404 as it
+    does for any unknown record.
+    """
+
+    regex = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    model: type[models.Model]
+
+    def to_python(self, value: str) -> int:
+        """The record's number; 0 (no record) when there is none."""
+        return pk_for(self.model._default_manager.all(), uuid.UUID(value))
+
+    def to_url(self, value: int) -> str:
+        """The record's UUID, for an address built from its number."""
+        records = self.model._default_manager.filter(pk=value)
+        return str(records.values_list(PUBLIC_ID, flat=True).get())
+
+
+def register_record_converters(converters: dict[str, type[models.Model]]) -> None:
+    """Make `<name:…>` in an address a record of that model named by UUID (ADR 0027)."""
+    for name, model in converters.items():
+        converter = type(f"{model.__name__}Converter", (RecordConverter,), {"model": model})
+        register_converter(converter, name)

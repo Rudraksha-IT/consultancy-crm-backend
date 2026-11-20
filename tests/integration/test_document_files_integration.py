@@ -150,7 +150,7 @@ class TestUploadingSeveralFiles:
                 "content_type": "application/pdf",
                 "size": len(PDF_BYTES),
                 "uploaded_at": file.uploaded_at.isoformat(),
-                "uploaded_by": {"id": me.pk, "name": "Bikash Thapa"},
+                "uploaded_by": {"id": str(me.public_id), "name": "Bikash Thapa"},
             }
         ]
 
@@ -391,7 +391,7 @@ class TestAddingFiles:
         body = add_files(abc, student, document).json()
 
         assert shown_document(body)["files"][1]["uploaded_by"] == {
-            "id": admin.pk,
+            "id": str(admin.public_id),
             "name": "Maya Admin",
         }
 

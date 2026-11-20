@@ -31,10 +31,10 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of the office's Fee Type with this name."""
     with tenant_context(office.consultancy):
-        return FeeType.objects.get(name=name).pk
+        return str(FeeType.objects.get(name=name).public_id)
 
 
 def type_url(office: ConsultancyContext, name: str) -> str:

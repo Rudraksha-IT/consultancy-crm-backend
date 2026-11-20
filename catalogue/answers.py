@@ -11,7 +11,7 @@ from documents.models import DocumentRequirement
 def _documents(requirements: list[DocumentRequirement]) -> list[dict[str, object]]:
     """The extra Document Types asked for (issue 40), oldest type first."""
     return [
-        {"id": requirement.document_type_id, "name": requirement.document_type.name}
+        {"id": requirement.document_type.public_id, "name": requirement.document_type.name}
         for requirement in requirements
     ]
 
@@ -20,8 +20,8 @@ def course_answer(course: Course) -> dict[str, object]:
     """One Course with its Intakes ("YYYY-MM", AD), oldest first, and its Course Files."""
     files = list(course.files.all())
     return {
-        "id": course.pk,
-        "university_id": course.university_id,
+        "id": course.public_id,
+        "university_id": course.university.public_id,
         "name": course.name,
         "level": course.level,
         "intakes": [intake.month for intake in course.intakes.all()],
@@ -45,7 +45,7 @@ def _uses(course: Course) -> int:
 def university_answer(university: University) -> dict[str, object]:
     """One University with the Courses that were loaded with it."""
     return {
-        "id": university.pk,
+        "id": university.public_id,
         "name": university.name,
         "country": university.country,
         "archived": university.archived,

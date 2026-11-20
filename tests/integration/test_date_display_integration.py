@@ -19,10 +19,10 @@ DATES_URL = "/api/configuration/dates/"
 PAYMENTS_URL = "/api/students/{id}/payments/"
 
 
-def pte_id(office: ConsultancyContext) -> int:
+def pte_id(office: ConsultancyContext) -> str:
     """The id of the office's PTE class Fee Type."""
     with tenant_context(office.consultancy):
-        return FeeType.objects.get(name="PTE class").pk
+        return str(FeeType.objects.get(name="PTE class").public_id)
 
 
 class TestDateDisplayInContext:

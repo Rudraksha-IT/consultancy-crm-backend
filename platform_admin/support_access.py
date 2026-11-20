@@ -19,7 +19,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from platform_admin.models import PlatformAdmin, SupportVisit
-from staff.models import PLATFORM_VISITOR_ID, PlatformVisitor, Role, StaffStatus
+from staff.models import (
+    PLATFORM_VISITOR_ID,
+    PLATFORM_VISITOR_PUBLIC_ID,
+    PlatformVisitor,
+    Role,
+    StaffStatus,
+)
 from tenancy.models import Consultancy
 from tenancy.services import NOT_READY_MESSAGE, get_status, is_ready
 from tenancy.status import ConsultancyStatus
@@ -172,6 +178,7 @@ def visitor_for(visit: SupportVisit) -> PlatformVisitor:
     admin = visit.platform_admin
     visitor = PlatformVisitor(
         pk=PLATFORM_VISITOR_ID,
+        public_id=PLATFORM_VISITOR_PUBLIC_ID,
         name=admin.name,
         email=admin.email,
         role=Role.ADMIN,

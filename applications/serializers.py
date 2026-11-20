@@ -22,7 +22,12 @@ from applications.types import (
     VisaSort,
 )
 from catalogue.models import Course
-from config.serializers import UNKNOWN_FIELD_KEY, RecordIdField, StrictSerializer
+from config.serializers import (
+    UNKNOWN_FIELD_KEY,
+    RecordIdField,
+    StrictSerializer,
+    parse_record_id,
+)
 from students.models import Country
 from students.profile_serializers import INTAKE_MESSAGE, INTAKE_PATTERN
 from students.serializers import (
@@ -56,29 +61,30 @@ def _same_message(message: str) -> dict[str, Any]:
     return dict.fromkeys(_ALL_MESSAGES, message)
 
 
-class CatalogueCourseField(serializers.Field[Course, int, int, Any]):
-    """A Course picked by id from the active Catalogue: neither it nor its University archived."""
+class CatalogueCourseField(serializers.Field[Course, str, str, Any]):
+    """A Course picked by UUID from the active Catalogue: neither it nor its University archived."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(CHOOSE_COURSE_MESSAGE))
 
     def to_internal_value(self, data: object) -> Course:
-        """Return the Course; a non-integer or anything not pickable is refused."""
-        if isinstance(data, bool) or not isinstance(data, int):
+        """Return the Course; anything but the UUID of one that can be picked is refused."""
+        public_id = parse_record_id(data)
+        if public_id is None:
             self.fail("invalid")
         course = (
             Course.objects.select_related("university")
             .prefetch_related("intakes")
-            .filter(pk=data, archived=False, university__archived=False)
+            .filter(public_id=public_id, archived=False, university__archived=False)
             .first()
         )
         if course is None:
             self.fail("invalid")
         return course
 
-    def to_representation(self, value: Course) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return int(value.pk)
+    def to_representation(self, value: Course) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.public_id)
 
 
 class NewApplicationSerializer(StrictSerializer[None]):

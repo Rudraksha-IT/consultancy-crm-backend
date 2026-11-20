@@ -138,7 +138,7 @@ class Asker:
 class Record:
     """A record a ready-made email can be about, as the picker shows it."""
 
-    id: int | UUID  # its UUID (ADR 0027); a class still by number until ticket 18
+    id: UUID  # its UUID (ADR 0027)
     label: str
 
 
@@ -478,10 +478,10 @@ def _about(
     raise RecordNotChosenError(CHOOSE_MESSAGES[record_kind])
 
 
-def _outside_id(row: Model) -> int | UUID:
-    """The id the picker shows for a record: its UUID, or a class's number until ticket 18."""
-    public_id: UUID | None = getattr(row, "public_id", None)
-    return int(row.pk) if public_id is None else public_id
+def _outside_id(row: Model) -> UUID:
+    """The id the picker shows for a record: its UUID (ADR 0027)."""
+    public_id: UUID = row.serializable_value("public_id")
+    return public_id
 
 
 def _context(asker: Asker, *, first_name: str | None) -> DraftContext:

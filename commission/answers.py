@@ -10,9 +10,9 @@ def commission_answer(commission: Commission) -> dict[str, object]:
     """One Commission: whose, which University and Intake, how much, and where it is."""
     student, university = commission.student, commission.university
     return {
-        "id": commission.pk,
+        "id": commission.public_id,
         "student": {"id": student.public_id, "name": student.name},
-        "university": {"id": university.pk, "name": university.name},
+        "university": {"id": university.public_id, "name": university.name},
         "intake": commission.intake,
         "amount": commission.amount,
         "status": commission.status,

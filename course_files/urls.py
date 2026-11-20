@@ -11,12 +11,12 @@ from course_files.views import (
     CourseFileView,
 )
 
-ONE_FILE = "catalogue/course-files/<int:file_id>/"
-ONE_BINNED = "documents/bin/course-files/<int:file_id>/"
+ONE_FILE = "catalogue/course-files/<course_file:file_id>/"
+ONE_BINNED = "documents/bin/course-files/<course_file:file_id>/"
 
 urlpatterns: list[URLPattern] = [
     path(
-        "catalogue/courses/<int:course_id>/files/",
+        "catalogue/courses/<course:course_id>/files/",
         CourseFileListView.as_view(),
         name="catalogue-course-files",
     ),

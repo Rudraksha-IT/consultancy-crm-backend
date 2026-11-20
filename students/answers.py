@@ -25,7 +25,7 @@ from transfer_requests.services import waiting_request_for
 
 
 def _counsellor(staff: Staff | None) -> dict[str, object] | None:
-    return None if staff is None else {"id": staff.pk, "name": staff.name}
+    return None if staff is None else {"id": staff.public_id, "name": staff.name}
 
 
 def student_row(student: Student) -> dict[str, object]:

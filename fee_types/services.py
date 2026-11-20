@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, IntegerField, Max, OuterRef, QuerySet, Subquery, Value
@@ -121,14 +122,14 @@ def delete_fee_type(type_id: int, by: Staff) -> None:
     logger.info("Fee type deleted: fee_type_id=%s, by_staff_id=%s", type_id, by.pk)
 
 
-def reorder_fee_types(order: list[int], by: Staff) -> None:
-    """Put the Fee Types in this order: every Fee Type's id, each once.
+def reorder_fee_types(order: list[UUID], by: Staff) -> None:
+    """Put the Fee Types in this order: every Fee Type's UUID, each once.
 
     Raises:
         FeeTypeOrderError: The ids aren't exactly every Fee Type's, each once.
     """
     with transaction.atomic():
-        fee_types = {t.pk: t for t in FeeType.objects.select_for_update()}
+        fee_types = {t.public_id: t for t in FeeType.objects.select_for_update()}
         if len(order) != len(set(order)) or set(order) != set(fee_types):
             raise FeeTypeOrderError
         for position, type_id in enumerate(order, start=1):

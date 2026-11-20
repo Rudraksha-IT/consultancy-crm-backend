@@ -13,7 +13,7 @@ def fee_type_answer(fee_type: FeeType, *, with_uses: bool) -> dict[str, object]:
         else None
     )
     return {
-        "id": fee_type.pk,
+        "id": fee_type.public_id,
         "name": fee_type.name,
         "hidden": fee_type.hidden,
         "other": fee_type.is_other,
@@ -23,4 +23,4 @@ def fee_type_answer(fee_type: FeeType, *, with_uses: bool) -> dict[str, object]:
 
 def fee_type_ref(fee_type: FeeType) -> dict[str, object]:
     """The Fee Type a Fee or Payment is for, as its answer names it."""
-    return {"id": fee_type.pk, "name": fee_type.name}
+    return {"id": fee_type.public_id, "name": fee_type.name}

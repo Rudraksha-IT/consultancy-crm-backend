@@ -6,10 +6,11 @@ The server never trusts the browser (issues README).
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from rest_framework import serializers
 
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from fee_types.models import FEE_TYPE_NAME_MAX_LENGTH, NOTE_MAX_LENGTH, FeeType
 from fee_types.services import MAX_FEE_TYPES, FeeTypeChange
 from modules.serializers import StrictBooleanField
@@ -25,7 +26,6 @@ OTHER_NEEDS_NOTE_MESSAGE = "Add a short note for Other."
 NOTE_LENGTH_MESSAGE = f"Use at most {NOTE_MAX_LENGTH} characters."
 NOTE_MESSAGE = "Write the note as one line of text."
 # Larger numbers can't be an id.
-MAX_ID = 2**31 - 1
 _ALL_MESSAGES = ("required", "null", "blank", "invalid")
 
 
@@ -71,29 +71,22 @@ class FeeTypeChangeSerializer(StrictSerializer[None]):
         return FeeTypeChange(name=data.get("name"), hidden=data.get("hidden"))
 
 
-def _whole_id(data: object) -> int | None:
-    """A positive whole-number id, or None for text, decimals, true/false or anything too big."""
-    if isinstance(data, bool) or not isinstance(data, int) or not 1 <= data <= MAX_ID:
-        return None
-    return data
-
-
-class _OrderIdField(serializers.Field[int, int, int, Any]):
-    """One Fee Type's id in the new order."""
+class _OrderIdField(serializers.Field[UUID, str, str, Any]):
+    """One Fee Type's UUID in the new order (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=dict.fromkeys(_ALL_MESSAGES, ORDER_MESSAGE))
 
-    def to_internal_value(self, data: object) -> int:
-        """Return the id."""
-        found = _whole_id(data)
+    def to_internal_value(self, data: object) -> UUID:
+        """Return the UUID."""
+        found = parse_record_id(data)
         if found is None:
             self.fail("invalid")
         return found
 
-    def to_representation(self, value: int) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return value
+    def to_representation(self, value: UUID) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value)
 
 
 _ORDER_MESSAGES = (*_ALL_MESSAGES, "not_a_list", "empty", "max_length")
@@ -109,31 +102,31 @@ class FeeTypeOrderSerializer(StrictSerializer[None]):
         error_messages=dict.fromkeys(_ORDER_MESSAGES, ORDER_MESSAGE),
     )
 
-    def order_value(self) -> list[int]:
-        """The ids in the new order."""
+    def order_value(self) -> list[UUID]:
+        """The UUIDs in the new order."""
         return list(self.validated_data["order"])
 
 
-class FeeTypeField(serializers.Field[FeeType, int, int, Any]):
-    """The Fee Type a Fee or Payment is for, by its id, in this Consultancy."""
+class FeeTypeField(serializers.Field[FeeType, str, str, Any]):
+    """The Fee Type a Fee or Payment is for, by its UUID, in this Consultancy (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=dict.fromkeys(_ALL_MESSAGES, CHOOSE_FEE_TYPE_MESSAGE))
 
     def to_internal_value(self, data: object) -> FeeType:
         """Return the Fee Type; hidden ones too (`check_fee_type_and_note` decides)."""
-        found = _whole_id(data)
+        found = parse_record_id(data)
         if found is None:
             self.fail("invalid")
         try:
-            return FeeType.objects.get(pk=found)
+            return FeeType.objects.get(public_id=found)
         except FeeType.DoesNotExist:
             # self.fail raises the field's validation error
             self.fail("invalid")
 
-    def to_representation(self, value: FeeType) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return value.pk
+    def to_representation(self, value: FeeType) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.public_id)
 
 
 class NoteField(PlainTextField):

@@ -11,6 +11,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from office_networks.exceptions import OfficeNetworkChangeIsAppendOnlyError
 from office_networks.networks import MAX_NETWORK_LENGTH
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
@@ -20,6 +21,9 @@ LABEL_MAX_LENGTH = 60
 
 class OfficeNetwork(models.Model):
     """One internet address or range Staff may clock in from, with a name such as "Main wifi"."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     label = models.CharField(max_length=LABEL_MAX_LENGTH)
     # The network in CIDR form as `networks.parse_office_network` returns it, e.g.
@@ -55,6 +59,9 @@ class AppendOnlyQuerySet(models.QuerySet["OfficeNetworkChange"]):
 
 class OfficeNetworkChange(models.Model):
     """One Office Network added or removed: who, when and what, kept as it was."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     action = models.CharField(max_length=10, choices=OfficeNetworkAction.choices)
     label = models.CharField(max_length=LABEL_MAX_LENGTH)

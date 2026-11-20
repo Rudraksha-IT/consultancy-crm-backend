@@ -136,13 +136,18 @@ def _appointment_text(booked: Booked | None) -> str:
     return f"{booked.kind.label} {timezone.localtime(booked.at):%Y-%m-%d %H:%M}"
 
 
-def _counsellor_filter(value: Any, viewer: Staff) -> str:  # noqa: ANN401  # "me", "none" or an id
+def _counsellor_filter(value: Any, viewer: Staff) -> str:  # noqa: ANN401  # "me", "none", a UUID
     """Whose Students, as the person exporting saw it."""
     if value == COUNSELLOR_ME:
         return f"{actor_name(viewer)}'s Students"
     if value == COUNSELLOR_NONE:
         return NO_COUNSELLOR_TEXT
-    name = Staff.objects.filter(pk=int(value)).values_list("name", flat=True).first()
+    public_id = parse_record_id(value)
+    name = (
+        None
+        if public_id is None
+        else Staff.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
     return UNKNOWN_COUNSELLOR_TEXT if name is None else str(name)
 
 
@@ -166,8 +171,13 @@ def _day(moment: datetime) -> str:
 
 
 def _fee_type_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
-    """The Fee Type's name; one deleted since reads as unknown."""
-    found = FeeType.objects.filter(pk=value).values_list("name", flat=True).first()
+    """The Fee Type's name, from its UUID; one deleted since reads as unknown."""
+    public_id = parse_record_id(str(value))
+    found = (
+        None
+        if public_id is None
+        else FeeType.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
     return found or UNKNOWN_FEE_TYPE_TEXT
 
 

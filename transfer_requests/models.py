@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 
@@ -27,6 +28,9 @@ class TransferRequestStatus(models.TextChoices):
 
 class TransferRequest(models.Model):
     """One request by a Staff member to become a Student's Assigned Counsellor."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="transfer_requests")
     asked_by = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")

@@ -87,7 +87,7 @@ def upload(
 ) -> _MonkeyPatchedResponse:
     """POST a Document as a form, with a Passport PDF unless `fields` say otherwise."""
     body: dict[str, object] = {
-        "document_type": str(type_named(office, "Passport").pk),
+        "document_type": str(type_named(office, "Passport").public_id),
         "file": a_file(),
         **fields,
     }
@@ -174,7 +174,7 @@ class TestChecklist:
         assert item_states(body) == [(name, "not_received") for name in DEFAULT_TYPES]
         assert (body["done"], body["total"], body["can_change"]) == (0, 8, True)
         assert body["items"][0] == {
-            "document_type": {"id": type_named(abc, "Passport").pk, "name": "Passport"},
+            "document_type": {"id": str(type_named(abc, "Passport").public_id), "name": "Passport"},
             "reason": "",
             "is_required": True,
             "added_for_student": False,
@@ -334,7 +334,10 @@ class TestUploading:
 
         body = upload(abc, student).json()
 
-        assert body["items"][0]["document"]["uploaded_by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert body["items"][0]["document"]["uploaded_by"] == {
+            "id": str(me.public_id),
+            "name": "Bikash Thapa",
+        }
 
     @pytest.mark.parametrize(
         ("content", "content_type"), [(JPEG_BYTES, "image/jpeg"), (PNG_BYTES, "image/png")]
@@ -372,7 +375,7 @@ class TestUploading:
         with tenant_context(abc.consultancy):
             police = DocumentType.objects.create(name="Police report")
 
-        body = upload(abc, student, document_type=str(police.pk)).json()
+        body = upload(abc, student, document_type=str(police.public_id)).json()
 
         assert item_states(body)[-1] == ("Police report", "waiting")
 
@@ -456,7 +459,7 @@ class TestUploading:
 class TestRefusedUploads:
     def test_no_file_is_refused(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
-        body = {"document_type": str(type_named(abc, "Passport").pk)}
+        body = {"document_type": str(type_named(abc, "Passport").public_id)}
 
         response = abc.client.post(documents_url(student), body, format="multipart")
 
@@ -562,7 +565,7 @@ class TestRefusedUploads:
 
     def test_a_json_body_is_refused(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
-        body = {"document_type": type_named(abc, "Passport").pk, "file": "JVBERi0="}
+        body = {"document_type": str(type_named(abc, "Passport").public_id), "file": "JVBERi0="}
 
         response = abc.client.post(documents_url(student), body, format="json")
 
@@ -709,11 +712,11 @@ class TestUploadSerializer:
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
             serializer = DocumentUploadSerializer(
-                data={"document_type": str(passport.pk), "file": a_file()}
+                data={"document_type": str(passport.public_id), "file": a_file()}
             )
 
             assert serializer.is_valid(), serializer.errors
-            assert DocumentTypeField().to_representation(passport) == passport.pk
+            assert DocumentTypeField().to_representation(passport) == str(passport.public_id)
 
     def test_models_name_themselves(self, abc: ConsultancyContext) -> None:
         student = make_student(abc)

@@ -12,6 +12,7 @@ from django.db.models.functions import Length
 from django.db.models.lookups import LessThanOrEqual
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from staff.models import Staff
 
 # The longest message, in characters.
@@ -20,6 +21,9 @@ INBOX_MESSAGE_MAX_LENGTH = 2000
 
 class InboxMessage(models.Model):
     """One message from `sender` to `recipient`, unread until the recipient opens it."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     sender = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")
     recipient = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")

@@ -8,6 +8,7 @@ Catalogue's upcoming Intakes.
 
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -53,12 +54,12 @@ EARLIER = month_of(TODAY.replace(day=1) - timedelta(days=40))
 LATER = f"{TODAY.year + 2}-03"
 
 
-def university_url(university_id: int) -> str:
+def university_url(university_id: object) -> str:
     """One University."""
     return f"{UNIVERSITIES_URL}{university_id}/"
 
 
-def course_url(course_id: int) -> str:
+def course_url(course_id: object) -> str:
     """One Course."""
     return f"/api/catalogue/courses/{course_id}/"
 
@@ -131,13 +132,13 @@ def course_row(course: Course | None = None, **changes: object) -> dict[str, obj
         "documents": [],
     }
     if course is not None:
-        row["id"] = course.pk
+        row["id"] = str(course.public_id)
     return {**row, **changes}
 
 
 def page_body(
     courses: list[dict[str, object]] | None = None,
-    deleted: list[int] | None = None,
+    deleted: list[str] | None = None,
     **changes: object,
 ) -> dict[str, object]:
     """Everything the edit page sends."""
@@ -155,7 +156,7 @@ def save_page(
     office: ConsultancyContext, university: University, body: dict[str, object]
 ) -> _MonkeyPatchedResponse:
     """PUT the whole edit page."""
-    return office.client.put(university_url(university.pk), body, format="json")
+    return office.client.put(university_url(university.public_id), body, format="json")
 
 
 def stored_courses(office: ConsultancyContext, university: University) -> list[tuple[str, bool]]:
@@ -184,7 +185,7 @@ class TestOneUniversity:
         make_course(abc, university, "Master of Nursing", archived=True)
         make_application(abc, used)
 
-        response = abc.client.get(university_url(university.pk))
+        response = abc.client.get(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_200_OK
         body = response.json()
@@ -200,13 +201,15 @@ class TestOneUniversity:
         abc.log_in_as(role)
         university = make_university(abc)
 
-        assert abc.client.get(university_url(university.pk)).status_code == status.HTTP_200_OK
+        assert (
+            abc.client.get(university_url(university.public_id)).status_code == status.HTTP_200_OK
+        )
 
     def test_a_teacher_cannot(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.TEACHER)
         university = make_university(abc)
 
-        response = abc.client.get(university_url(university.pk))
+        response = abc.client.get(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_FOR_TEACHERS
@@ -219,7 +222,7 @@ class TestOneUniversity:
     def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         university = make_university(abc)
 
-        response = abc.new_client().get(university_url(university.pk))
+        response = abc.new_client().get(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -235,7 +238,9 @@ class TestSavingTheEditPage:
             country="canada",
             courses=[
                 course_row(nursing, name="Bachelor of Nursing (Honours)", intakes=[NOV, FEB, NOV]),
-                course_row(None, name="Master of IT", level="master", documents=[reference.pk]),
+                course_row(
+                    None, name="Master of IT", level="master", documents=[str(reference.public_id)]
+                ),
             ],
         )
 
@@ -249,7 +254,9 @@ class TestSavingTheEditPage:
             ("Bachelor of Nursing (Honours)", "bachelor", [FEB, NOV]),
             ("Master of IT", "master", [FEB]),
         ]
-        assert answer["courses"][1]["documents"] == [{"id": reference.pk, "name": "Work Reference"}]
+        assert answer["courses"][1]["documents"] == [
+            {"id": str(reference.public_id), "name": "Work Reference"}
+        ]
         assert stored_intakes(abc, nursing) == [FEB, NOV]
 
     def test_nothing_is_stored_when_one_course_is_refused(self, abc: ConsultancyContext) -> None:
@@ -411,7 +418,7 @@ class TestSavingTheEditPage:
         sent = {
             "other": [course_row(elsewhere)],
             "twice": [course_row(nursing), course_row(nursing, name="Copy")],
-            "unknown": [{**course_row(nursing), "id": 999_999}],
+            "unknown": [{**course_row(nursing), "id": str(uuid.uuid4())}],
         }[rows]
 
         response = save_page(abc, university, page_body(courses=sent))
@@ -432,7 +439,9 @@ class TestSavingTheEditPage:
         everyone = make_type(abc, "Citizenship Card", everyone=True)
 
         response = save_page(
-            abc, university, page_body(courses=[course_row(nursing, documents=[everyone.pk])])
+            abc,
+            university,
+            page_body(courses=[course_row(nursing, documents=[str(everyone.public_id)])]),
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -576,7 +585,7 @@ class TestSavingTheEditPage:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = abc.client.post(university_url(university.pk), page_body(), format="json")
+        response = abc.client.post(university_url(university.public_id), page_body(), format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -630,7 +639,9 @@ class TestRacesTheChecksMiss:
         make_application(abc, old)
         monkeypatch.setattr(UniversityEditSerializer, "_check_deleted", lambda *_: None)
 
-        response = save_page(abc, university, page_body(name="Renamed", deleted=[old.pk]))
+        response = save_page(
+            abc, university, page_body(name="Renamed", deleted=[str(old.public_id)])
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -697,7 +708,7 @@ class TestPastMonths:
         university = make_university(abc)
 
         response = abc.client.post(
-            f"{university_url(university.pk)}courses/",
+            f"{university_url(university.public_id)}courses/",
             {"name": "Master of IT", "level": "master", "intakes": [EARLIER]},
             format="json",
         )
@@ -714,9 +725,11 @@ class TestPastMonths:
         nursing = make_course(abc, make_university(abc), intakes=(EARLIER, LATER))
 
         refused = abc.client.patch(
-            course_url(nursing.pk), {"intakes": [EARLIER, LAST_MONTH, LATER]}, format="json"
+            course_url(nursing.public_id), {"intakes": [EARLIER, LAST_MONTH, LATER]}, format="json"
         )
-        kept = abc.client.patch(course_url(nursing.pk), {"intakes": [EARLIER]}, format="json")
+        kept = abc.client.patch(
+            course_url(nursing.public_id), {"intakes": [EARLIER]}, format="json"
+        )
 
         assert refused.status_code == status.HTTP_400_BAD_REQUEST
         assert kept.status_code == status.HTTP_200_OK
@@ -728,7 +741,9 @@ class TestIntakesOnTheList:
         abc.log_in_as(Role.ADMIN)
         nursing = make_course(abc, make_university(abc), intakes=(NOV,))
 
-        response = abc.client.patch(course_url(nursing.pk), {"intakes": [NOV, FEB]}, format="json")
+        response = abc.client.patch(
+            course_url(nursing.public_id), {"intakes": [NOV, FEB]}, format="json"
+        )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["intakes"] == [FEB, NOV]
@@ -740,7 +755,9 @@ class TestIntakesOnTheList:
         nursing = make_course(abc, make_university(abc), intakes=(FEB, JUL))
         application = make_application(abc, nursing, FEB)
 
-        response = abc.client.patch(course_url(nursing.pk), {"intakes": [JUL]}, format="json")
+        response = abc.client.patch(
+            course_url(nursing.public_id), {"intakes": [JUL]}, format="json"
+        )
 
         assert response.status_code == status.HTTP_200_OK
         assert stored_intakes(abc, nursing) == [JUL]
@@ -753,7 +770,7 @@ class TestIntakesOnTheList:
         abc.log_in_as(Role.ADMIN)
         nursing = make_course(abc, make_university(abc), intakes=(FEB,))
 
-        response = abc.client.patch(course_url(nursing.pk), {"intakes": []}, format="json")
+        response = abc.client.patch(course_url(nursing.public_id), {"intakes": []}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"intakes": ["Add at least one intake."]}
@@ -766,7 +783,9 @@ class TestIntakesOnTheList:
         make_application(abc, nursing, FEB)
         make_application(abc, nursing, JUL)
 
-        response = abc.client.patch(course_url(nursing.pk), {"intakes": [FEB, JUL]}, format="json")
+        response = abc.client.patch(
+            course_url(nursing.public_id), {"intakes": [FEB, JUL]}, format="json"
+        )
 
         assert response.json()["applications"] == 2
 
@@ -780,18 +799,20 @@ class TestAddingACourseOnTheList:
         reference = make_type(abc, "Work Reference")
 
         response = abc.client.post(
-            f"{university_url(university.pk)}courses/",
+            f"{university_url(university.public_id)}courses/",
             {
                 "name": "Master of IT",
                 "level": "master",
                 "intakes": [FEB],
-                "documents": [reference.pk],
+                "documents": [str(reference.public_id)],
             },
             format="json",
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.json()["documents"] == [{"id": reference.pk, "name": "Work Reference"}]
+        assert response.json()["documents"] == [
+            {"id": str(reference.public_id), "name": "Work Reference"}
+        ]
 
     def test_a_refused_document_adds_nothing(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -799,12 +820,12 @@ class TestAddingACourseOnTheList:
         everyone = make_type(abc, "Citizenship Card", everyone=True)
 
         response = abc.client.post(
-            f"{university_url(university.pk)}courses/",
+            f"{university_url(university.public_id)}courses/",
             {
                 "name": "Master of IT",
                 "level": "master",
                 "intakes": [FEB],
-                "documents": [everyone.pk],
+                "documents": [str(everyone.public_id)],
             },
             format="json",
         )
@@ -829,7 +850,7 @@ class TestDeletingCourses:
             DocumentRequirement.objects.create(document_type=reference, course=old)
 
         response = save_page(
-            abc, university, page_body(courses=[course_row(keep)], deleted=[old.pk])
+            abc, university, page_body(courses=[course_row(keep)], deleted=[str(old.public_id)])
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -846,7 +867,7 @@ class TestDeletingCourses:
         university = make_university(abc)
         nursing = make_course(abc, university)
 
-        response = save_page(abc, university, page_body(deleted=[nursing.pk]))
+        response = save_page(abc, university, page_body(deleted=[str(nursing.public_id)]))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -860,7 +881,7 @@ class TestDeletingCourses:
         old = make_course(abc, university, archived=True)
         make_application(abc, old)
 
-        response = save_page(abc, university, page_body(deleted=[old.pk]))
+        response = save_page(abc, university, page_body(deleted=[str(old.public_id)]))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -877,9 +898,9 @@ class TestDeletingCourses:
         old = make_course(abc, university, archived=True)
         elsewhere = make_course(abc, make_university(abc, "Monash"), "Elsewhere", archived=True)
         courses, deleted = {
-            "kept_too": ([course_row(old)], [old.pk]),
-            "other_university": ([], [elsewhere.pk]),
-            "twice": ([], [old.pk, old.pk]),
+            "kept_too": ([course_row(old)], [str(old.public_id)]),
+            "other_university": ([], [str(elsewhere.public_id)]),
+            "twice": ([], [str(old.public_id), str(old.public_id)]),
         }[which]
 
         response = save_page(abc, university, page_body(courses=courses, deleted=deleted))
@@ -902,7 +923,7 @@ class TestDeletingAUniversity:
         with tenant_context(abc.consultancy):
             DocumentRequirement.objects.create(document_type=reference, course=nursing)
 
-        response = abc.client.delete(university_url(university.pk))
+        response = abc.client.delete(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         with tenant_context(abc.consultancy):
@@ -916,7 +937,7 @@ class TestDeletingAUniversity:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = abc.client.delete(university_url(university.pk))
+        response = abc.client.delete(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "Archive the university and save before deleting it."}
@@ -933,7 +954,7 @@ class TestDeletingAUniversity:
         make_application(abc, first)
         make_application(abc, second)
 
-        response = abc.client.delete(university_url(university.pk))
+        response = abc.client.delete(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "Used by 2 applications, so it stays archived."}
@@ -954,7 +975,7 @@ class TestDeletingAUniversity:
                 recorded_by_name=admin.name,
             )
 
-        response = abc.client.delete(university_url(university.pk))
+        response = abc.client.delete(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "Used by 1 commission, so it stays archived."}
@@ -964,7 +985,7 @@ class TestDeletingAUniversity:
         abc.log_in_as(role)
         university = make_university(abc, archived=True)
 
-        response = abc.client.delete(university_url(university.pk))
+        response = abc.client.delete(university_url(university.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         with tenant_context(abc.consultancy):
@@ -981,7 +1002,7 @@ class TestDeletingAUniversity:
         admin = abc.log_in_as(Role.ADMIN)
         university = make_university(abc, "Secret Name University", archived=True)
 
-        abc.client.delete(university_url(university.pk))
+        abc.client.delete(university_url(university.public_id))
 
         json_logs.only(
             f"University deleted: university_id={university.pk}, courses=0, by_staff_id={admin.pk}"

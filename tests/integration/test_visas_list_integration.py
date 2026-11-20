@@ -122,18 +122,18 @@ class TestRows:
                 "email": "sita@gmail.test",
             },
             "university": {
-                "id": course.university_id,
+                "id": str(course.university.public_id),
                 "name": "University of Toronto",
                 "country": "canada",
             },
-            "course": {"id": course.pk, "name": course.name, "level": "master"},
+            "course": {"id": str(course.public_id), "name": course.name, "level": "master"},
             "intake": "2027-09",
             "status": "applied",
             "next_appointment": {"kind": "interview", "at": local_text(when)},
             "started_on": timezone.localdate().isoformat(),
             # A new office starts with the Document Types every Student needs.
             "documents": {"done": 0, "total": STARTING_TYPES, "rejected": 0, "waiting": 0},
-            "assigned_counsellor": {"id": bikash.pk, "name": "Bikash Thapa"},
+            "assigned_counsellor": {"id": str(bikash.public_id), "name": "Bikash Thapa"},
         }
 
     def test_no_appointment_and_no_counsellor_are_empty(self, abc: ConsultancyContext) -> None:
@@ -369,7 +369,7 @@ class TestFilters:
         with tenant_context(office.consultancy):
             bikash = Staff.objects.get(name="Bikash Thapa")
 
-        by_id = names_in(listed(office, {"counsellor": str(bikash.pk)}))
+        by_id = names_in(listed(office, {"counsellor": str(bikash.public_id)}))
         log_in(office, bikash)
         mine = names_in(listed(office, {"counsellor": "me"}))
 

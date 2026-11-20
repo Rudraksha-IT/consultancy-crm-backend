@@ -5,6 +5,7 @@ Country lists are in test_country_document_lists_integration.py; University list
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,6 +34,9 @@ from tests.integration.test_stage_and_counsellor_integration import (
     named_staff,
 )
 
+# A record UUID that no office has (ADR 0027).
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
 if TYPE_CHECKING:
     from rest_framework.response import _MonkeyPatchedResponse
 
@@ -53,13 +57,13 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def course_documents_url(course: Course | int) -> str:
+def course_documents_url(course: Course | int | str) -> str:
     """Where a Course's extra documents are set."""
-    pk = course if isinstance(course, int) else course.pk
+    pk = course if isinstance(course, int | str) else course.public_id
     return f"/api/catalogue/courses/{pk}/documents/"
 
 
-def asked_url(student: Student | int | str, type_id: int | None = None) -> str:
+def asked_url(student: Student | int | str, type_id: object = None) -> str:
     """Where the documents asked for one Student are set, or one is taken off."""
     pk = student if isinstance(student, int | str) else student.public_id
     one = "" if type_id is None else f"{type_id}/"
@@ -77,10 +81,10 @@ def optional_type(office: ConsultancyContext, name: str) -> DocumentType:
         return DocumentType.objects.create(name=name, needed_by_everyone=False)
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of one of the office's Document Types."""
     with tenant_context(office.consultancy):
-        return int(DocumentType.objects.get(name=name).pk)
+        return str(DocumentType.objects.get(name=name).public_id)
 
 
 def put(office: ConsultancyContext, url: str, ids: object) -> _MonkeyPatchedResponse:
@@ -124,10 +128,10 @@ class TestCourseDocuments:
         course = make_course(abc)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, course_documents_url(course), [cv.pk])
+        response = put(abc, course_documents_url(course), [str(cv.public_id)])
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["documents"] == [{"id": cv.pk, "name": "CV"}]
+        assert response.json()["documents"] == [{"id": str(cv.public_id), "name": "CV"}]
         assert response.json()["name"] == "Master of IT"
         assert stored_requirements(abc) == [("Master of IT", "CV")]
 
@@ -137,19 +141,21 @@ class TestCourseDocuments:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc, "Federation University")
         cv = optional_type(abc, "CV")
-        put(abc, course_documents_url(course), [cv.pk])
+        put(abc, course_documents_url(course), [str(cv.public_id)])
 
         [university] = abc.client.get(CATALOGUE_URL).json()["results"]
 
         assert "documents" not in university
-        assert university["courses"][0]["documents"] == [{"id": cv.pk, "name": "CV"}]
+        assert university["courses"][0]["documents"] == [{"id": str(cv.public_id), "name": "CV"}]
 
     def test_the_university_list_endpoint_is_gone(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, f"{CATALOGUE_URL}{course.university_id}/documents/", [cv.pk])
+        response = put(
+            abc, f"{CATALOGUE_URL}{course.university.public_id}/documents/", [str(cv.public_id)]
+        )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert stored_requirements(abc) == []
@@ -162,9 +168,9 @@ class TestCourseDocuments:
         gs = optional_type(abc, "Genuine Student statement")
         cv = optional_type(abc, "CV")
         url = course_documents_url(course)
-        put(abc, url, [gs.pk, cv.pk])
+        put(abc, url, [str(gs.public_id), str(cv.public_id)])
 
-        put(abc, url, [cv.pk])
+        put(abc, url, [str(cv.public_id)])
         kept = stored_requirements(abc)
         cleared = put(abc, url, [])
 
@@ -177,7 +183,7 @@ class TestCourseDocuments:
         course = make_course(abc, archived=True)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, course_documents_url(course), [cv.pk])
+        response = put(abc, course_documents_url(course), [str(cv.public_id)])
 
         assert response.status_code == status.HTTP_200_OK
 
@@ -196,7 +202,7 @@ class TestCourseDocuments:
         course = make_course(abc)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, course_documents_url(course), [cv.pk])
+        response = put(abc, course_documents_url(course), [str(cv.public_id)])
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == refused
@@ -206,7 +212,7 @@ class TestCourseDocuments:
         abc.log_in_as(Role.ADMIN)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, course_documents_url(999_999), [cv.pk])
+        response = put(abc, course_documents_url(SOME_UUID), [str(cv.public_id)])
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -231,7 +237,7 @@ class TestCourseDocuments:
         course = make_course(abc, "Federation University")
         cv = optional_type(abc, "CV")
 
-        put(abc, course_documents_url(course), [cv.pk])
+        put(abc, course_documents_url(course), [str(cv.public_id)])
 
         [entry] = json_logs.with_message("Document requirements set")
         assert "Master" not in entry["message"]
@@ -279,7 +285,7 @@ class TestRefusedLists:
         url = _target_url(abc, target)
         cv = optional_type(abc, "CV")
 
-        response = put(abc, url, [cv.pk, cv.pk])
+        response = put(abc, url, [str(cv.public_id), str(cv.public_id)])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"document_types": ["Choose each document only once."]}
@@ -304,7 +310,7 @@ class TestRefusedLists:
     ) -> None:
         url = _target_url(abc, "course")
 
-        response = put(abc, url, list(range(1, MAX_DOCUMENT_TYPES + 2)))
+        response = put(abc, url, [str(uuid.uuid4()) for _ in range(MAX_DOCUMENT_TYPES + 1)])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -425,13 +431,13 @@ class TestAskingOneStudent:
         student = own_student(abc)
         portfolio = optional_type(abc, "Portfolio")
 
-        response = put(abc, asked_url(student), [portfolio.pk])
+        response = put(abc, asked_url(student), [str(portfolio.public_id)])
 
         assert response.status_code == status.HTTP_200_OK
         body = response.json()
         assert items(body)[-1] == ("Portfolio", ADDED_FOR_STUDENT)
         assert body["items"][-1]["added_for_student"] is True
-        assert body["asked"] == [portfolio.pk]
+        assert body["asked"] == [str(portfolio.public_id)]
         assert body["total"] == len(DEFAULT_TYPES) + 1
         assert stored_requirements(abc) == [("Sita Gurung", "Portfolio")]
 
@@ -440,7 +446,7 @@ class TestAskingOneStudent:
         abc.log_in_as(Role.ADMIN)
         portfolio = optional_type(abc, "Portfolio")
 
-        response = put(abc, asked_url(student), [portfolio.pk])
+        response = put(abc, asked_url(student), [str(portfolio.public_id)])
 
         assert response.status_code == status.HTTP_200_OK
 
@@ -463,7 +469,7 @@ class TestAskingOneStudent:
 
         responses = [
             put(abc, asked_url(student), []),
-            abc.client.delete(asked_url(student, portfolio.pk)),
+            abc.client.delete(asked_url(student, portfolio.public_id)),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_403_FORBIDDEN] * 2
@@ -473,9 +479,9 @@ class TestAskingOneStudent:
     def test_not_needed_takes_it_off_the_checklist(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
         portfolio = optional_type(abc, "Portfolio")
-        put(abc, asked_url(student), [portfolio.pk])
+        put(abc, asked_url(student), [str(portfolio.public_id)])
 
-        response = abc.client.delete(asked_url(student, portfolio.pk))
+        response = abc.client.delete(asked_url(student, portfolio.public_id))
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["total"] == len(DEFAULT_TYPES)
@@ -485,11 +491,11 @@ class TestAskingOneStudent:
     def test_not_needed_is_refused_once_a_file_is_uploaded(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
         portfolio = optional_type(abc, "Portfolio")
-        put(abc, asked_url(student), [portfolio.pk])
+        put(abc, asked_url(student), [str(portfolio.public_id)])
         make_document(abc, student, "Portfolio")
 
         responses = [
-            abc.client.delete(asked_url(student, portfolio.pk)),
+            abc.client.delete(asked_url(student, portfolio.public_id)),
             put(abc, asked_url(student), []),
         ]
 
@@ -507,10 +513,10 @@ class TestAskingOneStudent:
     def test_a_rejected_file_counts_as_uploaded_too(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
         portfolio = optional_type(abc, "Portfolio")
-        put(abc, asked_url(student), [portfolio.pk])
+        put(abc, asked_url(student), [str(portfolio.public_id)])
         make_document(abc, student, "Portfolio", Verification.REJECTED)
 
-        response = abc.client.delete(asked_url(student, portfolio.pk))
+        response = abc.client.delete(asked_url(student, portfolio.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -519,9 +525,9 @@ class TestAskingOneStudent:
         portfolio = optional_type(abc, "Portfolio")
 
         responses = [
-            abc.client.delete(asked_url(student, portfolio.pk)),
+            abc.client.delete(asked_url(student, portfolio.public_id)),
             abc.client.delete(asked_url(student, 999_999)),
-            abc.client.delete(asked_url(999_999, portfolio.pk)),
+            abc.client.delete(asked_url(999_999, portfolio.public_id)),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 3
@@ -536,7 +542,7 @@ class TestAskingOneStudent:
         with tenant_context(abc.consultancy):
             DocumentRequirement.objects.create(document_type=cv, course=course)
 
-        response = abc.client.delete(asked_url(student, cv.pk))
+        response = abc.client.delete(asked_url(student, cv.public_id))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert stored_requirements(abc) == [("Master of IT", "CV")]
@@ -547,7 +553,7 @@ class TestAskingOneStudent:
 
         responses = [
             getattr(abc.client, method)(asked_url(student)),
-            getattr(abc.client, method)(asked_url(student, 1)),
+            getattr(abc.client, method)(asked_url(student, SOME_UUID)),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_405_METHOD_NOT_ALLOWED] * 2
@@ -555,7 +561,10 @@ class TestAskingOneStudent:
     def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         student = make_student(abc)
 
-        responses = [put(abc, asked_url(student), []), abc.client.delete(asked_url(student, 1))]
+        responses = [
+            put(abc, asked_url(student), []),
+            abc.client.delete(asked_url(student, SOME_UUID)),
+        ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
 
@@ -695,8 +704,8 @@ class TestPickingTypes:
 
         responses = [
             platform_site.client.get(PICKER_URL),
-            platform_site.client.put(course_documents_url(1), {"document_types": []}),
-            platform_site.client.put(asked_url(1), {"document_types": []}),
+            platform_site.client.put(course_documents_url(SOME_UUID), {"document_types": []}),
+            platform_site.client.put(asked_url(SOME_UUID), {"document_types": []}),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 3
@@ -728,7 +737,7 @@ class TestConfigurationUses:
         abc.log_in_as(Role.ADMIN)
         unused = optional_type(abc, "Unused")
 
-        response = abc.client.delete(f"{CONFIG_TYPES_URL}{unused.pk}/")
+        response = abc.client.delete(f"{CONFIG_TYPES_URL}{unused.public_id}/")
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         with tenant_context(abc.consultancy):
@@ -750,7 +759,7 @@ class TestConfigurationUses:
             if use == "student":
                 DocumentRequirement.objects.create(document_type=cv, student=student)
 
-        response = abc.client.delete(f"{CONFIG_TYPES_URL}{cv.pk}/")
+        response = abc.client.delete(f"{CONFIG_TYPES_URL}{cv.public_id}/")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -781,7 +790,7 @@ class TestConfigurationUses:
         abc.log_in_as(role)
         unused = optional_type(abc, "Unused")
 
-        response = abc.client.delete(f"{CONFIG_TYPES_URL}{unused.pk}/")
+        response = abc.client.delete(f"{CONFIG_TYPES_URL}{unused.public_id}/")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == ONLY_ADMIN_CONFIG
@@ -794,7 +803,7 @@ class TestConfigurationUses:
         abc.log_in_as(Role.ADMIN)
         unused = optional_type(abc, "Unused")
 
-        abc.client.delete(f"{CONFIG_TYPES_URL}{unused.pk}/")
+        abc.client.delete(f"{CONFIG_TYPES_URL}{unused.public_id}/")
 
         [entry] = json_logs.with_message("Document type removed")
         assert "Unused" not in entry["message"]
@@ -809,5 +818,5 @@ class TestPlumbing:
         with tenant_context(abc.consultancy):
             requirement = DocumentRequirement.objects.create(document_type=cv, course=course)
 
-            assert DocumentTypeListField().to_representation([cv]) == [cv.pk]
+            assert DocumentTypeListField().to_representation([cv]) == [str(cv.public_id)]
             assert str(requirement) == str(cv.pk)

@@ -293,7 +293,7 @@ class TestMoney:
     ) -> None:
         student = make_student(abc)
         with tenant_context(abc.consultancy):
-            pte = FeeType.objects.get(name="PTE class").pk
+            pte = str(FeeType.objects.get(name="PTE class").public_id)
         response = visit.client.post(
             f"/api/students/{student.public_id}/payments/",
             {
@@ -317,7 +317,7 @@ class TestTasks:
             {
                 "title": "Call Sita",
                 "due_on": (timezone.localdate() + timedelta(days=1)).isoformat(),
-                "assignee": counsellor.pk,
+                "assignee": str(counsellor.public_id),
             },
             format="json",
         )
@@ -343,7 +343,7 @@ class TestTasks:
             {
                 "title": "Own task",
                 "due_on": timezone.localdate().isoformat(),
-                "assignee": counsellor.pk,
+                "assignee": str(counsellor.public_id),
             },
             format="json",
         )
@@ -415,7 +415,7 @@ class TestDocuments:
         response = visit.client.post(
             f"/api/students/{student.public_id}/documents/",
             {
-                "document_type": str(passport.pk),
+                "document_type": str(passport.public_id),
                 "file": SimpleUploadedFile("passport.pdf", PDF_BYTES, "application/pdf"),
             },
             format="multipart",
@@ -438,7 +438,7 @@ class TestDocuments:
         visit.client.post(
             url,
             {
-                "document_type": str(passport.pk),
+                "document_type": str(passport.public_id),
                 "file": SimpleUploadedFile("front.pdf", PDF_BYTES, "application/pdf"),
             },
             format="multipart",

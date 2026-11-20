@@ -33,19 +33,11 @@ ONLY_ME_MESSAGE = "Say whether only you should see it."
 ONLY_ME_ASSIGNEE_MESSAGE = "An “Only me” task can only be for you."
 ONLY_ME_STUDENT_MESSAGE = "An “Only me” task can't be about a Student."
 ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
-LARGEST_ID = 2**63 - 1
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "invalid_choice")
 
 
 def _same_message(message: str) -> dict[str, Any]:
     return dict.fromkeys(_ALL_MESSAGES, message)
-
-
-def _an_id(data: object) -> int | None:
-    """`data` as a database id, or None when it can't be one (text, decimals, booleans...)."""
-    if isinstance(data, bool) or not isinstance(data, int) or not 1 <= data <= LARGEST_ID:
-        return None
-    return data
 
 
 class TitleField(PlainTextField):
@@ -97,23 +89,25 @@ class DueOnField(serializers.Field[date, str, str, Any]):
         return value.isoformat()
 
 
-class AssigneeField(serializers.Field[Staff, int, int, Any]):
-    """Who the Task is for: any active Staff member, by id."""
+class AssigneeField(serializers.Field[Staff, str, str, Any]):
+    """Who the Task is for: any active Staff member, by UUID (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(ASSIGNEE_MESSAGE))
 
     def to_internal_value(self, data: object) -> Staff:
         """Return the Staff member; anyone invited, gone or unknown is refused."""
-        pk = _an_id(data)
-        assignee = None if pk is None else assignable_staff().filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        assignee = (
+            None if public_id is None else assignable_staff().filter(public_id=public_id).first()
+        )
         if assignee is None:
             self.fail("invalid")
         return assignee
 
-    def to_representation(self, value: Staff) -> int:
+    def to_representation(self, value: Staff) -> str:
         """Return the id (unused: answers are built by hand)."""
-        return value.pk
+        return str(value.public_id)
 
 
 class StudentLinkField(serializers.Field[Student | None, str | None, str | None, Any]):

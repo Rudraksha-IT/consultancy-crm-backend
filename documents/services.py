@@ -73,10 +73,12 @@ class StudentChecklist:
 
     checklist: Checklist
     documents: Mapping[int, Document]
-    # The Document Types asked for this Student alone (spec 63b), by id.
-    asked: tuple[int, ...] = ()
+    # The Document Types asked for this Student alone (spec 63b), by UUID (ADR 0027).
+    asked: tuple[uuid.UUID, ...] = ()
     # Each listed type's instruction and example files (Document Examples, spec 64), by type id.
     guides: Mapping[int, TypeGuide] = field(default_factory=dict)
+    # Each listed type's UUID, its id outside the server, by type id.
+    type_ids: Mapping[int, uuid.UUID] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -171,13 +173,17 @@ def checklist_of(student: Student) -> StudentChecklist:
     required = _required_by_student([student.pk])[student.pk]
     checklist = build_checklist(required, [_held(d) for d in documents])
     asked = DocumentRequirement.objects.filter(student=student).values_list(
-        "document_type_id", flat=True
+        "document_type__public_id", flat=True
     )
+    type_ids = DocumentType.objects.filter(
+        pk__in=[item.type_id for item in checklist.items]
+    ).values_list("pk", "public_id")
     return StudentChecklist(
         checklist,
         {document.pk: document for document in documents},
         tuple(asked),
         guides_for(item.type_id for item in checklist.items),
+        dict(type_ids),
     )
 
 

@@ -2,32 +2,10 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 
 # Keys that name a record: "id", "student_id", "attachment_ids", ...
 _ID_SUFFIXES = ("_id", "_ids")
-_LIST_INDEX = re.compile(r"\[\d+\]")
-
-# Records ticket 17 hasn't switched yet: employees and the office's other records (ticket 18),
-# the Platform and logins (ticket 19). Each ticket removes its own; the set ends empty.
-SWITCHED_LATER = frozenset(
-    {
-        "assigned_counsellor.id",
-        "university.id",
-        "course.id",
-        "document_type.id",
-        "fee_type.id",
-        "uploaded_by.id",
-        "recorded_by.id",
-        "sent_by.id",
-        "added_by.id",
-        "created_by.id",
-        "assignee.id",
-        "by.id",
-        "viewer_id",
-    }
-)
 
 
 def _names_a_record(key: str) -> bool:
@@ -62,17 +40,9 @@ def _numbers_in_object(answer: dict[object, object], where: str) -> list[str]:
     return found
 
 
-def _switched_later(place: str) -> bool:
-    plain = _LIST_INDEX.sub("", place)
-    return any(plain == key or plain.endswith(f".{key}") for key in SWITCHED_LATER)
-
-
 def assert_no_record_numbers(answer: object) -> None:
-    """Fail naming every place in `answer` where a record is named by a number.
-
-    Places in `SWITCHED_LATER` are left for the ticket that switches them.
-    """
-    found = [place for place in record_numbers_in(answer) if not _switched_later(place)]
+    """Fail naming every place in `answer` where a record is named by a number."""
+    found = record_numbers_in(answer)
     assert not found, f"record numbers in the answer: {found}"
 
 

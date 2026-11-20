@@ -61,7 +61,7 @@ def staff_progress_answer(report: StaffProgressReport) -> dict[str, object]:
 
 def _person(row: ProgressRow, more: dict[str, object] | None = None) -> dict[str, object]:
     return {
-        "id": row.staff.pk,
+        "id": row.staff.public_id,
         "name": row.staff.name,
         "is_active": row.staff.is_active,
         **(more or {}),
@@ -77,7 +77,7 @@ def classes_answer(rows: list[ClassRow]) -> dict[str, object]:
     return {
         "batches": [
             {
-                "id": row.batch.pk,
+                "id": row.batch.public_id,
                 "name": row.batch.name,
                 "test_type": row.batch.test_type,
                 "teacher": row.batch.teacher.name,

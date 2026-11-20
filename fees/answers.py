@@ -52,7 +52,7 @@ def owing_student_answer(row: OwingStudent) -> dict[str, object]:
 
 def by_type_fee_type(fee_type: FeeType) -> dict[str, object]:
     """A Fee Type on Fees by type: hidden ones still show their money (spec 69)."""
-    return {"id": fee_type.pk, "name": fee_type.name, "hidden": fee_type.hidden}
+    return {"id": fee_type.public_id, "name": fee_type.name, "hidden": fee_type.hidden}
 
 
 def by_type_totals_answer(totals: Totals) -> dict[str, object]:

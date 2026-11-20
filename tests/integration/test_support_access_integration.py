@@ -21,7 +21,7 @@ from auth_tokens.services import sign_out_everywhere
 from history.models import HistoryEntry
 from platform_admin.models import PlatformAdmin, SupportVisit
 from platform_admin.support_access import ENTRY_CODE_LIFETIME, VISIT_LENGTH
-from staff.models import PLATFORM_VISITOR_ID, Role, Staff
+from staff.models import PLATFORM_VISITOR_PUBLIC_ID, Role, Staff
 from students.models import Source, Stage, Student
 from tenancy.status import ConsultancyStatus
 from tests.conftest import (
@@ -58,12 +58,12 @@ REFUSED = "Not allowed."
 
 def reset_code_url(staff: Staff) -> str:
     """Send `staff` a reset Code (Platform Admins only)."""
-    return f"/api/support-access/staff/{staff.pk}/reset-code/"
+    return f"/api/support-access/staff/{staff.public_id}/reset-code/"
 
 
 def sign_out_url(staff: Staff) -> str:
     """Sign `staff` out of every device (Platform Admins only)."""
-    return f"/api/support-access/staff/{staff.pk}/sign-out/"
+    return f"/api/support-access/staff/{staff.public_id}/sign-out/"
 
 
 def note_url(student: Student) -> str:
@@ -278,7 +278,7 @@ class TestEnteringTheOffice:
             "platform_admin_name": "Platform Ops",
             "platform_host": platform_site.host,
         }
-        assert context["staff"]["id"] == PLATFORM_VISITOR_ID
+        assert context["staff"]["id"] == str(PLATFORM_VISITOR_PUBLIC_ID)
 
     def test_staff_context_has_no_support_access(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)

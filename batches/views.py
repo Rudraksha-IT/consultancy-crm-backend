@@ -212,7 +212,7 @@ class BatchTeachersView(APIView):
 
     def get(self, request: Request) -> Response:
         """Return each one's id and name, by name."""
-        return Response([{"id": t.pk, "name": t.name} for t in active_teachers()])
+        return Response([{"id": str(t.public_id), "name": t.name} for t in active_teachers()])
 
 
 def _enrolled_answers(students: list[Student]) -> list[dict[str, object]]:

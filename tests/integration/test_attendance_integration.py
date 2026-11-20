@@ -46,7 +46,7 @@ MARKS = ("present", "absent", "late", "leave")
 
 def attendance_url(batch: Batch | int, on: date | str) -> str:
     """One class day's Attendance."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     text = on if isinstance(on, str) else on.isoformat()
     return f"/api/batches/{pk}/attendance/{text}/"
 
@@ -598,14 +598,14 @@ class TestStudentClasses:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == [
             {
-                "id": other.pk,
+                "id": str(other.public_id),
                 "name": "IELTS Evening",
                 "time_slot": "5 PM",
                 "attended_percent": None,
                 "recent_days": [],
             },
             {
-                "id": batch.pk,
+                "id": str(batch.public_id),
                 "name": "PTE Day",
                 "time_slot": "11:00 AM-12:30 PM",
                 "attended_percent": 50,

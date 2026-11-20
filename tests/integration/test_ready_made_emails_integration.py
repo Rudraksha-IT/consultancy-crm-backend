@@ -336,7 +336,7 @@ class TestTheMenu:
             {"id": str(granted.public_id), "label": "Australia visa: Granted"}
         ]
         assert kinds["class_details"]["records"] == [
-            {"id": batch.pk, "label": "IELTS Morning, 7:00-8:30 AM"}
+            {"id": str(batch.public_id), "label": "IELTS Morning, 7:00-8:30 AM"}
         ]
         for kind in ("payment_received", "offer_received", "visa_result", "class_details"):
             assert kinds[kind]["unavailable"] is None
@@ -542,7 +542,7 @@ class TestDrafts:
             set_weekly_off(weekly_off, by=admin)
         batch = make_batch(abc, teacher, (sita,))
 
-        answer = drafted(abc, sita, "class_details", batch.pk)
+        answer = drafted(abc, sita, "class_details", str(batch.public_id))
 
         assert answer["subject"] == "Your class: IELTS Morning"
         assert (
@@ -660,7 +660,7 @@ class TestRefusedDrafts:
             "payment_received": str(make_payment(abc, ram, admin).public_id),
             "offer_received": str(make_offer(abc, ram).public_id),
             "visa_result": str(make_visa(abc, ram, VisaStatus.GRANTED).public_id),
-            "class_details": make_batch(abc, teacher, (ram,)).pk,
+            "class_details": str(make_batch(abc, teacher, (ram,)).public_id),
         }
 
         for kind, record in theirs.items():
@@ -737,7 +737,7 @@ class TestRefusedDrafts:
         batch = make_batch(abc, teacher, (sita,))
         switch_modules(abc.consultancy, {Module.COMMUNICATION})
 
-        response = draft(abc, sita, "class_details", batch.pk)
+        response = draft(abc, sita, "class_details", str(batch.public_id))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -835,8 +835,8 @@ class TestEmailToMany:
                     "kind": "class_details",
                     "record": "batch",
                     "records": [
-                        {"id": first.pk, "label": "IELTS Morning, 7:00-8:30 AM"},
-                        {"id": later.pk, "label": "PTE Evening, 7:00-8:30 AM"},
+                        {"id": str(first.public_id), "label": "IELTS Morning, 7:00-8:30 AM"},
+                        {"id": str(later.public_id), "label": "PTE Evening, 7:00-8:30 AM"},
                     ],
                     "unavailable": None,
                 },
@@ -865,7 +865,7 @@ class TestEmailToMany:
         batch = make_batch(abc, teacher)
 
         plain = bulk_draft(abc, "plain").json()
-        details = bulk_draft(abc, "class_details", batch.pk).json()
+        details = bulk_draft(abc, "class_details", str(batch.public_id)).json()
 
         assert plain == {
             "subject": "",
@@ -881,7 +881,9 @@ class TestEmailToMany:
         batch = make_batch(abc, teacher)
         abc.log_in_as(Role.FRONT_DESK)
 
-        assert bulk_draft(abc, "class_details", batch.pk).status_code == status.HTTP_200_OK
+        assert (
+            bulk_draft(abc, "class_details", str(batch.public_id)).status_code == status.HTTP_200_OK
+        )
 
     @pytest.mark.parametrize(
         "kind",
@@ -951,7 +953,7 @@ class TestEditingAndSending:
     ) -> None:
         ram = make_student(abc, name="Ram Thapa", email="ram@example.com")
         batch = make_batch(abc, teacher, (sita, ram))
-        answer = bulk_draft(abc, "class_details", batch.pk).json()
+        answer = bulk_draft(abc, "class_details", str(batch.public_id)).json()
 
         response = abc.client.post(
             "/api/messages/bulk/",

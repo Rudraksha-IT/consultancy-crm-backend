@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.db import models
 
+from config.public_ids import public_id_field
 from documents.models import (
     CONTENT_TYPE_MAX_LENGTH,
     FILE_NAME_MAX_LENGTH,
@@ -20,6 +21,9 @@ class DocumentExample(InTheBin):
     signed link (ADR 0015). Replacing or removing one puts it in the Bin. A Document Type that
     still has examples, even in the Bin, is never removed (PROTECT).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     document_type = models.ForeignKey(
         DocumentType, on_delete=models.PROTECT, related_name="examples"

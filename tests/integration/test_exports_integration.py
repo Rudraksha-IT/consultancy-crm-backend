@@ -324,7 +324,7 @@ class TestPaymentsExport:
         visa = make_payment(abc, sita, desk, amount=40000, fee_type="Visa fee", note="first half")
         make_payment(abc, sita, desk, amount=15000, fee_type="PTE class")
         with tenant_context(abc.consultancy):
-            visa_id = FeeType.objects.get(name="Visa fee").pk
+            visa_id = FeeType.objects.get(name="Visa fee").public_id
         filters = {"fee_type": str(visa_id)}
 
         listed = abc.client.get("/api/payments/", filters).json()["results"]
@@ -352,7 +352,7 @@ class TestPaymentsExport:
             "from": "2026-10-01",
             "to": "2026-10-31",
             "student": str(sita.public_id),
-            "fee_type": "999999",
+            "fee_type": "00000000-0000-4000-8000-000000000001",
             "q": "000",
         }
 
@@ -415,12 +415,12 @@ class TestExportRecords:
         hari = named_staff(abc, "Hari Thapa")
         student_named(abc, "Sita Karki", hari)
 
-        export(abc.client, "students", {"stage": "applying", "counsellor": str(hari.pk)})
+        export(abc.client, "students", {"stage": "applying", "counsellor": str(hari.public_id)})
 
         [record] = records(abc)
         assert record.list == "students"
         assert record.row_count == 1
-        assert record.filters == {"stage": "applying", "counsellor": str(hari.pk)}
+        assert record.filters == {"stage": "applying", "counsellor": str(hari.public_id)}
         assert record.filters_text == "Stage: Applying, Counsellor: Hari Thapa"
         assert record.by_staff_id == admin.pk
         assert record.by_name == admin.name

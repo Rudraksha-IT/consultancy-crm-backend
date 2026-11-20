@@ -443,7 +443,7 @@ class TestWhoCanChangeTheNewDetails:
             {
                 "name": "IELTS Morning",
                 "test_type": "ielts",
-                "teacher": teacher.pk,
+                "teacher": str(teacher.public_id),
                 "time_slot": "7:00-8:30 AM",
                 "starts_on": today().isoformat(),
                 "ends_on": (today() + timedelta(days=60)).isoformat(),

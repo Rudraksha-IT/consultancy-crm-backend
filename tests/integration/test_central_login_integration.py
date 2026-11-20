@@ -386,7 +386,7 @@ class TestDirectoryKeptInStep:
     def test_deactivating_through_the_api_removes_it(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         leaver = abc.add_staff(Role.COUNSELLOR, email=SHARED_EMAIL)
-        response = abc.client.post(f"/api/staff/{leaver.pk}/deactivate/", format="json")
+        response = abc.client.post(f"/api/staff/{leaver.public_id}/deactivate/", format="json")
         assert response.status_code == status.HTTP_200_OK
         assert (email_hash(SHARED_EMAIL), "abcedu") not in entries()
 

@@ -32,7 +32,7 @@ from tenancy.types import DateDisplay, OfficeLogo
 class StaffSummary:
     """Who is logged in."""
 
-    id: int
+    id: str  # their UUID (ADR 0027)
     name: str
     email: str
     role: str
@@ -99,7 +99,7 @@ def build_staff_context(staff: Staff, consultancy: Consultancy) -> StaffContext:
     office_details = get_office_details(consultancy)
     return StaffContext(
         staff=StaffSummary(
-            id=staff.pk,
+            id=str(staff.public_id),
             name=staff.name,
             email=staff.email,
             role=staff.role,

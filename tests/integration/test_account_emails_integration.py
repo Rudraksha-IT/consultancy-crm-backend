@@ -247,7 +247,7 @@ class TestStaffCodeEmailsInTheOfficesLook:
         staff = abc.add_staff(Role.COUNSELLOR)
         visit = open_as_platform_admin(platform_site, abc)
 
-        response = visit.client.post(f"/api/support-access/staff/{staff.pk}/reset-code/")
+        response = visit.client.post(f"/api/support-access/staff/{staff.public_id}/reset-code/")
 
         assert response.status_code == status.HTTP_200_OK, response.content
         sent = last()

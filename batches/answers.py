@@ -19,10 +19,10 @@ from students.models import Student
 def batch_answer(batch: Batch, viewer: Staff, today: date) -> dict[str, object]:
     """One class as a list shows it; `batch` comes from `with_counts`."""
     return {
-        "id": batch.pk,
+        "id": batch.public_id,
         "name": batch.name,
         "test_type": batch.test_type,
-        "teacher": {"id": batch.teacher.pk, "name": batch.teacher.name},
+        "teacher": {"id": batch.teacher.public_id, "name": batch.teacher.name},
         "time_slot": batch.time_slot,
         "starts_on": batch.starts_on.isoformat(),
         "ends_on": batch.ends_on.isoformat(),
@@ -57,7 +57,7 @@ def enrolled_student_answer(student: Student, attended: int | None) -> dict[str,
     return {
         "id": student.public_id,
         "name": student.name,
-        "batches": [{"id": m.batch.pk, "name": m.batch.name} for m in memberships],
+        "batches": [{"id": m.batch.public_id, "name": m.batch.name} for m in memberships],
         "attended_percent": attended,
     }
 
@@ -79,7 +79,7 @@ def attendance_day_answer(
 def student_class_answer(entry: StudentClass) -> dict[str, object]:
     """One class a Student is in, with their Attendance in it (spec 86)."""
     return {
-        "id": entry.batch.pk,
+        "id": entry.batch.public_id,
         "name": entry.batch.name,
         "time_slot": entry.batch.time_slot,
         "attended_percent": entry.attended_percent,

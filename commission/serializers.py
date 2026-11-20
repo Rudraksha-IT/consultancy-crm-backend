@@ -25,13 +25,6 @@ def _same_message(message: str) -> dict[str, Any]:
     return dict.fromkeys(_ALL_MESSAGES, message)
 
 
-def _an_id(data: object) -> int | None:
-    """The id sent, or None for anything that isn't a positive whole number."""
-    if isinstance(data, bool) or not isinstance(data, int) or data < 1:
-        return None
-    return data
-
-
 class StudentChoiceField(serializers.Field[Student, str, str, Any]):
     """Any Student of this Consultancy, by UUID (ADR 0027)."""
 
@@ -51,25 +44,27 @@ class StudentChoiceField(serializers.Field[Student, str, str, Any]):
         return str(value.public_id)
 
 
-class UniversityChoiceField(serializers.Field[University, int, int, Any]):
-    """A University from the active Catalogue (spec 51), by id."""
+class UniversityChoiceField(serializers.Field[University, str, str, Any]):
+    """A University from the active Catalogue (spec 51), by UUID (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(UNIVERSITY_MESSAGE))
 
     def to_internal_value(self, data: object) -> University:
         """Return the University; archived or unknown ones are refused."""
-        pk = _an_id(data)
+        public_id = parse_record_id(data)
         university = (
-            None if pk is None else University.objects.filter(pk=pk, archived=False).first()
+            None
+            if public_id is None
+            else University.objects.filter(public_id=public_id, archived=False).first()
         )
         if university is None:
             self.fail("invalid")
         return university
 
-    def to_representation(self, value: University) -> int:
+    def to_representation(self, value: University) -> str:
         """Return the id (unused: answers are built by hand)."""
-        return int(value.pk)
+        return str(value.public_id)
 
 
 class IntakeField(serializers.Field[str, str, str, Any]):

@@ -7,6 +7,7 @@ from clock_in.models import WorkFromHome
 from notifications.models import BIN_KINDS, Notification, NotificationKind
 from notifications.types import NotificationPage
 from staff.models import Staff
+from staff.refs import person_ref
 from transfer_requests.models import TransferRequest
 
 
@@ -25,12 +26,12 @@ def notification_answer(notification: Notification, viewer: Staff) -> dict[str, 
     shows_student = student is not None and why_cannot_link_student(viewer) is None
     given = notification.kind == NotificationKind.ASSIGNED
     return {
-        "id": notification.pk,
+        "id": str(notification.public_id),
         "kind": notification.kind,
         "created_at": notification.created_at.isoformat(),
         "is_read": notification.read_at is not None,
-        "task": {"id": task.pk, "title": task.title, "due_on": task.due_on.isoformat()},
-        "by": {"id": task.created_by_id, "name": task.created_by_name} if given else None,
+        "task": {"id": str(task.public_id), "title": task.title, "due_on": task.due_on.isoformat()},
+        "by": person_ref(task.created_by, task.created_by_name) if given else None,
         "student": {"id": student.public_id, "name": student.name}
         if shows_student and student
         else None,
@@ -48,12 +49,12 @@ def _bin_answer(notification: Notification) -> dict[str, object]:
     student = notification.student
     assert student is not None  # noqa: S101  # the database requires it for these kinds
     return {
-        "id": notification.pk,
+        "id": str(notification.public_id),
         "kind": notification.kind,
         "created_at": notification.created_at.isoformat(),
         "is_read": notification.read_at is not None,
         "task": None,
-        "by": {"id": notification.by_staff_id, "name": notification.by_name},
+        "by": person_ref(notification.by_staff, notification.by_name),
         "student": {"id": student.public_id, "name": student.name},
         "transfer_request": None,
         "bin": {"item": notification.bin_item, "reason": notification.bin_reason},
@@ -67,18 +68,18 @@ def _transfer_answer(notification: Notification, request: TransferRequest) -> di
     Only Staff who see Students get these, so the Student is always named.
     """
     if notification.kind == NotificationKind.TRANSFER_ASKED:
-        by: dict[str, object] = {"id": request.asked_by_id, "name": request.asked_by.name}
+        by: dict[str, object] = person_ref(request.asked_by, request.asked_by.name)
     else:
-        by = {"id": request.answered_by_id, "name": request.answered_by_name}
+        by = person_ref(request.answered_by, request.answered_by_name)
     return {
-        "id": notification.pk,
+        "id": str(notification.public_id),
         "kind": notification.kind,
         "created_at": notification.created_at.isoformat(),
         "is_read": notification.read_at is not None,
         "task": None,
         "by": by,
         "student": {"id": request.student.public_id, "name": request.student.name},
-        "transfer_request": {"id": request.pk, "status": request.status},
+        "transfer_request": {"id": str(request.public_id), "status": request.status},
         "bin": None,
         "work_from_home": None,
     }
@@ -90,18 +91,18 @@ def _work_from_home_answer(notification: Notification, dates: WorkFromHome) -> d
     The reason stays on the person's page; the bell names who acted and which dates.
     """
     return {
-        "id": notification.pk,
+        "id": str(notification.public_id),
         "kind": notification.kind,
         "created_at": notification.created_at.isoformat(),
         "is_read": notification.read_at is not None,
         "task": None,
-        "by": {"id": notification.by_staff_id, "name": notification.by_name},
+        "by": person_ref(notification.by_staff, notification.by_name),
         "student": None,
         "transfer_request": None,
         "bin": None,
         "work_from_home": {
-            "id": dates.pk,
-            "staff_id": dates.staff_id,
+            "id": str(dates.public_id),
+            "staff_id": str(dates.staff.public_id),
             "starts_on": dates.starts_on.isoformat(),
             "ends_on": None if dates.ends_on is None else dates.ends_on.isoformat(),
             "status": dates.status,

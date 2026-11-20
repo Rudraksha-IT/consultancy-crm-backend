@@ -11,7 +11,7 @@ from communication.attachments import MAX_ATTACHMENTS, AttachmentKind, Chosen
 from communication.models import SUBJECT_MAX_LENGTH
 from communication.ready_made import Kind
 from communication.types import EmailText
-from config.serializers import StrictCharField, StrictSerializer, parse_record_id
+from config.serializers import RecordIdField, StrictCharField, StrictSerializer, parse_record_id
 from staff.serializers import CONTROL_CHARACTERS, CONTROL_CHARACTERS_MESSAGE
 from students.serializers import (
     NOTE_CHARACTERS_MESSAGE,
@@ -22,7 +22,6 @@ from students.serializers import (
 )
 
 BODY_MAX_LENGTH = 10_000
-LARGEST_ID = 2**63 - 1
 
 SUBJECT_MESSAGE = "Write a subject line."
 SUBJECT_TOO_LONG_MESSAGE = f"A subject line can be at most {SUBJECT_MAX_LENGTH} characters."
@@ -80,10 +79,6 @@ class MessageBodyField(StrictCharField):
         return value
 
 
-def _is_id(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= LARGEST_ID
-
-
 def _chosen(item: object) -> Chosen | None:
     """One file named `{"kind": …, "id": …}` and nothing else, or None when it isn't."""
     if not isinstance(item, dict) or set(item) != _ATTACHMENT_KEYS:
@@ -91,10 +86,8 @@ def _chosen(item: object) -> Chosen | None:
     kind, given = item["kind"], item["id"]
     if not isinstance(kind, str) or kind not in _ATTACHMENT_KINDS:
         return None
-    if kind == AttachmentKind.DOCUMENT_FILE:  # by UUID (ADR 0027); the rest until ticket 18
-        public_id = parse_record_id(given)
-        return None if public_id is None else Chosen(AttachmentKind.DOCUMENT_FILE, public_id)
-    return Chosen(AttachmentKind(kind), given) if _is_id(given) else None
+    public_id = parse_record_id(given)
+    return None if public_id is None else Chosen(AttachmentKind(kind), public_id)
 
 
 class AttachmentsField(serializers.Field[list[Chosen], list[Chosen], list[Chosen], Any]):
@@ -201,16 +194,11 @@ class StudentListFiltersSerializer(StudentListQuerySerializer):
 class PreTickQuerySerializer(StudentListFiltersSerializer):
     """From the query string: a class (`batch`) or a Student list's filters, to pre-tick."""
 
-    batch = serializers.IntegerField(
-        min_value=1,
-        max_value=LARGEST_ID,
-        required=False,
-        error_messages=_same_message(BATCH_MESSAGE),
-    )
+    batch = RecordIdField(BATCH_MESSAGE, required=False)
 
-    def batch_id(self) -> int | None:
-        """The class chosen, if any."""
-        batch: int | None = self.validated_data.get("batch")
+    def batch_id(self) -> UUID | None:
+        """The class chosen, if any, by UUID."""
+        batch: UUID | None = self.validated_data.get("batch")
         return batch
 
     def has_student_filters(self) -> bool:

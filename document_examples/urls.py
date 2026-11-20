@@ -13,9 +13,9 @@ from document_examples.views import (
     ReplaceExampleView,
 )
 
-ONE_TYPE = "configuration/document-types/<int:type_id>/"
-ONE_EXAMPLE = "configuration/document-examples/<int:example_id>/"
-ONE_BINNED = "documents/bin/document-examples/<int:example_id>/"
+ONE_TYPE = "configuration/document-types/<document_type:type_id>/"
+ONE_EXAMPLE = "configuration/document-examples/<example:example_id>/"
+ONE_BINNED = "documents/bin/document-examples/<example:example_id>/"
 
 urlpatterns: list[URLPattern] = [
     path(f"{ONE_TYPE}instruction/", InstructionView.as_view(), name="document-type-instruction"),
@@ -23,7 +23,7 @@ urlpatterns: list[URLPattern] = [
     path(ONE_EXAMPLE, ExampleView.as_view(), name="document-example"),
     path(f"{ONE_EXAMPLE}replace/", ReplaceExampleView.as_view(), name="document-example-replace"),
     path(
-        "documents/examples/<int:example_id>/link/",
+        "documents/examples/<example:example_id>/link/",
         ExampleLinkView.as_view(),
         name="document-example-link",
     ),

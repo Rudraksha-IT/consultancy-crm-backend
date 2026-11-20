@@ -48,7 +48,10 @@ def _documents_answer(documents: Iterable[Document]) -> list[dict[str, object]]:
     return [
         {
             "id": document.public_id,
-            "document_type": {"id": document.document_type_id, "name": document.document_type.name},
+            "document_type": {
+                "id": document.document_type.public_id,
+                "name": document.document_type.name,
+            },
             "files": _files_answer(document),
             "verification": document.verification,
         }
@@ -77,8 +80,8 @@ def application_answer(application: Application) -> dict[str, object]:
     offered_on = application.offered_on
     return {
         "id": application.public_id,
-        "university": {"id": university.pk, "name": university.name},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {"id": university.public_id, "name": university.name},
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": application.status,
         "offer_kind": application.offer_kind,
@@ -97,8 +100,8 @@ def visa_answer(visa: Visa) -> dict[str, object]:
     return {
         "id": visa.public_id,
         "application_id": visa.application.public_id,
-        "university": {"id": university.pk, "name": university.name},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {"id": university.public_id, "name": university.name},
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "status": visa.status,
         "started_on": visa.started_on.isoformat(),
         "biometrics_at": moment_text(visa.biometrics_at),
@@ -123,7 +126,7 @@ def appointment_answer(booked: Booked | None) -> dict[str, object] | None:
 
 
 def _counsellor(counsellor: Staff | None) -> dict[str, object] | None:
-    return None if counsellor is None else {"id": counsellor.pk, "name": counsellor.name}
+    return None if counsellor is None else {"id": counsellor.public_id, "name": counsellor.name}
 
 
 def office_application_row(application: Application) -> dict[str, object]:
@@ -145,8 +148,12 @@ def office_application_row(application: Application) -> dict[str, object]:
             "phone": student.phone,
             "email": student.email,
         },
-        "university": {"id": university.pk, "name": university.name, "country": university.country},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {
+            "id": university.public_id,
+            "name": university.name,
+            "country": university.country,
+        },
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": application.status,
         "offer_kind": application.offer_kind,
@@ -179,8 +186,12 @@ def office_visa_row(visa: Visa, checklist: Checklist) -> dict[str, object]:
             "phone": student.phone,
             "email": student.email,
         },
-        "university": {"id": university.pk, "name": university.name, "country": university.country},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {
+            "id": university.public_id,
+            "name": university.name,
+            "country": university.country,
+        },
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": visa.status,
         "next_appointment": appointment_answer(next_appointment(visa.dates, timezone.localdate())),

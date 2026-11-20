@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import models
 
 from catalogue.models import Course
+from config.public_ids import public_id_field
 from documents.models import FILE_NAME_MAX_LENGTH, STORAGE_KEY_MAX_LENGTH, InTheBin
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 
@@ -17,6 +18,9 @@ class CourseFile(InTheBin):
     Deleting puts it in the Bin, where an Admin restores it or deletes it for good. A Course that
     still has Course Files, even in the Bin, is never deleted (PROTECT).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="files")
     # The name Staff see, which an Admin may change; the file keeps `file_name`.

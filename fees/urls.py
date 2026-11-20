@@ -16,7 +16,7 @@ urlpatterns: list[URLPattern] = [
     path("accounts/student-fees/", StudentFeesListView.as_view(), name="student-fees-list"),
     path("accounts/fees-by-type/", FeesByTypeView.as_view(), name="fees-by-type"),
     path(
-        "accounts/fees-by-type/<int:fee_type_id>/",
+        "accounts/fees-by-type/<fee_type:fee_type_id>/",
         FeeTypeStudentsView.as_view(),
         name="fee-type-students",
     ),

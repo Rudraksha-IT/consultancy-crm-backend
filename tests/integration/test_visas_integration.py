@@ -130,8 +130,15 @@ class TestStartingAVisa:
             {
                 "id": str(visa.public_id),
                 "application_id": str(application.public_id),
-                "university": {"id": application.course.university_id, "name": "Deakin University"},
-                "course": {"id": application.course_id, "name": "Master of IT", "level": "master"},
+                "university": {
+                    "id": str(application.course.university.public_id),
+                    "name": "Deakin University",
+                },
+                "course": {
+                    "id": str(application.course.public_id),
+                    "name": "Master of IT",
+                    "level": "master",
+                },
                 "status": "applied",
                 "started_on": timezone.localdate().isoformat(),
                 "biometrics_at": None,
@@ -524,7 +531,9 @@ class TestChangingTheStatus:
         visa = make_visa(abc, student, offer_application(abc, student))
         other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
         abc.client.post(
-            f"/api/students/{student.public_id}/transfer/", {"counsellor": other.pk}, format="json"
+            f"/api/students/{student.public_id}/transfer/",
+            {"counsellor": str(other.public_id)},
+            format="json",
         )
 
         response = change(abc, student, visa, status="refused")

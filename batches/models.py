@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from staff.models import Staff
 from students.models import Student
 
@@ -35,6 +36,9 @@ class Batch(models.Model):
     leave.
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     name = models.CharField(max_length=NAME_MAX_LENGTH)
     test_type = models.CharField(max_length=TEST_TYPE_MAX_LENGTH, choices=TestType.choices)
     teacher = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="batches")
@@ -63,6 +67,9 @@ class Batch(models.Model):
 
 class BatchMembership(models.Model):
     """One Student in one Batch (spec 84)."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     batch = models.ForeignKey(Batch, on_delete=models.PROTECT, related_name="memberships")
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="memberships")
@@ -96,6 +103,9 @@ class Attendance(models.Model):
 
     Kept when the Student leaves the Batch, so their record comes back if they rejoin.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     batch = models.ForeignKey(Batch, on_delete=models.PROTECT, related_name="attendance")
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="attendance")

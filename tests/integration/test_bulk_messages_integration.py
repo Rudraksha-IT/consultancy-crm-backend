@@ -51,6 +51,8 @@ NOT_FOUND = {"students": ["Some of these Students can't be found."]}
 LOST = {"students": ["Lost Students can't be chosen."]}
 TOO_SLOW = "Not sent: sending took too long. Send again to this Student."
 
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
 
 def send_bulk(office: ConsultancyContext, body: object) -> _MonkeyPatchedResponse:
     """POST one email to many Students, as given."""
@@ -125,10 +127,10 @@ def students(abc: ConsultancyContext, counsellor: Staff) -> dict[str, Student]:
 
 
 @pytest.fixture
-def ielts(abc: ConsultancyContext, teacher: Staff, students: dict[str, Student]) -> int:
+def ielts(abc: ConsultancyContext, teacher: Staff, students: dict[str, Student]) -> str:
     """The IELTS Morning class, with Sita, Hari, Maya and Lila in it; returns its id."""
     members = tuple(students[name] for name in ("sita", "hari", "maya", "lila"))
-    return make_batch(abc, teacher, members, name="IELTS Morning").pk
+    return str(make_batch(abc, teacher, members, name="IELTS Morning").public_id)
 
 
 class TestSendingToTheStudentsChosen:
@@ -328,7 +330,7 @@ class TestPreTicking:
     """A class or the Student list's filters only pre-tick the Students who can be chosen."""
 
     def test_a_class_pre_ticks_its_students_with_an_address_who_arent_lost(
-        self, abc: ConsultancyContext, admin: Staff, ielts: int
+        self, abc: ConsultancyContext, admin: Staff, ielts: str
     ) -> None:
         response = abc.client.get(BULK_URL, {"batch": ielts})
 
@@ -370,7 +372,7 @@ class TestPreTicking:
 
         assert (len(answer["students"]), answer["count"], answer["max"]) == (2, 3, 2)
 
-    def test_front_desk_cant_pre_tick_a_class(self, abc: ConsultancyContext, ielts: int) -> None:
+    def test_front_desk_cant_pre_tick_a_class(self, abc: ConsultancyContext, ielts: str) -> None:
         abc.log_in_as(Role.FRONT_DESK)
 
         response = abc.client.get(BULK_URL, {"batch": ielts})
@@ -379,12 +381,12 @@ class TestPreTicking:
         assert response.json() == NOT_FOR_FRONT_DESK
 
     def test_an_unknown_class_is_not_found(self, abc: ConsultancyContext, admin: Staff) -> None:
-        response = abc.client.get(BULK_URL, {"batch": 999_999})
+        response = abc.client.get(BULK_URL, {"batch": SOME_UUID})
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_with_classes_switched_off_a_class_is_not_found_and_lists_still_work(
-        self, abc: ConsultancyContext, admin: Staff, ielts: int
+        self, abc: ConsultancyContext, admin: Staff, ielts: str
     ) -> None:
         switch_modules(abc.consultancy, {Module.COMMUNICATION})
 

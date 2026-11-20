@@ -53,8 +53,8 @@ def test_is_uuid() -> None:
     assert not is_uuid("not-a-uuid")
 
 
-def test_assert_skips_only_what_later_tickets_switch() -> None:
-    """A counsellor's number is left for ticket 18; a Student's is not."""
-    assert_no_record_numbers({"results": [{"id": A_UUID, "assigned_counsellor": {"id": 3}}]})
-    with pytest.raises(AssertionError, match=r"results\[0\]\.id"):
-        assert_no_record_numbers({"results": [{"id": 3}]})
+def test_assert_names_every_number_nested_too() -> None:
+    """An employee's number is refused as much as a Student's; UUIDs pass."""
+    assert_no_record_numbers({"results": [{"id": A_UUID, "assigned_counsellor": {"id": A_UUID}}]})
+    with pytest.raises(AssertionError, match=r"results\[0\]\.assigned_counsellor\.id"):
+        assert_no_record_numbers({"results": [{"id": A_UUID, "assigned_counsellor": {"id": 3}}]})

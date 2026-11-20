@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import date, time, timedelta
 from typing import Any
+from uuid import UUID
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -20,7 +21,7 @@ from clock_in.models import (
     WeeklyOff,
 )
 from clock_in.work_from_home import NewDates
-from config.serializers import StrictCharField, StrictSerializer
+from config.serializers import RecordIdField, StrictCharField, StrictSerializer
 from students.serializers import NOTE_CHARACTERS_MESSAGE, NOTE_CONTROL_CHARACTERS
 
 MONTH_MESSAGE = "Choose a month such as 2026-10."
@@ -175,20 +176,15 @@ class MonthQuerySerializer(StrictSerializer[None]):
     """Which month (this month by default), and whose (one's own by default)."""
 
     month = MonthField()
-    staff = serializers.IntegerField(
-        required=False,
-        min_value=1,
-        max_value=2**31 - 1,
-        error_messages=_same_message(STAFF_MESSAGE),
-    )
+    staff = RecordIdField(STAFF_MESSAGE, required=False)
 
     def year_month(self) -> tuple[int, int]:
         """The month asked for, or this month in the Consultancy's time zone."""
         return _year_month(self.validated_data.get("month"))
 
-    def staff_id(self) -> int | None:
-        """Whose month was asked for, if anyone's but one's own."""
-        staff: int | None = self.validated_data.get("staff")
+    def staff_id(self) -> UUID | None:
+        """Whose month was asked for, if anyone's but one's own, by UUID."""
+        staff: UUID | None = self.validated_data.get("staff")
         return staff
 
 

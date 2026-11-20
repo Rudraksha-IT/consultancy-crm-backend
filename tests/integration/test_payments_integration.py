@@ -73,7 +73,11 @@ LINE_FIELDS = frozenset({"amount", "fee_type", "note"})
 
 def good_line(office: ConsultancyContext, **changes: object) -> dict[str, object]:
     """One line the server accepts: NPR 25,000 for the Application fee; `changes` override it."""
-    return {"amount": 25000, "fee_type": fee_type_named(office, "Application fee").pk, **changes}
+    return {
+        "amount": 25000,
+        "fee_type": str(fee_type_named(office, "Application fee").public_id),
+        **changes,
+    }
 
 
 def good_body(office: ConsultancyContext, **changes: object) -> dict[str, object]:
@@ -143,7 +147,7 @@ class TestRecording:
         assert response.status_code == status.HTTP_201_CREATED
         [payment] = stored_payments(abc)
         application_fee = {
-            "id": fee_type_named(abc, "Application fee").pk,
+            "id": str(fee_type_named(abc, "Application fee").public_id),
             "name": "Application fee",
         }
         assert response.json() == {
@@ -270,7 +274,7 @@ class TestHistory:
         log_in(abc, desk)
         student = make_student(abc)
 
-        visa = fee_type_named(abc, "Visa fee").pk
+        visa = str(fee_type_named(abc, "Visa fee").public_id)
         pay(abc, student, amount=125000, method="fonepay_qr", fee_type=visa)
 
         assert len(stored_payments(abc)) == 1
@@ -432,7 +436,7 @@ def line_for(
     office: ConsultancyContext, name: str, amount: int, note: str = ""
 ) -> dict[str, object]:
     """One line: `amount` for the Fee Type with this name."""
-    return {"fee_type": fee_type_named(office, name).pk, "amount": amount, "note": note}
+    return {"fee_type": str(fee_type_named(office, name).public_id), "amount": amount, "note": note}
 
 
 def split_visit(office: ConsultancyContext, student: Student) -> _MonkeyPatchedResponse:

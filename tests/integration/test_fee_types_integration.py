@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -68,12 +69,12 @@ def fee_type(office: ConsultancyContext, name: str) -> FeeType:
         return FeeType.objects.get(name=name)
 
 
-def fee_type_id(office: ConsultancyContext, name: str) -> int:
-    """The id of the office's Fee Type with this name."""
-    return fee_type(office, name).pk
+def fee_type_id(office: ConsultancyContext, name: str) -> str:
+    """The id of the office's Fee Type with this name: its UUID (ADR 0027)."""
+    return str(fee_type(office, name).public_id)
 
 
-def type_url(type_id: int) -> str:
+def type_url(type_id: object) -> str:
     """One Fee Type."""
     return f"{FEE_TYPES_URL}{type_id}/"
 
@@ -101,7 +102,7 @@ def add(office: ConsultancyContext, body: object) -> _MonkeyPatchedResponse:
     return office.client.post(FEE_TYPES_URL, body, format="json")
 
 
-def change(office: ConsultancyContext, type_id: int, body: object) -> _MonkeyPatchedResponse:
+def change(office: ConsultancyContext, type_id: object, body: object) -> _MonkeyPatchedResponse:
     """PATCH one Fee Type."""
     return office.client.patch(type_url(type_id), body, format="json")
 
@@ -326,7 +327,7 @@ class TestAdding:
 
         add(abc, {"name": "Secret type name"})
 
-        added = fee_type_id(abc, "Secret type name")
+        added = fee_type(abc, "Secret type name").pk  # logs keep the number
         assert json_logs.only(f"Fee type added: fee_type_id={added}, by_staff_id={admin.pk}")
         assert "Secret type name" not in json_logs.text()
 
@@ -477,9 +478,11 @@ class TestDeleting:
 
 
 class TestOrder:
-    def ids(self, office: ConsultancyContext) -> list[int]:
+    def ids(self, office: ConsultancyContext) -> list[str]:
+        """Every Fee Type's UUID, in the order they show."""
         with tenant_context(office.consultancy):
-            return list(FeeType.objects.order_by("position", "pk").values_list("pk", flat=True))
+            found = FeeType.objects.order_by("position", "pk").values_list("public_id", flat=True)
+            return [str(public_id) for public_id in found]
 
     def test_a_new_order_is_kept_and_answered(self, abc: ConsultancyContext) -> None:
         as_admin(abc)
@@ -501,7 +504,7 @@ class TestOrder:
         sent = {
             "missing": ids[1:],
             "twice": [ids[0], *ids[:-1]],
-            "unknown": [*ids[:-1], 999_999],
+            "unknown": [*ids[:-1], str(uuid.uuid4())],
         }[wrong]
 
         response = abc.client.put(ORDER_URL, {"order": sent}, format="json")
@@ -509,7 +512,7 @@ class TestOrder:
         assert (response.status_code, response.json()) == (status.HTTP_400_BAD_REQUEST, ORDER)
         assert names(abc) == DEFAULT_NAMES
 
-    @pytest.mark.parametrize("sent", [[], None, "1,2,3", [True], ["1"], [1.5], [0], [2**31]])
+    @pytest.mark.parametrize("sent", [[], None, "1,2,3", [True], ["1"], [1.5], [0], [2**31], [1]])
     def test_a_wrong_shape_is_refused(self, abc: ConsultancyContext, sent: object) -> None:
         as_admin(abc)
 
@@ -521,7 +524,9 @@ class TestOrder:
     def test_too_long_a_list_is_refused(self, abc: ConsultancyContext) -> None:
         as_admin(abc)
 
-        response = abc.client.put(ORDER_URL, {"order": list(range(1, 60))}, format="json")
+        response = abc.client.put(
+            ORDER_URL, {"order": [str(uuid.uuid4()) for _ in range(60)]}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 

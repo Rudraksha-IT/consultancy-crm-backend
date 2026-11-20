@@ -66,10 +66,10 @@ def ids(response: _MonkeyPatchedResponse) -> list[str]:
     return [row["id"] for row in response.json()["results"]]
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of the office's Fee Type with this name."""
     with tenant_context(office.consultancy):
-        return FeeType.objects.get(name=name).pk
+        return str(FeeType.objects.get(name=name).public_id)
 
 
 def edit_body(office: ConsultancyContext, **changes: object) -> dict[str, object]:
@@ -234,7 +234,7 @@ class TestList:
         desk_payment(abc)
         abc.log_in_as(Role.ADMIN)
 
-        assert listed(abc, fee_type=999_999).json()["count"] == 0
+        assert listed(abc, fee_type=uuid.uuid4()).json()["count"] == 0
 
     @pytest.mark.parametrize("value", ["visa", "1.5", "0", "-1", str(2**31)])
     def test_a_fee_type_that_is_not_an_id_is_refused(

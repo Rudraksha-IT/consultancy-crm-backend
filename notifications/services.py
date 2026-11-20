@@ -244,8 +244,11 @@ def _with_task(notifications: QuerySet[Notification]) -> QuerySet[Notification]:
     return notifications.select_related(
         "task",
         "task__student",
+        "task__created_by",
         "transfer_request__student",
         "transfer_request__asked_by",
+        "transfer_request__answered_by",
         "student",
-        "work_from_home",
+        "work_from_home__staff",
+        "by_staff",
     )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from document_examples.answers import examples_answer
 from documents.bin import BinItem
 from documents.bin_answers import bin_answer
@@ -10,12 +12,13 @@ from documents.models import Document, DocumentFile, DocumentType
 from documents.requirements import CountryDocuments, uses_of
 from documents.services import Paperwork, StudentChecklist
 from staff.models import Staff
+from staff.refs import person_ref
 
 
 def document_type_answer(document_type: DocumentType) -> dict[str, object]:
     """One Document Type, whether every Student needs it, and its usual Document Group."""
     return {
-        "id": document_type.pk,
+        "id": document_type.public_id,
         "name": document_type.name,
         "needed_by_everyone": document_type.needed_by_everyone,
         "usual_group": document_type.usual_group,
@@ -46,7 +49,10 @@ def country_list_answer(one: CountryDocuments) -> dict[str, object]:
         "country": one.country.value,
         "documents": [
             {
-                "document_type": {"id": row.document_type.pk, "name": row.document_type.name},
+                "document_type": {
+                    "id": row.document_type.public_id,
+                    "name": row.document_type.name,
+                },
                 "group": row.group.value,
             }
             for row in one.listed
@@ -55,7 +61,7 @@ def country_list_answer(one: CountryDocuments) -> dict[str, object]:
 
 
 def _person(staff: Staff | None) -> dict[str, object] | None:
-    return None if staff is None else {"id": staff.pk, "name": staff.name}
+    return None if staff is None else {"id": staff.public_id, "name": staff.name}
 
 
 def _link_answer(document: Document) -> dict[str, object] | None:
@@ -73,8 +79,8 @@ def _link_answer(document: Document) -> dict[str, object] | None:
     return None
 
 
-def _uploader(name: str, staff_id: int | None) -> dict[str, object] | None:
-    return {"id": staff_id, "name": name} if name else None
+def _uploader(name: str, staff: Staff | None) -> dict[str, object] | None:
+    return person_ref(staff, name) if name else None
 
 
 def file_answer(file: DocumentFile) -> dict[str, object]:
@@ -85,7 +91,7 @@ def file_answer(file: DocumentFile) -> dict[str, object]:
         "content_type": file.content_type,
         "size": file.size,
         "uploaded_at": file.uploaded_at.isoformat(),
-        "uploaded_by": _uploader(file.uploaded_by_name, file.uploaded_by_id),
+        "uploaded_by": _uploader(file.uploaded_by_name, file.uploaded_by),
     }
 
 
@@ -109,7 +115,7 @@ def document_answer(document: Document) -> dict[str, object]:
         "rejection_reason": document.rejection_reason,
         "link": _link_answer(document),
         "uploaded_at": document.uploaded_at.isoformat(),
-        "uploaded_by": _uploader(document.uploaded_by_name, document.uploaded_by_id),
+        "uploaded_by": _uploader(document.uploaded_by_name, document.uploaded_by),
     }
 
 
@@ -129,7 +135,7 @@ def _item_answer(item: ChecklistItem, documents: StudentChecklist) -> dict[str, 
     in_bin = [documents.documents[one.id] for one in item.in_bin]
     guide = documents.guides.get(item.type_id)
     return {
-        "document_type": {"id": item.type_id, "name": item.name},
+        "document_type": {"id": documents.type_ids[item.type_id], "name": item.name},
         "reason": item.reason,
         "is_required": item.is_required,
         "added_for_student": item.added_for_student,
@@ -153,7 +159,7 @@ def checklist_answer(
     *,
     can_change: bool,
     deletes_for_good: bool = False,
-    viewer_id: int | None = None,
+    viewer_id: UUID | None = None,
 ) -> dict[str, object]:
     """The Student's checklist, the types asked for them alone, and what the viewer may do.
 

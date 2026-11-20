@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db import models
 from django.db.models import Q
 
+from config.public_ids import public_id_field
 from payments.models import MAX_AMOUNT
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import CHOICE_MAX_LENGTH
@@ -40,6 +41,9 @@ class ExpenseMethod(models.TextChoices):
 
 class Expense(models.Model):
     """One Expense: the day paid (AD), what kind, who to, whole NPR and how."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     spent_on = models.DateField()
     category = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=ExpenseCategory.choices)

@@ -247,7 +247,7 @@ class TestEveryAnswerAboutAStudent:
     def test_a_receipt_and_fees_by_type(self, abc: ConsultancyContext, full: Student) -> None:
         with tenant_context(abc.consultancy):
             payment = Payment.objects.get().public_id
-            fee_type = FeeType.objects.get(name="Visa fee").pk
+            fee_type = FeeType.objects.get(name="Visa fee").public_id
 
         answers = [
             abc.client.get(f"/api/payments/{payment}/"),

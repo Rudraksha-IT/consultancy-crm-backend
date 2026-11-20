@@ -6,6 +6,7 @@ from communication.attachments import MAX_EMAIL_BYTES, Attachable, AttachableFil
 from communication.models import Message
 from communication.ready_made import DraftWithFiles, MenuEntry
 from communication.types import BulkResult
+from staff.refs import person_ref
 from students.models import Student
 
 
@@ -22,7 +23,7 @@ def message_answer(message: Message) -> dict[str, object]:
         "sent_to": message.sent_to,
         "attachments": list(message.attachments),
         "sent_at": message.sent_at.isoformat(),
-        "sent_by": {"id": message.sent_by_id, "name": message.sent_by_name},
+        "sent_by": person_ref(message.sent_by, message.sent_by_name),
     }
 
 

@@ -5,7 +5,12 @@ Every existing row gets its own UUID, unique, and nothing else about it changes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
+from django.apps import apps as now
+from django.apps.registry import Apps
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django_tenants.utils import tenant_context
@@ -14,6 +19,35 @@ from students.models import AcademicRecord, Student
 from tests.conftest import ConsultancyContext, ConsultancyFactory
 
 BEFORE = [("students", "0007_details_version")]
+
+
+def _staff(apps: Apps) -> None:
+    for n in range(3):
+        apps.get_model("staff", "Staff").objects.create(
+            name=f"Staff {n}", email=f"staff{n}@office.com", role="counsellor"
+        )
+
+
+def _catalogue(apps: Apps) -> None:
+    for n in range(3):
+        university = apps.get_model("catalogue", "University").objects.create(
+            name=f"University {n}", country="australia"
+        )
+        apps.get_model("catalogue", "Course").objects.create(
+            university=university, name=f"Course {n}", level="bachelor"
+        )
+
+
+def _fee_types(apps: Apps) -> None:
+    """Every office starts with its seven Fee Types (a data migration); nothing to add."""
+
+
+# Ticket 18's kinds: the migration before each app's switch, the rows to make, the models.
+OFFICE_KINDS: dict[str, tuple[tuple[str, str], Callable[[Apps], None], list[str]]] = {
+    "staff": (("staff", "0008_light_by_default"), _staff, ["Staff"]),
+    "catalogue": (("catalogue", "0001_initial"), _catalogue, ["University", "Course"]),
+    "fee_types": (("fee_types", "0002_default_fee_types"), _fee_types, ["FeeType"]),
+}
 
 
 @pytest.fixture
@@ -63,3 +97,40 @@ def test_new_rows_get_a_uuid_by_themselves(abc: ConsultancyContext) -> None:
 
     assert first.public_id
     assert first.public_id != second.public_id
+
+
+@pytest.mark.parametrize("kind", OFFICE_KINDS)
+def test_existing_office_records_each_get_their_own_uuid(
+    abc: ConsultancyContext, kind: str
+) -> None:
+    """Employees, the catalogue and Fee Types made before the change get different UUIDs."""
+    before, make_rows, model_names = OFFICE_KINDS[kind]
+    app = before[0]
+    with tenant_context(abc.consultancy):
+        executor = MigrationExecutor(connection)
+        executor.migrate([before])
+        make_rows(executor.loader.project_state([before]).apps)
+        with connection.cursor() as cursor:
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        old_rows = {
+            name: _rows_without_uuid(executor.loader.project_state([before]).apps, app, name)
+            for name in model_names
+        }
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        for name in model_names:
+            model: Any = now.get_model(app, name)
+            rows = list(model.objects.order_by("pk").values())
+            assert [{k: v for k, v in row.items() if k != "public_id"} for row in rows] == old_rows[
+                name
+            ]
+            ids = [row["public_id"] for row in rows]
+            assert rows
+            assert all(ids)
+            assert len(set(ids)) == len(ids)
+
+
+def _rows_without_uuid(apps: Apps, app: str, name: str) -> list[dict[str, object]]:
+    model: Any = apps.get_model(app, name)
+    return list(model.objects.order_by("pk").values())

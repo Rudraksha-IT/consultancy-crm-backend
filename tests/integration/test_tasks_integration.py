@@ -48,7 +48,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def task_url(task: Task | int) -> str:
     """One Task."""
-    pk = task if isinstance(task, int) else task.pk
+    pk = task if isinstance(task, int | str) else task.public_id
     return f"/api/tasks/{pk}/"
 
 
@@ -68,7 +68,7 @@ def good_body(assignee: Staff, /, **changes: object) -> dict[str, object]:
     return {
         "title": "Call Sita about her IELTS score",
         "due_on": day(1).isoformat(),
-        "assignee": assignee.pk,
+        "assignee": str(assignee.public_id),
         **changes,
     }
 
@@ -130,7 +130,7 @@ class TestCreating:
         assert response.status_code == status.HTTP_201_CREATED
         [task] = stored_tasks(abc)
         assert response.json() == {
-            "id": task.pk,
+            "id": str(task.public_id),
             "title": "Call Sita about her IELTS score",
             "due_on": day(1).isoformat(),
             "priority": "normal",
@@ -138,8 +138,8 @@ class TestCreating:
             "timing": "upcoming",
             "is_done": False,
             "done_at": None,
-            "assignee": {"id": counsellor.pk, "name": "Bikash Thapa"},
-            "created_by": {"id": desk.pk, "name": "Ramesh KC"},
+            "assignee": {"id": str(counsellor.public_id), "name": "Bikash Thapa"},
+            "created_by": {"id": str(desk.public_id), "name": "Ramesh KC"},
             "student": {"id": str(student.public_id), "name": "Manisha Rai"},
             "can_mark_done": True,
         }
@@ -294,7 +294,7 @@ class TestRefusedInput:
         with tenant_context(abc.consultancy):
             Staff.objects.filter(pk=other.pk).update(status=left)
 
-        response = create(abc, me, assignee=other.pk)
+        response = create(abc, me, assignee=str(other.public_id))
 
         assert response.json() == ASSIGNEE_MESSAGE
         assert stored_tasks(abc) == []
@@ -469,8 +469,8 @@ class TestMyTasks:
         [given] = abc.client.get(TASKS_URL, {"view": "given"}).json()["results"]
         [mine] = abc.client.get(TASKS_URL).json()["results"]
 
-        assert given["assignee"] == {"id": leaver.pk, "name": "Bikash Thapa"}
-        assert mine["created_by"] == {"id": leaver.pk, "name": "Bikash Thapa"}
+        assert given["assignee"] == {"id": str(leaver.public_id), "name": "Bikash Thapa"}
+        assert mine["created_by"] == {"id": str(leaver.public_id), "name": "Bikash Thapa"}
 
 
 class TestMarkingDone:
@@ -795,7 +795,7 @@ class TestModel:
         staff = abc.add_staff(Role.COUNSELLOR)
         student = make_student(abc)
 
-        assert AssigneeField().to_representation(staff) == staff.pk
+        assert AssigneeField().to_representation(staff) == str(staff.public_id)
         assert StudentLinkField().to_representation(student) == str(student.public_id)
         assert StudentLinkField().to_representation(None) is None
         assert DoneField().to_representation(value=True) is True

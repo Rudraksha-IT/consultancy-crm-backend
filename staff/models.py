@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, ClassVar
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db import models
 from django.db.models import BooleanField, ExpressionWrapper, Q
 from django.utils import timezone
+
+from config.public_ids import public_id_field
 
 STAFF_NAME_MAX_LENGTH = 200
 ROLE_MAX_LENGTH = 20
@@ -46,6 +49,9 @@ class StaffManager(BaseUserManager["Staff"]):
 
 class Staff(AbstractBaseUser):
     """A person who works for the Consultancy and logs in with email and password."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     name = models.CharField(max_length=STAFF_NAME_MAX_LENGTH)
     email = models.EmailField(unique=True)
@@ -97,6 +103,8 @@ class Staff(AbstractBaseUser):
 # A Platform Admin inside a Consultancy has this id: no Staff row ever does (ids start at 1), so
 # "is this mine?" checks never match and lists filtered by them are empty.
 PLATFORM_VISITOR_ID = 0
+# ...and this id outside the server (ADR 0027): the same on every request, and no Staff's.
+PLATFORM_VISITOR_PUBLIC_ID = uuid.UUID(int=0)
 
 
 class PlatformVisitorIsNotStaffError(Exception):

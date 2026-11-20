@@ -37,7 +37,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def type_url(type_id: int) -> str:
+def type_url(type_id: object) -> str:
     """One Document Type."""
     return f"{TYPES_URL}{type_id}/"
 
@@ -53,10 +53,10 @@ def stored_types(office: ConsultancyContext) -> list[tuple[str, bool]]:
         return list(DocumentType.objects.order_by("pk").values_list("name", "needed_by_everyone"))
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of one of the office's Document Types."""
     with tenant_context(office.consultancy):
-        return int(DocumentType.objects.get(name=name).pk)
+        return str(DocumentType.objects.get(name=name).public_id)
 
 
 class TestListingTypes:
@@ -350,7 +350,7 @@ class TestDocumentsPage:
                 "name": "Bina Rejected",
                 "stage": "applying",
                 "country": "australia",
-                "assigned_counsellor": {"id": me.pk, "name": "Bikash Thapa"},
+                "assigned_counsellor": {"id": str(me.public_id), "name": "Bikash Thapa"},
             },
             "done": 7,
             "total": 8,

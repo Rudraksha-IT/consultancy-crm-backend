@@ -49,7 +49,7 @@ def employee_answer(staff: Staff, set_up: bool | None = None) -> dict[str, objec
     a list passes `set_up` it looked up for everyone at once.
     """
     return {
-        "id": staff.pk,
+        "id": str(staff.public_id),
         "name": staff.name,
         "email": staff.email,
         "mobile": staff.mobile,
@@ -197,4 +197,6 @@ class CounsellorChoicesView(APIView):
 
     def get(self, request: Request) -> Response:
         """Return each one's id, name and Role."""
-        return Response([{"id": s.pk, "name": s.name, "role": s.role} for s in list_counsellors()])
+        return Response(
+            [{"id": str(s.public_id), "name": s.name, "role": s.role} for s in list_counsellors()]
+        )

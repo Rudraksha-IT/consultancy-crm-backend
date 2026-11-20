@@ -10,7 +10,7 @@ def progress_answer(progress: StaffProgress) -> dict[str, object]:
     staff = progress.staff
     return {
         "staff": {
-            "id": staff.pk,
+            "id": staff.public_id,
             "name": staff.name,
             "job_title": staff.job_title,
             "mobile": staff.mobile,

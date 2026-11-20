@@ -104,7 +104,10 @@ class TestProgress:
                         "name": "Sita Gurung",
                         "stage": "applying",
                         "country": "australia",
-                        "assigned_counsellor": {"id": counsellor.pk, "name": "Bikash Thapa"},
+                        "assigned_counsellor": {
+                            "id": str(counsellor.public_id),
+                            "name": "Bikash Thapa",
+                        },
                     },
                     "percent": 45,
                     "next_step": "Waiting for an offer, Deakin University",

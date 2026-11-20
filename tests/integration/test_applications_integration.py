@@ -146,7 +146,7 @@ class TestAddingAnApplication:
         _, student = counselled_student(abc, Stage.APPLYING)
         course = make_course(abc)
 
-        response = add(abc, student, course=course.pk, intake="2027-07")
+        response = add(abc, student, course=str(course.public_id), intake="2027-07")
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
@@ -155,8 +155,8 @@ class TestAddingAnApplication:
         assert body["applications"] == [
             {
                 "id": str(stored_applications(abc, student)[0].public_id),
-                "university": {"id": course.university_id, "name": "Deakin University"},
-                "course": {"id": course.pk, "name": "Master of IT", "level": "master"},
+                "university": {"id": str(course.university.public_id), "name": "Deakin University"},
+                "course": {"id": str(course.public_id), "name": "Master of IT", "level": "master"},
                 "intake": "2027-07",
                 "status": "applied",
                 "offer_kind": "",
@@ -175,8 +175,8 @@ class TestAddingAnApplication:
         first = make_course(abc)
         second = make_course(abc, "RMIT University")
 
-        add(abc, student, course=first.pk, intake="2027-03")
-        body = add(abc, student, course=second.pk, intake="2027-03").json()
+        add(abc, student, course=str(first.public_id), intake="2027-03")
+        body = add(abc, student, course=str(second.public_id), intake="2027-03").json()
 
         names = [a["university"]["name"] for a in body["applications"]]
         assert names == ["Deakin University", "RMIT University"]
@@ -186,7 +186,7 @@ class TestAddingAnApplication:
         student = make_student(abc, other, Stage.COUNSELLING)
         abc.log_in_as(Role.ADMIN)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_201_CREATED
 
@@ -196,7 +196,7 @@ class TestAddingAnApplication:
         student = make_student(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_201_CREATED
 
@@ -205,7 +205,7 @@ class TestAddingAnApplication:
         student = make_student(abc, other)
         abc.log_in_as(Role.COUNSELLOR)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_YOUR_STUDENT
@@ -217,7 +217,7 @@ class TestAddingAnApplication:
         student = make_student(abc)
         abc.log_in_as(Role.FRONT_DESK)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == COUNSELLOR_OR_ADMIN
@@ -226,7 +226,7 @@ class TestAddingAnApplication:
         student = make_student(abc)
         abc.log_in_as(Role.TEACHER)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_FOR_TEACHERS
@@ -237,10 +237,12 @@ class TestAddingAnApplication:
         me, student = counselled_student(abc)
         other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
         abc.client.post(
-            f"/api/students/{student.public_id}/transfer/", {"counsellor": other.pk}, format="json"
+            f"/api/students/{student.public_id}/transfer/",
+            {"counsellor": str(other.public_id)},
+            format="json",
         )
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert me.pk != other.pk
         assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -271,7 +273,7 @@ class TestAddingAnApplication:
         _, student = counselled_student(abc)
         course = make_course(abc, archived=True)
 
-        response = add(abc, student, course=course.pk, intake="2027-03")
+        response = add(abc, student, course=str(course.public_id), intake="2027-03")
 
         assert response.json() == CHOOSE_COURSE
 
@@ -279,7 +281,7 @@ class TestAddingAnApplication:
         _, student = counselled_student(abc)
         course = make_course(abc, university_archived=True)
 
-        response = add(abc, student, course=course.pk, intake="2027-03")
+        response = add(abc, student, course=str(course.public_id), intake="2027-03")
 
         assert response.json() == CHOOSE_COURSE
 
@@ -303,7 +305,7 @@ class TestAddingAnApplication:
         _, student = counselled_student(abc)
         course = make_course(abc)
 
-        response = add(abc, student, course=course.pk, intake=intake)
+        response = add(abc, student, course=str(course.public_id), intake=intake)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == CHOOSE_INTAKE
@@ -312,17 +314,17 @@ class TestAddingAnApplication:
     def test_a_missing_intake_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)
 
-        response = add(abc, student, course=make_course(abc).pk)
+        response = add(abc, student, course=str(make_course(abc).public_id))
 
         assert response.json() == CHOOSE_INTAKE
 
     def test_the_same_course_and_intake_twice_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)
         course = make_course(abc)
-        add(abc, student, course=course.pk, intake="2027-03")
+        add(abc, student, course=str(course.public_id), intake="2027-03")
 
-        again = add(abc, student, course=course.pk, intake="2027-03")
-        other_intake = add(abc, student, course=course.pk, intake="2027-07")
+        again = add(abc, student, course=str(course.public_id), intake="2027-03")
+        other_intake = add(abc, student, course=str(course.public_id), intake="2027-07")
 
         assert again.status_code == status.HTTP_400_BAD_REQUEST
         assert again.json() == ALREADY_APPLIED
@@ -332,7 +334,9 @@ class TestAddingAnApplication:
     def test_a_status_cannot_be_sent_with_a_new_application(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03", status="offer")
+        response = add(
+            abc, student, course=str(make_course(abc).public_id), intake="2027-03", status="offer"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -342,7 +346,12 @@ class TestAddingAnApplication:
         _, student = counselled_student(abc)
 
         response = add(
-            abc, student, course=make_course(abc).pk, intake="2027-03", student_id=999, note="x"
+            abc,
+            student,
+            course=str(make_course(abc).public_id),
+            intake="2027-03",
+            student_id=999,
+            note="x",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -367,7 +376,7 @@ class TestAddingAnApplication:
         for month in months[:MAX_APPLICATIONS_PER_STUDENT]:
             make_application(abc, student, course if month in months[:24] else other, intake=month)
 
-        response = add(abc, student, course=other.pk, intake=months[-1])
+        response = add(abc, student, course=str(other.public_id), intake=months[-1])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == TOO_MANY
@@ -375,7 +384,7 @@ class TestAddingAnApplication:
     def test_a_student_who_does_not_exist_is_not_found(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = add(abc, 99_999, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, 99_999, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -607,7 +616,7 @@ class TestTheStageFollows:
         log_in(abc, me)
         student = make_student(abc, me, stage)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.json()["stage"] == "applying"
         assert stored(abc, student).stage == Stage.APPLYING
@@ -618,7 +627,7 @@ class TestTheStageFollows:
 
     def test_the_history_endpoint_shows_the_automatic_move(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)
-        add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         page = abc.client.get(f"/api/students/{student.public_id}/history/").json()
 
@@ -679,7 +688,7 @@ class TestTheStageFollows:
     ) -> None:
         _, student = counselled_student(abc, stage)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
 
         assert response.json()["stage"] == stage.value
         assert stage_entries(abc, student) == []
@@ -687,7 +696,7 @@ class TestTheStageFollows:
     def test_a_lost_student_is_never_moved(self, abc: ConsultancyContext) -> None:
         me, student = counselled_student(abc, Stage.LOST)
 
-        response = add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        response = add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
         [application] = stored_applications(abc, student)
         offer(abc, student, application, me)
 
@@ -701,7 +710,7 @@ class TestTheStageFollows:
     ) -> None:
         _, student = counselled_student(abc)
 
-        add(abc, student, course=make_course(abc).pk, intake="2027-03")
+        add(abc, student, course=str(make_course(abc).public_id), intake="2027-03")
         change(abc, student, stored_applications(abc, student)[0], status="rejected")
 
         assert json_logs.with_message("Application status changed")
@@ -742,7 +751,7 @@ class TestTheProfile:
         percent, next_step = expected
         assert body["progress"] == {"percent": percent, "next_step": next_step, "is_done": False}
         assert (home_row["percent"], home_row["next_step"]) == (percent, next_step)
-        assert me.pk == body["assigned_counsellor"]["id"]
+        assert str(me.public_id) == body["assigned_counsellor"]["id"]
 
     def test_it_lists_every_application_with_its_status(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)

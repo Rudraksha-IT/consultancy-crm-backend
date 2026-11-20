@@ -16,15 +16,15 @@ def transfer_request_answer(request: TransferRequest, viewer: Staff) -> dict[str
     is_waiting = request.status == TransferRequestStatus.WAITING
     answered = request.status in (TransferRequestStatus.APPROVED, TransferRequestStatus.DECLINED)
     return {
-        "id": request.pk,
+        "id": str(request.public_id),
         "student": {"id": student.public_id, "name": student.name},
-        "asked_by": {"id": request.asked_by_id, "name": request.asked_by.name},
+        "asked_by": {"id": str(request.asked_by.public_id), "name": request.asked_by.name},
         "reason": request.reason,
         "asked_at": request.asked_at.isoformat(),
         "status": request.status,
         "counsellor": None
         if counsellor is None
-        else {"id": counsellor.pk, "name": counsellor.name},
+        else {"id": str(counsellor.public_id), "name": counsellor.name},
         "answered_by": (
             {
                 "name": request.answered_by_name,

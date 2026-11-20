@@ -16,16 +16,16 @@ UNIVERSITIES = "catalogue/universities/"
 urlpatterns: list[URLPattern] = [
     path(UNIVERSITIES, UniversityListView.as_view(), name="catalogue-universities"),
     path(
-        f"{UNIVERSITIES}<int:university_id>/",
+        f"{UNIVERSITIES}<university:university_id>/",
         UniversityView.as_view(),
         name="catalogue-university",
     ),
     path(
-        f"{UNIVERSITIES}<int:university_id>/courses/",
+        f"{UNIVERSITIES}<university:university_id>/courses/",
         CourseListView.as_view(),
         name="catalogue-courses",
     ),
-    path("catalogue/courses/<int:course_id>/", CourseView.as_view(), name="catalogue-course"),
+    path("catalogue/courses/<course:course_id>/", CourseView.as_view(), name="catalogue-course"),
     path("catalogue/intakes/", IntakeListView.as_view(), name="catalogue-intakes"),
     path("catalogue/import/", CatalogueImportView.as_view(), name="catalogue-import"),
 ]

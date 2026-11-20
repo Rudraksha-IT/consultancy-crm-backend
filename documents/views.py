@@ -182,7 +182,7 @@ def _checklist(student: Student, viewer: Staff, code: int = status.HTTP_200_OK) 
         checklist_of(student),
         can_change=can_change,
         deletes_for_good=viewer.role == Role.ADMIN and not is_platform_visitor(viewer),
-        viewer_id=None if is_platform_visitor(viewer) else viewer.pk,
+        viewer_id=None if is_platform_visitor(viewer) else viewer.public_id,
     )
     return Response(answer, status=code)
 

@@ -103,7 +103,7 @@ def message_answer(message: Message, student: Student, staff: Staff) -> dict[str
         "sent_to": message.sent_to,
         "attachments": message.attachments,
         "sent_at": message.sent_at.isoformat(),
-        "sent_by": {"id": staff.pk, "name": staff.name},
+        "sent_by": {"id": str(staff.public_id), "name": staff.name},
     }
 
 

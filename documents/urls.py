@@ -36,7 +36,7 @@ urlpatterns: list[URLPattern] = [
         name="configuration-document-types",
     ),
     path(
-        "configuration/document-types/<int:type_id>/",
+        "configuration/document-types/<document_type:type_id>/",
         DocumentTypeView.as_view(),
         name="configuration-document-type",
     ),
@@ -78,7 +78,7 @@ urlpatterns: list[URLPattern] = [
         name="student-documents-asked",
     ),
     path(
-        f"{ONE_STUDENT}documents/asked/<int:type_id>/",
+        f"{ONE_STUDENT}documents/asked/<document_type:type_id>/",
         StudentAskedTypeView.as_view(),
         name="student-document-asked",
     ),
@@ -98,7 +98,7 @@ urlpatterns: list[URLPattern] = [
     ),
     path("documents/types/", PickableTypesView.as_view(), name="documents-types"),
     path(
-        "catalogue/courses/<int:course_id>/documents/",
+        "catalogue/courses/<course:course_id>/documents/",
         CourseDocumentsView.as_view(),
         name="catalogue-course-documents",
     ),

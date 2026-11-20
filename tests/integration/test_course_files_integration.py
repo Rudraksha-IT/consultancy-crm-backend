@@ -62,21 +62,21 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def files_url(course: Course | int) -> str:
-    """Where a Course's Course Files are uploaded."""
-    pk = course if isinstance(course, int) else course.pk
+def files_url(course: Course | int | str) -> str:
+    """Where a Course's Course Files are uploaded (by UUID; a number or text to try bad ones)."""
+    pk = course if isinstance(course, int | str) else course.public_id
     return f"/api/catalogue/courses/{pk}/files/"
 
 
-def file_url(file: CourseFile | int) -> str:
+def file_url(file: CourseFile | int | str) -> str:
     """One Course File in use."""
-    pk = file if isinstance(file, int) else file.pk
+    pk = file if isinstance(file, int | str) else file.public_id
     return f"/api/catalogue/course-files/{pk}/"
 
 
-def bin_url(file: CourseFile | int) -> str:
+def bin_url(file: CourseFile | int | str) -> str:
     """One Course File in the Bin."""
-    pk = file if isinstance(file, int) else file.pk
+    pk = file if isinstance(file, int | str) else file.public_id
     return f"/api/documents/bin/course-files/{pk}/"
 
 
@@ -88,7 +88,10 @@ def a_pdf(
 
 
 def upload(
-    client: APIClient, course: Course | int, name: object = "Master of IT brochure", **more: object
+    client: APIClient,
+    course: Course | int | str,
+    name: object = "Master of IT brochure",
+    **more: object,
 ) -> _MonkeyPatchedResponse:
     """POST a PDF with its name to a Course."""
     body: dict[str, object] = {"file": a_pdf(), "name": name, **more}
@@ -137,7 +140,7 @@ class TestUpload:
         assert response.status_code == status.HTTP_201_CREATED
         [file] = stored(abc)
         assert response.json() == {
-            "id": file.pk,
+            "id": str(file.public_id),
             "name": "Master of IT brochure",
             "file_name": "deakin-master-it-2027.pdf",
             "size": len(PDF_BYTES),
@@ -158,7 +161,7 @@ class TestUpload:
         upload(abc.client, course)
 
         [file] = stored(abc)
-        assert file.storage_key.startswith(f"abcedu/course-files/{course.pk}/")
+        assert file.storage_key.startswith(f"abcedu/course-files/{course.public_id}/")
         assert file.storage_key.endswith(".pdf")
         assert "storage_key" not in str(upload(abc.client, course).json())
 
@@ -531,9 +534,13 @@ class TestBin:
         [row] = response.json()["results"]
         assert row == {
             "kind": "course_file",
-            "course_file": {"id": file.pk, "name": "Old brochure", "file_name": "brochure.pdf"},
-            "university": {"id": course.university_id, "name": "Deakin University"},
-            "course": {"id": course.pk, "name": "Master of IT"},
+            "course_file": {
+                "id": str(file.public_id),
+                "name": "Old brochure",
+                "file_name": "brochure.pdf",
+            },
+            "university": {"id": str(course.university.public_id), "name": "Deakin University"},
+            "course": {"id": str(course.public_id), "name": "Master of IT"},
             "by": {"id": row["by"]["id"], "name": "Test Admin"},
             "at": row["at"],
             "reason": "Deleted from the Catalogue",
@@ -563,7 +570,7 @@ class TestBin:
         response = abc.client.post(f"{bin_url(file)}restore/", {}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["id"] == file.pk
+        assert response.json()["id"] == str(file.public_id)
         [kept] = stored(abc)
         assert not kept.is_in_bin
         assert (kept.bin_reason, kept.binned_by_name) == ("", "")
@@ -668,12 +675,12 @@ class TestWithTheCatalogue:
         kept = make_course_file(abc, course, "Brochure")
         make_course_file(abc, course, "Old", binned=True)
 
-        response = abc.client.get(f"{UNIVERSITIES_URL}{course.university_id}/")
+        response = abc.client.get(f"{UNIVERSITIES_URL}{course.university.public_id}/")
 
         [answer] = response.json()["courses"]
         assert answer["files"] == [
             {
-                "id": kept.pk,
+                "id": str(kept.public_id),
                 "name": "Brochure",
                 "file_name": "brochure.pdf",
                 "size": len(PDF_BYTES),
@@ -704,16 +711,18 @@ class TestWithTheCatalogue:
         as_role(abc, Role.ADMIN)
         course = make_course(abc, archived=True)
         make_course_file(abc, course, binned=True)
-        university = abc.client.get(f"{UNIVERSITIES_URL}{course.university_id}/").json()
+        university = abc.client.get(f"{UNIVERSITIES_URL}{course.university.public_id}/").json()
         body = {
             "name": university["name"],
             "country": university["country"],
             "archived": False,
             "courses": [],
-            "deleted_courses": [course.pk],
+            "deleted_courses": [str(course.public_id)],
         }
 
-        response = abc.client.put(f"{UNIVERSITIES_URL}{course.university_id}/", body, format="json")
+        response = abc.client.put(
+            f"{UNIVERSITIES_URL}{course.university.public_id}/", body, format="json"
+        )
 
         assert (response.status_code, response.json()) == (
             status.HTTP_400_BAD_REQUEST,
@@ -730,7 +739,7 @@ class TestWithTheCatalogue:
         make_course_file(abc, course)
         make_course_file(abc, course, "Second", binned=True)
 
-        response = abc.client.delete(f"{UNIVERSITIES_URL}{course.university_id}/")
+        response = abc.client.delete(f"{UNIVERSITIES_URL}{course.university.public_id}/")
 
         assert (response.status_code, response.json()) == (
             status.HTTP_400_BAD_REQUEST,
@@ -744,7 +753,7 @@ class TestWithTheCatalogue:
         course = make_course(abc, archived=True)
         make_course_file(abc, course, "Kept")
 
-        response = abc.client.get(f"{UNIVERSITIES_URL}{course.university_id}/")
+        response = abc.client.get(f"{UNIVERSITIES_URL}{course.university.public_id}/")
 
         assert [f["name"] for f in response.json()["courses"][0]["files"]] == ["Kept"]
 

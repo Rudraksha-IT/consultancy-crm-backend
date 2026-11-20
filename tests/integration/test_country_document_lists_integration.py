@@ -9,6 +9,7 @@ as "Other documents" (not required, no group).
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
@@ -48,29 +49,32 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
+
 def list_url(country: str) -> str:
     """Where one Country's document list is set."""
     return f"{LISTS_URL}{country}/"
 
 
-def optional_type(office: ConsultancyContext, name: str, usual_group: str = "applying") -> int:
+def optional_type(office: ConsultancyContext, name: str, usual_group: str = "applying") -> str:
     """Store a Document Type asked for only when needed, and return its id."""
     with tenant_context(office.consultancy):
-        return int(
+        return str(
             DocumentType.objects.create(
                 name=name, needed_by_everyone=False, usual_group=usual_group
-            ).pk
+            ).public_id
         )
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of one of the office's Document Types."""
     with tenant_context(office.consultancy):
-        return int(DocumentType.objects.get(name=name).pk)
+        return str(DocumentType.objects.get(name=name).public_id)
 
 
 def put_list(
-    office: ConsultancyContext, country: str, rows: list[tuple[int, str]]
+    office: ConsultancyContext, country: str, rows: list[tuple[str, str]]
 ) -> _MonkeyPatchedResponse:
     """PUT a Country's whole list as (type id, group) rows."""
     body = {"documents": [{"document_type": pk, "group": group} for pk, group in rows]}
@@ -88,12 +92,16 @@ def stored_lists(office: ConsultancyContext) -> list[tuple[str, str, str]]:
         return [(row.country, row.document_type.name, row.group) for row in rows]
 
 
-def set_list(office: ConsultancyContext, country: str, rows: list[tuple[int, str]]) -> None:
+def set_list(office: ConsultancyContext, country: str, rows: list[tuple[str, str]]) -> None:
     """Store a Country's list directly."""
     with tenant_context(office.consultancy):
         DocumentRequirement.objects.bulk_create(
-            DocumentRequirement(document_type_id=pk, country=country, group=group)
-            for pk, group in rows
+            DocumentRequirement(
+                document_type=DocumentType.objects.get(public_id=type_id),
+                country=country,
+                group=group,
+            )
+            for type_id, group in rows
         )
 
 
@@ -182,7 +190,9 @@ class TestSettingCountryLists:
         police = optional_type(abc, "Police report", "visa")
         put_list(abc, "uk", [(gs, "statements"), (police, "visa")])
         with tenant_context(abc.consultancy):
-            kept_row = DocumentRequirement.objects.get(country="uk", document_type_id=police).pk
+            kept_row = DocumentRequirement.objects.get(
+                country="uk", document_type__public_id=police
+            ).pk
 
         put_list(abc, "uk", [(police, "applying")])
         moved = stored_lists(abc)
@@ -280,6 +290,8 @@ class TestRefusedCountryLists:
             ({"documents": [{"group": "visa"}]}, None),
             ({"documents": [{"document_type": 999_999, "group": "visa"}]}, None),
             ({"documents": [{"document_type": 999_999}]}, None),
+            ({"documents": [{"document_type": SOME_UUID}]}, None),
+            ({"documents": [{"document_type": SOME_UUID.upper(), "group": "visa"}]}, None),
             ({"documents": [], "country": "uk"}, {"detail": ["Unknown field."]}),
         ],
     )
@@ -335,7 +347,7 @@ class TestRefusedCountryLists:
         abc.log_in_as(Role.ADMIN)
         cv = optional_type(abc, "CV")
 
-        response = put_list(abc, "australia", [(cv, "applying"), (999_999, "visa")])
+        response = put_list(abc, "australia", [(cv, "applying"), (SOME_UUID, "visa")])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"documents": [CHOOSE_TYPES]}
@@ -353,7 +365,7 @@ class TestRefusedCountryLists:
         self, abc: ConsultancyContext
     ) -> None:
         abc.log_in_as(Role.ADMIN)
-        rows = [(pk, "visa") for pk in range(1, MAX_DOCUMENT_TYPES + 2)]
+        rows = [(str(uuid.uuid4()), "visa") for _ in range(MAX_DOCUMENT_TYPES + 1)]
 
         response = put_list(abc, "australia", rows)
 
@@ -428,7 +440,7 @@ class TestUsualGroup:
 
 
 @pytest.fixture
-def lists(abc: ConsultancyContext) -> dict[str, int]:
+def lists(abc: ConsultancyContext) -> dict[str, str]:
     """Australia, Canada and Japan lists, and a Counsellor logged in. Returns the type ids."""
     ids = {
         "GS": optional_type(abc, "Genuine Student statement", "statements"),

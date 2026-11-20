@@ -47,5 +47,5 @@ class PaymentFilters:
     paid_from: date | None = None
     paid_to: date | None = None
     student_id: UUID | None = None  # the Student's public id (ADR 0027)
-    fee_type_id: int | None = None
+    fee_type_id: UUID | None = None  # the Fee Type's public id
     query: str = ""

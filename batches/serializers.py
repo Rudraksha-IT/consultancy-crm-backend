@@ -30,7 +30,6 @@ ENDS_ON_MESSAGE = f"Enter an end date within {YEARS_AWAY} years of today."
 ENDS_BEFORE_STARTS_MESSAGE = "It can't end before it starts."
 STUDENT_MESSAGE = "Choose a Student from the list."
 ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
-LARGEST_ID = 2**63 - 1
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "invalid_choice")
 
 
@@ -40,13 +39,6 @@ def _same_message(message: str) -> dict[str, Any]:
 
 def _length_message(limit: int) -> str:
     return f"Use at most {limit} characters."
-
-
-def _an_id(data: object) -> int | None:
-    """`data` as a database id, or None when it can't be one (text, decimals, booleans...)."""
-    if isinstance(data, bool) or not isinstance(data, int) or not 1 <= data <= LARGEST_ID:
-        return None
-    return data
 
 
 def years_from(today: date, years: int) -> date:
@@ -99,23 +91,25 @@ class BatchDateField(serializers.Field[date, str, str, Any]):
         return value.isoformat()
 
 
-class TeacherField(serializers.Field[Staff, int, int, Any]):
-    """Who teaches the class: an active Teacher, by id."""
+class TeacherField(serializers.Field[Staff, str, str, Any]):
+    """Who teaches the class: an active Teacher, by UUID (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(TEACHER_MESSAGE))
 
     def to_internal_value(self, data: object) -> Staff:
         """Return the Teacher; anyone else, invited, gone or unknown is refused."""
-        pk = _an_id(data)
-        teacher = None if pk is None else active_teachers().filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        teacher = (
+            None if public_id is None else active_teachers().filter(public_id=public_id).first()
+        )
         if teacher is None:
             self.fail("invalid")
         return teacher
 
-    def to_representation(self, value: Staff) -> int:
+    def to_representation(self, value: Staff) -> str:
         """Return the id (unused: answers are built by hand)."""
-        return value.pk
+        return str(value.public_id)
 
 
 class BatchSerializer(StrictSerializer[None]):

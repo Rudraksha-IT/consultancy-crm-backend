@@ -206,7 +206,7 @@ class PaymentListQuerySerializer(StrictSerializer[None]):
     to = FilterDateField()
     q = serializers.CharField(max_length=SEARCH_MAX_LENGTH, required=False, allow_blank=True)
     student = RecordIdField(required=False)
-    fee_type = serializers.IntegerField(min_value=1, max_value=2**31 - 1, required=False)
+    fee_type = RecordIdField(required=False)
     page = serializers.IntegerField(min_value=1, max_value=1_000_000, required=False)
 
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:

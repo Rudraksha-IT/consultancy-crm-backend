@@ -474,7 +474,7 @@ class TestLinking:
         response = abc.client.post(
             documents_url(student),
             {
-                "document_type": str(type_named(abc, "Passport").pk),
+                "document_type": str(type_named(abc, "Passport").public_id),
                 "file": a_file(),
                 "application": [str(application.pk), str(application.pk)],
             },
@@ -498,7 +498,7 @@ class TestLinking:
         assert shown["documents"] == [
             {
                 "id": str(linked.public_id),
-                "document_type": {"id": linked.document_type_id, "name": "Passport"},
+                "document_type": {"id": str(linked.document_type.public_id), "name": "Passport"},
                 "files": [{"id": str(file.public_id), "file_name": "passport.pdf"}],
                 "verification": "pending",
             }

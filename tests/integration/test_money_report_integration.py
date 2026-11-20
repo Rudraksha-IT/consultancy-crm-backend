@@ -244,7 +244,9 @@ class TestMoneyReport:
         make_payment(abc, student, admin, amount=15000, paid_on=today(), fee_type="PTE class")
         make_payment(abc, student, admin, amount=99, paid_on=months_ago(SIX), fee_type="Other")
         with tenant_context(abc.consultancy):
-            ids = dict(FeeType.objects.values_list("name", "pk"))
+            ids = {
+                name: str(uuid) for name, uuid in FeeType.objects.values_list("name", "public_id")
+            }
 
         body = money(abc)
 
@@ -261,7 +263,7 @@ class TestMoneyReport:
         with tenant_context(abc.consultancy):
             FeeType.objects.filter(name="PTE class").update(hidden=True)
 
-            pte = FeeType.objects.get(name="PTE class").pk
+            pte = str(FeeType.objects.get(name="PTE class").public_id)
 
         rows = money(abc)["money_in_by_fee_type"]
 

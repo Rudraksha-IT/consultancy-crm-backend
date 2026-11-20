@@ -73,7 +73,7 @@ def transfer_url(student: Student | int | str) -> str:
 
 def assigned_url(staff: Staff | int) -> str:
     """The Students still assigned to a Staff member."""
-    pk = staff if isinstance(staff, int) else staff.pk
+    pk = staff if isinstance(staff, int | str) else staff.public_id
     return f"/api/staff/{pk}/assigned-students/"
 
 
@@ -533,10 +533,13 @@ class TestAssigningACounsellor:
         abc.log_in_as(role)
         student = make_student(abc)
 
-        response = assign(abc, student, bikash.pk)
+        response = assign(abc, student, str(bikash.public_id))
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["assigned_counsellor"] == {"id": bikash.pk, "name": "Bikash Thapa"}
+        assert response.json()["assigned_counsellor"] == {
+            "id": str(bikash.public_id),
+            "name": "Bikash Thapa",
+        }
         assert stored(abc, student).assigned_counsellor_id == bikash.pk
 
     def test_the_assignment_is_recorded_in_history(self, abc: ConsultancyContext) -> None:
@@ -545,7 +548,7 @@ class TestAssigningACounsellor:
         log_in(abc, desk)
         student = make_student(abc)
 
-        assign(abc, student, bikash.pk)
+        assign(abc, student, str(bikash.public_id))
 
         [entry] = history_rows(abc, student)
         assert entry.kind == HistoryKind.COUNSELLOR_ASSIGNED
@@ -555,7 +558,7 @@ class TestAssigningACounsellor:
         admin = abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
 
-        assert assign(abc, student, admin.pk).status_code == status.HTTP_200_OK
+        assert assign(abc, student, str(admin.public_id)).status_code == status.HTTP_200_OK
 
     def test_front_desk_can_no_longer_change_the_student_afterwards(
         self, abc: ConsultancyContext
@@ -564,7 +567,7 @@ class TestAssigningACounsellor:
         abc.log_in_as(Role.FRONT_DESK)
         student = make_student(abc)
 
-        body = assign(abc, student, bikash.pk).json()
+        body = assign(abc, student, str(bikash.public_id)).json()
 
         assert body["can_change"] is False
         assert body["can_assign"] is False
@@ -573,7 +576,7 @@ class TestAssigningACounsellor:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc)
 
-        response = assign(abc, student, me.pk)
+        response = assign(abc, student, str(me.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == ASSIGN_ROLES
@@ -584,7 +587,7 @@ class TestAssigningACounsellor:
         abc.log_in_as(Role.TEACHER)
         student = make_student(abc)
 
-        assert assign(abc, student, bikash.pk).json() == NOT_FOR_TEACHERS
+        assert assign(abc, student, str(bikash.public_id)).json() == NOT_FOR_TEACHERS
 
     def test_a_student_who_has_a_counsellor_is_transferred_instead(
         self, abc: ConsultancyContext
@@ -594,7 +597,7 @@ class TestAssigningACounsellor:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc, bikash)
 
-        response = assign(abc, student, anjali.pk)
+        response = assign(abc, student, str(anjali.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == ALREADY_ASSIGNED
@@ -612,7 +615,7 @@ class TestAssigningACounsellor:
         student = make_student(abc)
 
         for staff in (desk, teacher, left):
-            response = assign(abc, student, staff.pk)
+            response = assign(abc, student, str(staff.public_id))
             assert response.status_code == status.HTTP_400_BAD_REQUEST
             assert response.json() == CHOOSE_COUNSELLOR
         assert stored(abc, student).assigned_counsellor_id is None
@@ -636,7 +639,9 @@ class TestAssigningACounsellor:
 
         missing = abc.client.post(assign_url(student), {}, format="json")
         extra = abc.client.post(
-            assign_url(student), {"counsellor": bikash.pk, "stage": "visa"}, format="json"
+            assign_url(student),
+            {"counsellor": str(bikash.public_id), "stage": "visa"},
+            format="json",
         )
 
         assert missing.status_code == status.HTTP_400_BAD_REQUEST
@@ -657,7 +662,9 @@ class TestAssigningACounsellor:
     def test_a_student_who_does_not_exist_is_not_found(self, abc: ConsultancyContext) -> None:
         admin = abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(assign_url(999_999), {"counsellor": admin.pk}, format="json")
+        response = abc.client.post(
+            assign_url(999_999), {"counsellor": str(admin.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -671,16 +678,19 @@ class TestTransfer:
         log_in(abc, nabin)
         student = make_student(abc, nabin, Stage.COUNSELLING)
 
-        response = transfer(abc, student, bikash.pk)
+        response = transfer(abc, student, str(bikash.public_id))
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["assigned_counsellor"] == {"id": bikash.pk, "name": "Bikash Thapa"}
+        assert response.json()["assigned_counsellor"] == {
+            "id": str(bikash.public_id),
+            "name": "Bikash Thapa",
+        }
         assert response.json()["can_change"] is False
         note = abc.client.put(
             f"/api/students/{student.public_id}/note/", {"note": "x"}, format="json"
         )
         assert note.status_code == status.HTTP_403_FORBIDDEN
-        assert transfer(abc, student, nabin.pk).json() == NOT_YOUR_STUDENT
+        assert transfer(abc, student, str(nabin.public_id)).json() == NOT_YOUR_STUDENT
         log_in(abc, bikash)
         assert set_stage(abc, student, stage="lead").status_code == status.HTTP_200_OK
 
@@ -690,7 +700,7 @@ class TestTransfer:
         log_in(abc, nabin)
         student = make_student(abc, nabin, Stage.COUNSELLING)
 
-        transfer(abc, student, bikash.pk)
+        transfer(abc, student, str(bikash.public_id))
 
         [entry] = history_rows(abc, student)
         assert entry.kind == HistoryKind.TRANSFERRED
@@ -706,7 +716,7 @@ class TestTransfer:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc, nabin, Stage.APPLYING)
 
-        assert transfer(abc, student, bikash.pk).status_code == status.HTTP_200_OK
+        assert transfer(abc, student, str(bikash.public_id)).status_code == status.HTTP_200_OK
         assert stored(abc, student).assigned_counsellor_id == bikash.pk
 
     def test_another_counsellor_is_refused(self, abc: ConsultancyContext) -> None:
@@ -714,7 +724,7 @@ class TestTransfer:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, nabin)
 
-        response = transfer(abc, student, me.pk)
+        response = transfer(abc, student, str(me.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_YOUR_STUDENT
@@ -726,7 +736,7 @@ class TestTransfer:
         abc.log_in_as(Role.FRONT_DESK)
         student = make_student(abc, nabin)
 
-        assert transfer(abc, student, bikash.pk).json() == COUNSELLOR_OR_ADMIN
+        assert transfer(abc, student, str(bikash.public_id)).json() == COUNSELLOR_OR_ADMIN
 
     def test_a_teacher_is_refused(self, abc: ConsultancyContext) -> None:
         nabin = named_staff(abc, "Nabin Adhikari")
@@ -734,7 +744,7 @@ class TestTransfer:
         abc.log_in_as(Role.TEACHER)
         student = make_student(abc, nabin)
 
-        assert transfer(abc, student, bikash.pk).json() == NOT_FOR_TEACHERS
+        assert transfer(abc, student, str(bikash.public_id)).json() == NOT_FOR_TEACHERS
 
     def test_a_student_with_no_counsellor_is_assigned_instead(
         self, abc: ConsultancyContext
@@ -743,7 +753,7 @@ class TestTransfer:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
 
-        response = transfer(abc, student, bikash.pk)
+        response = transfer(abc, student, str(bikash.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_ASSIGNED_YET
@@ -752,7 +762,7 @@ class TestTransfer:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me)
 
-        response = transfer(abc, student, me.pk)
+        response = transfer(abc, student, str(me.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"counsellor": ["They're already this Student's counsellor."]}
@@ -775,7 +785,7 @@ class TestTransfer:
             Staff.objects.filter(pk=left.pk).update(status=StaffStatus.DEACTIVATED)
         student = make_student(abc, me)
 
-        assert transfer(abc, student, left.pk).json() == CHOOSE_COUNSELLOR
+        assert transfer(abc, student, str(left.public_id)).json() == CHOOSE_COUNSELLOR
 
     def test_unknown_fields_are_refused(self, abc: ConsultancyContext) -> None:
         me = abc.log_in_as(Role.COUNSELLOR)
@@ -783,7 +793,9 @@ class TestTransfer:
         student = make_student(abc, me)
 
         response = abc.client.post(
-            transfer_url(student), {"counsellor": bikash.pk, "reason": "x"}, format="json"
+            transfer_url(student),
+            {"counsellor": str(bikash.public_id), "reason": "x"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -804,7 +816,7 @@ class TestTransfer:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc, nabin)
 
-        transfer(abc, student, bikash.pk)
+        transfer(abc, student, str(bikash.public_id))
 
         assert "Bikash" not in json_logs.text()
         assert json_logs.with_message("Student transferred")
@@ -939,7 +951,9 @@ class TestChangesMadeMeanwhile:
 
         monkeypatch.setattr(f"students.journey_views.{service}", changed)
 
-        response = abc.client.post(url(student), {"counsellor": bikash.pk}, format="json")
+        response = abc.client.post(
+            url(student), {"counsellor": str(bikash.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_409_CONFLICT
         assert response.json() == {

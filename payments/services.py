@@ -217,7 +217,7 @@ def _matching(filters: PaymentFilters) -> Q:
         "paid_on__gte": filters.paid_from,
         "paid_on__lte": filters.paid_to,
         "student__public_id": filters.student_id,
-        "fee_type_id": filters.fee_type_id,
+        "fee_type__public_id": filters.fee_type_id,
     }
     match = Q(**{lookup: value for lookup, value in conditions.items() if value is not None})
     return match & _search(filters.query) if filters.query else match

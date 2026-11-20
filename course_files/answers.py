@@ -11,7 +11,7 @@ from documents.bin_answers import bin_answer
 def course_file_answer(file: CourseFile) -> dict[str, object]:
     """One Course File in use: its name, the file's own name, size and when it was added."""
     return {
-        "id": file.pk,
+        "id": file.public_id,
         "name": file.name,
         "file_name": file.file_name,
         "size": file.size,
@@ -30,8 +30,8 @@ def binned_course_file_answer(file: CourseFile) -> dict[str, object]:
     university = course.university
     return {
         "kind": "course_file",
-        "course_file": {"id": file.pk, "name": file.name, "file_name": file.file_name},
-        "university": {"id": university.pk, "name": university.name},
-        "course": {"id": course.pk, "name": course.name},
+        "course_file": {"id": file.public_id, "name": file.name, "file_name": file.file_name},
+        "university": {"id": university.public_id, "name": university.name},
+        "course": {"id": course.public_id, "name": course.name},
         **bin_answer(file),
     }

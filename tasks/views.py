@@ -141,7 +141,9 @@ class TaskAssigneesView(APIView):
 
     def get(self, request: Request) -> Response:
         """Return each one's id, name and Role, by name."""
-        return Response([{"id": s.pk, "name": s.name, "role": s.role} for s in assignable_staff()])
+        return Response(
+            [{"id": str(s.public_id), "name": s.name, "role": s.role} for s in assignable_staff()]
+        )
 
 
 class StudentTasksView(APIView):

@@ -160,4 +160,4 @@ def timing(task: Task, today: date) -> Timing:
 
 
 def _with_people(tasks: QuerySet[Task]) -> QuerySet[Task]:
-    return tasks.select_related("assignee", "student")
+    return tasks.select_related("assignee", "student", "created_by")

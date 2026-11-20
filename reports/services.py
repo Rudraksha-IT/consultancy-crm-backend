@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from uuid import UUID
 
 from django.db.models import Count, Q, QuerySet, Sum
 from django.utils import timezone
@@ -85,7 +86,7 @@ class MoneyReport:
     months: list[MoneyMonth]
     money_out_by_category: list[tuple[ExpenseCategory, int]]
     # Money in from Students over all the months, per Fee Type: (id, name, amount), most first.
-    money_in_by_fee_type: list[tuple[int, str, int]]
+    money_in_by_fee_type: list[tuple[UUID, str, int]]
 
 
 @dataclass(frozen=True)
@@ -313,7 +314,7 @@ def money_report(month_count: int) -> MoneyReport:
     months = months_back(timezone.localdate(), month_count)
     payments = Payment.objects.filter(_days_of(months, "paid_on")).order_by()
     per_fee_type = (
-        payments.values_list("fee_type_id", "fee_type__name", "fee_type__position")
+        payments.values_list("fee_type__public_id", "fee_type__name", "fee_type__position")
         .annotate(amount=Sum("amount"))
         .order_by("-amount", "fee_type__position", "fee_type_id")
     )

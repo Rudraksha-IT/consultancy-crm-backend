@@ -221,7 +221,7 @@ def _in_use(document_type: DocumentType) -> int:
 
 def _store(document_type: DocumentType, new: NewExample, by: Staff) -> DocumentExample:
     """Keep the record, then the file; call inside a transaction so a failed store keeps none."""
-    folder = f"{get_active_schema_name()}/document-examples/{document_type.pk}/"
+    folder = f"{get_active_schema_name()}/document-examples/{document_type.public_id}/"
     key = f"{folder}{uuid.uuid4().hex}{new.kind.extension}"
     example = DocumentExample.objects.create(
         document_type=document_type,

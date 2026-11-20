@@ -208,9 +208,9 @@ def picked(*rows: CourseFile | DocumentExample | DocumentFile) -> list[dict[str,
     return [{"kind": kinds[type(row)], "id": outside_id(row)} for row in rows]
 
 
-def outside_id(row: CourseFile | DocumentExample | DocumentFile) -> int | str:
-    """The id the picker gives a file: a Document file's UUID; the rest by number (ticket 18)."""
-    return str(row.public_id) if isinstance(row, DocumentFile) else row.pk
+def outside_id(row: CourseFile | DocumentExample | DocumentFile) -> str:
+    """The id the picker gives a file: its UUID (ADR 0027)."""
+    return str(row.public_id)
 
 
 def stored_messages(office: ConsultancyContext) -> list[Message]:
@@ -411,7 +411,7 @@ class TestAttachingToOneStudent:
     def test_an_unknown_id_is_refused(
         self, abc: ConsultancyContext, admin: Staff, sita: Student, kind: str
     ) -> None:
-        unknown = str(uuid.uuid4()) if kind == "document_file" else 999_999
+        unknown = str(uuid.uuid4())
         response = send(abc, sita, [{"kind": kind, "id": unknown}])
 
         assert response.json() == GONE
@@ -432,6 +432,7 @@ class TestAttachingToOneStudent:
             [{"kind": "course_file", "id": -1}],
             [{"kind": "course_file", "id": 2**63}],
             [{"kind": "course_file", "id": 1.5}],
+            [{"kind": "course_file", "id": "3F8A2C1E-9B7D-4C2A-8E1F-0A1B2C3D4E5F"}],
             [{"kind": "document_file", "id": 1}],
             [{"kind": "document_file", "id": "not-a-uuid"}],
             [{"kind": "course_file", "id": 1, "path": "/etc/passwd"}],
@@ -458,7 +459,7 @@ class TestAttachingToOneStudent:
     def test_at_most_twenty_files(
         self, abc: ConsultancyContext, admin: Staff, sita: Student
     ) -> None:
-        attachments = [{"kind": "course_file", "id": number} for number in range(1, 22)]
+        attachments = [{"kind": "course_file", "id": str(uuid.uuid4())} for _ in range(21)]
 
         response = send(abc, sita, attachments)
 
@@ -638,7 +639,7 @@ class TestWhatCanBeAttached:
 
         answer = abc.client.get(BULK_ATTACHABLE_URL).json()
 
-        assert [row["id"] for row in answer["course_files"]] == [brochure.pk]
+        assert [row["id"] for row in answer["course_files"]] == [str(brochure.public_id)]
         assert answer["documents"] == []
 
     @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK])
@@ -701,7 +702,7 @@ class TestWhatCanBeAttached:
 
         [row] = abc.client.get(attachable_url(sita)).json()["course_files"]
 
-        assert (row["id"], row["name"]) == (brochure.pk, INJECTION_STRINGS[0])
+        assert (row["id"], row["name"]) == (str(brochure.public_id), INJECTION_STRINGS[0])
 
 
 class TestSuggestedAttachments:

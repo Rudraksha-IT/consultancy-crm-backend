@@ -47,14 +47,10 @@ class AttachmentKind(StrEnum):
 
 @dataclass(frozen=True)
 class Chosen:
-    """One file as the composer names it: its kind and id.
-
-    A Document file is named by its UUID (ADR 0027); Course Files and Document Examples still
-    by number until ticket 18 switches them.
-    """
+    """One file as the composer names it: its kind and UUID (ADR 0027)."""
 
     kind: AttachmentKind
-    id: int | UUID
+    id: UUID
 
 
 @dataclass(frozen=True)
@@ -66,7 +62,7 @@ class Attachable:
     """
 
     kind: AttachmentKind
-    id: int | UUID
+    id: UUID
     name: str
     file_name: str
     size: int
@@ -88,7 +84,7 @@ def _course_file(file: CourseFile) -> Attachable:
     course = file.course
     return Attachable(
         AttachmentKind.COURSE_FILE,
-        file.pk,
+        file.public_id,
         file.name,
         file.file_name,
         file.size,
@@ -102,7 +98,7 @@ def example_attachable(example: DocumentExample, type_name: str) -> Attachable:
     """A Document Example as the picker shows it, under its Document Type's name."""
     return Attachable(
         AttachmentKind.DOCUMENT_EXAMPLE,
-        example.pk,
+        example.public_id,
         example.file_name,
         example.file_name,
         example.size,
@@ -188,27 +184,23 @@ def chosen_files(chosen: Sequence[Chosen], student: Student | None) -> list[Atta
     return files
 
 
-def _ids(wanted: Sequence[Chosen], kind: AttachmentKind) -> list[int]:
-    return [c.id for c in wanted if c.kind == kind and isinstance(c.id, int)]
-
-
-def _uuids(wanted: Sequence[Chosen], kind: AttachmentKind) -> list[UUID]:
-    return [c.id for c in wanted if c.kind == kind and isinstance(c.id, UUID)]
+def _ids(wanted: Sequence[Chosen], kind: AttachmentKind) -> list[UUID]:
+    return [c.id for c in wanted if c.kind == kind]
 
 
 def _found(wanted: Sequence[Chosen], student: Student | None) -> dict[Chosen, Attachable]:
     """Each file named that is in use (and the Student's own, for a Document file)."""
     course_files = CourseFile.objects.filter(
-        pk__in=_ids(wanted, AttachmentKind.COURSE_FILE), binned_at__isnull=True
+        public_id__in=_ids(wanted, AttachmentKind.COURSE_FILE), binned_at__isnull=True
     ).select_related("course__university")
     examples = DocumentExample.objects.filter(
-        pk__in=_ids(wanted, AttachmentKind.DOCUMENT_EXAMPLE), binned_at__isnull=True
+        public_id__in=_ids(wanted, AttachmentKind.DOCUMENT_EXAMPLE), binned_at__isnull=True
     ).select_related("document_type")
     found = [_course_file(file) for file in course_files]
     found += [example_attachable(example, example.document_type.name) for example in examples]
     if student is not None:
         documents = DocumentFile.objects.filter(
-            public_id__in=_uuids(wanted, AttachmentKind.DOCUMENT_FILE),
+            public_id__in=_ids(wanted, AttachmentKind.DOCUMENT_FILE),
             document__student=student,
             binned_at__isnull=True,
             document__binned_at__isnull=True,

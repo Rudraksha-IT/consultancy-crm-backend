@@ -60,19 +60,19 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def batch_url(batch: Batch | int) -> str:
     """One Batch."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     return f"/api/batches/{pk}/"
 
 
 def members_url(batch: Batch | int) -> str:
     """A Batch's Students."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     return f"/api/batches/{pk}/students/"
 
 
 def member_url(batch: Batch | int, student: Student | int | str) -> str:
     """One Student in a Batch."""
-    batch_pk = batch if isinstance(batch, int) else batch.pk
+    batch_pk = batch if isinstance(batch, int | str) else batch.public_id
     student_pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/batches/{batch_pk}/students/{student_pk}/"
 
@@ -87,7 +87,7 @@ def good_body(teacher: Staff, /, **changes: object) -> dict[str, object]:
     return {
         "name": "IELTS Morning",
         "test_type": "ielts",
-        "teacher": teacher.pk,
+        "teacher": str(teacher.public_id),
         "time_slot": "7:00-8:30 AM",
         "starts_on": day(5).isoformat(),
         "ends_on": day(65).isoformat(),
@@ -161,10 +161,10 @@ class TestCreating:
         assert response.status_code == status.HTTP_201_CREATED
         batch = stored_batches(abc)[0]
         assert response.json() == {
-            "id": batch.pk,
+            "id": str(batch.public_id),
             "name": "IELTS Morning",
             "test_type": "ielts",
-            "teacher": {"id": teacher.pk, "name": "Gita Lama"},
+            "teacher": {"id": str(teacher.public_id), "name": "Gita Lama"},
             "time_slot": "7:00-8:30 AM",
             "starts_on": day(5).isoformat(),
             "ends_on": day(65).isoformat(),
@@ -220,6 +220,8 @@ class TestCreating:
         me = abc.log_in_as(Role.COUNSELLOR)
 
         batch_id = create(abc, teacher).json()["id"]
+        with tenant_context(abc.consultancy):  # logs keep the number
+            batch_id = Batch.objects.get(public_id=batch_id).pk
 
         json_logs.only(
             f"Batch created: batch_id={batch_id}, teacher_id={teacher.pk}, by_staff_id={me.pk}"
@@ -282,7 +284,7 @@ class TestRefusedInput:
     ) -> None:
         other = abc.add_staff(role, email=f"not-teacher-{role.value}@abc.test")
 
-        response = create(abc, teacher, teacher=other.pk)
+        response = create(abc, teacher, teacher=str(other.public_id))
 
         assert response.json() == TEACHER_MESSAGE
 
@@ -400,7 +402,10 @@ class TestEditing:
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["teacher"] == {"id": other_teacher.pk, "name": "Hari Rai"}
+        assert response.json()["teacher"] == {
+            "id": str(other_teacher.public_id),
+            "name": "Hari Rai",
+        }
         stored = stored_batches(abc)[0]
         assert (stored.name, stored.test_type, stored.teacher_id) == (
             "PTE Evening",
@@ -555,7 +560,7 @@ class TestListing:
 
         [listed] = abc.client.get(BATCHES_URL).json()["results"]
 
-        assert listed["teacher"] == {"id": teacher.pk, "name": "Gita Lama"}
+        assert listed["teacher"] == {"id": str(teacher.public_id), "name": "Gita Lama"}
 
 
 class TestOneClass:
@@ -808,15 +813,15 @@ class TestStudentsAndTheirClasses:
                 {
                     "id": str(anil.public_id),
                     "name": "Anil Rai",
-                    "batches": [{"id": morning.pk, "name": "IELTS Morning"}],
+                    "batches": [{"id": str(morning.public_id), "name": "IELTS Morning"}],
                     "attended_percent": None,
                 },
                 {
                     "id": str(sita.public_id),
                     "name": "Sita Gurung",
                     "batches": [
-                        {"id": morning.pk, "name": "IELTS Morning"},
-                        {"id": pte.pk, "name": "PTE Day"},
+                        {"id": str(morning.public_id), "name": "IELTS Morning"},
+                        {"id": str(pte.public_id), "name": "PTE Day"},
                     ],
                     "attended_percent": None,
                 },
@@ -861,8 +866,8 @@ class TestTeachers:
             Staff.objects.filter(pk=gone.pk).update(status=StaffStatus.DEACTIVATED)
 
         assert abc.client.get(TEACHERS_URL).json() == [
-            {"id": teacher.pk, "name": "Gita Lama"},
-            {"id": hari.pk, "name": "Hari Rai"},
+            {"id": str(teacher.public_id), "name": "Gita Lama"},
+            {"id": str(hari.public_id), "name": "Hari Rai"},
         ]
 
     @pytest.mark.parametrize("role", [Role.FRONT_DESK, Role.TEACHER])
@@ -1028,5 +1033,5 @@ class TestModel:
         student = make_student(abc)
 
         assert BatchDateField("x").to_representation(date(2026, 11, 2)) == "2026-11-02"
-        assert TeacherField().to_representation(teacher) == teacher.pk
+        assert TeacherField().to_representation(teacher) == str(teacher.public_id)
         assert StudentChoiceField().to_representation(student) == str(student.public_id)

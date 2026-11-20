@@ -77,7 +77,7 @@ def type_of(office: ConsultancyContext, name: str = "Bank Statement") -> Documen
 
 def type_url(document_type: DocumentType | int) -> str:
     """One Document Type in Configuration."""
-    pk = document_type if isinstance(document_type, int) else document_type.pk
+    pk = document_type if isinstance(document_type, int | str) else document_type.public_id
     return f"{TYPES_URL}{pk}/"
 
 
@@ -93,19 +93,19 @@ def instruction_url(document_type: DocumentType | int) -> str:
 
 def example_url(example: DocumentExample | int) -> str:
     """One example file in use, in Configuration."""
-    pk = example if isinstance(example, int) else example.pk
+    pk = example if isinstance(example, int | str) else example.public_id
     return f"/api/configuration/document-examples/{pk}/"
 
 
 def link_url(example: DocumentExample | int) -> str:
     """Where Staff ask for a short link to an example file in use."""
-    pk = example if isinstance(example, int) else example.pk
+    pk = example if isinstance(example, int | str) else example.public_id
     return f"/api/documents/examples/{pk}/link/"
 
 
 def bin_url(example: DocumentExample | int) -> str:
     """One example file in the Bin."""
-    pk = example if isinstance(example, int) else example.pk
+    pk = example if isinstance(example, int | str) else example.public_id
     return f"/api/documents/bin/document-examples/{pk}/"
 
 
@@ -174,7 +174,7 @@ def configured(office: ConsultancyContext, name: str = "Bank Statement") -> dict
 def example_answer(example: DocumentExample) -> dict[str, object]:
     """An example file as the API answers it."""
     return {
-        "id": example.pk,
+        "id": str(example.public_id),
         "file_name": example.file_name,
         "content_type": example.content_type,
         "size": example.size,
@@ -192,7 +192,7 @@ class TestInstruction:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["instruction"] == text
-        assert response.json()["id"] == statement.pk
+        assert response.json()["id"] == str(statement.public_id)
         assert type_of(abc).instruction == text
 
     def test_every_type_starts_without_one_and_configuration_shows_it(
@@ -369,7 +369,7 @@ class TestAddExample:
         response = add_example(abc.client, statement)
 
         [example] = stored(abc)
-        assert example.storage_key.startswith(f"abcedu/document-examples/{statement.pk}/")
+        assert example.storage_key.startswith(f"abcedu/document-examples/{statement.public_id}/")
         assert example.storage_key.endswith(".pdf")
         assert "storage_key" not in str(response.json())
 
@@ -757,8 +757,8 @@ class TestBin:
         [row] = response.json()["results"]
         assert row == {
             "kind": "document_example",
-            "document_example": {"id": example.pk, "file_name": "old-sample.pdf"},
-            "document_type": {"id": statement.pk, "name": "Bank Statement"},
+            "document_example": {"id": str(example.public_id), "file_name": "old-sample.pdf"},
+            "document_type": {"id": str(statement.public_id), "name": "Bank Statement"},
             "by": {"id": row["by"]["id"], "name": "Test Admin"},
             "at": row["at"],
             "reason": "Removed from the examples",
@@ -789,7 +789,7 @@ class TestBin:
         response = abc.client.post(f"{bin_url(example)}restore/", {}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["id"] == example.pk
+        assert response.json()["id"] == str(example.public_id)
         [kept] = stored(abc)
         assert not kept.is_in_bin
         assert (kept.bin_reason, kept.binned_by_name) == ("", "")

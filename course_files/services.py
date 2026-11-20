@@ -47,7 +47,7 @@ def add_course_file(course: Course, new: NewCourseFile, by: Staff) -> CourseFile
             raise CourseNotLiveError
         if CourseFile.objects.filter(course=locked).count() >= MAX_FILES_PER_COURSE:
             raise TooManyCourseFilesError
-        folder = f"{get_active_schema_name()}/course-files/{locked.pk}/"
+        folder = f"{get_active_schema_name()}/course-files/{locked.public_id}/"
         key = f"{folder}{uuid.uuid4().hex}{PDF.extension}"
         file = CourseFile.objects.create(
             course=locked,

@@ -15,7 +15,7 @@ def task_answer(task: Task, viewer: Staff, today: date) -> dict[str, object]:
     student = task.student
     shows_student = student is not None and why_cannot_link_student(viewer) is None
     return {
-        "id": task.pk,
+        "id": str(task.public_id),
         "title": task.title,
         "due_on": task.due_on.isoformat(),
         "priority": task.priority,
@@ -25,7 +25,10 @@ def task_answer(task: Task, viewer: Staff, today: date) -> dict[str, object]:
         "done_at": None if task.done_at is None else task.done_at.isoformat(),
         "assignee": _person(task.assignee),
         # No id when a Platform Admin gave it (Support Access); the name says who.
-        "created_by": {"id": task.created_by_id, "name": task.created_by_name},
+        "created_by": {
+            "id": None if task.created_by is None else str(task.created_by.public_id),
+            "name": task.created_by_name,
+        },
         "student": {"id": student.public_id, "name": student.name}
         if shows_student and student
         else None,
@@ -35,4 +38,4 @@ def task_answer(task: Task, viewer: Staff, today: date) -> dict[str, object]:
 
 
 def _person(staff: Staff) -> dict[str, object]:
-    return {"id": staff.pk, "name": staff.name}
+    return {"id": str(staff.public_id), "name": staff.name}

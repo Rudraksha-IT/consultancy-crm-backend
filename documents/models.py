@@ -55,6 +55,9 @@ class DocumentType(models.Model):
     in another.
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     name = models.CharField(max_length=DOCUMENT_TYPE_NAME_MAX_LENGTH)
     needed_by_everyone = models.BooleanField(default=False)
     usual_group = models.CharField(
@@ -157,6 +160,9 @@ class DocumentRequirement(models.Model):
     Group; a Course's or a Student's uses the type's usual group. University lists were removed
     (issue 80).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     document_type = models.ForeignKey(
         DocumentType, on_delete=models.PROTECT, related_name="requirements"

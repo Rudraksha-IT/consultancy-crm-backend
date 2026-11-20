@@ -124,7 +124,10 @@ class TestUploadingWithTheResult:
         assert answer["documents"] == [
             {
                 "id": str(document.public_id),
-                "document_type": {"id": document.document_type_id, "name": "Visa letter"},
+                "document_type": {
+                    "id": str(document.document_type.public_id),
+                    "name": "Visa letter",
+                },
                 "files": [{"id": str(file.public_id), "file_name": "visa-grant.pdf"}],
                 "verification": "pending",
             }

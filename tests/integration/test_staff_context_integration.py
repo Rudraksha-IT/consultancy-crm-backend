@@ -52,7 +52,7 @@ class TestStaffContext:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {
             "staff": {
-                "id": staff.pk,
+                "id": str(staff.public_id),
                 "name": staff.name,
                 "email": staff.email,
                 "role": expected_role,

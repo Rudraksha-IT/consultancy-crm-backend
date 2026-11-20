@@ -12,7 +12,7 @@ urlpatterns: list[URLPattern] = [
         name="commission-received",
     ),
     path(
-        "accounts/commission/<int:commission_id>/status/",
+        "accounts/commission/<commission:commission_id>/status/",
         CommissionStatusView.as_view(),
         name="commission-status",
     ),

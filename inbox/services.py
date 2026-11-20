@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from uuid import UUID
 
-from django.db.models import Case, Count, F, IntegerField, Max, Q, QuerySet, When
+from django.db.models import Case, Count, F, IntegerField, Q, QuerySet, Subquery, Value, When
 from django.utils import timezone
 
 from inbox.exceptions import PersonHasLeftError
@@ -29,7 +30,7 @@ class InboxCheck:
     """The polling answer: conversations with unread messages, and my newest message's id."""
 
     unread: int
-    latest: int | None
+    latest: UUID | None  # the newest message's UUID (ADR 0027)
 
 
 @dataclass(frozen=True)
@@ -79,11 +80,25 @@ def people_to_write_to(me: Staff) -> QuerySet[Staff]:
 
 def check(me: Staff) -> InboxCheck:
     """How many conversations have messages unread by `me`, and the newest message's id."""
-    found = _mine(me).aggregate(
-        latest=Max("pk"),
-        unread=Count("sender", distinct=True, filter=Q(recipient=me, read_at__isnull=True)),
+    unread = (
+        InboxMessage.objects.filter(recipient=me, read_at__isnull=True)
+        .order_by()
+        .annotate(everyone=Value(1))
+        .values("everyone")
+        .annotate(people=Count("sender", distinct=True))
+        .values("people")
     )
-    return InboxCheck(unread=found["unread"], latest=found["latest"])
+    newest = (
+        _mine(me)
+        .order_by("-pk")
+        .annotate(unread=Subquery(unread, output_field=IntegerField()))
+        .values_list("public_id", "unread")
+        .first()
+    )
+    if newest is None:
+        return InboxCheck(unread=0, latest=None)
+    latest, people = newest
+    return InboxCheck(unread=people or 0, latest=latest)
 
 
 def conversations(me: Staff) -> list[Conversation]:

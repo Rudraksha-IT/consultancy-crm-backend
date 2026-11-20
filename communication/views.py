@@ -270,7 +270,7 @@ def _chosen(ids: list[UUID]) -> list[Student]:
 
 
 def _recipients(
-    request: Request, batch_id: int | None, filters: StudentFilters | None
+    request: Request, batch_id: UUID | None, filters: StudentFilters | None
 ) -> QuerySet[Student]:
     """The Students in the class `batch_id`, or else those matching `filters`.
 
@@ -284,7 +284,7 @@ def _recipients(
     reason = why_cannot_on_batches(staff, BatchAction.SEE)
     if reason is not None:
         raise PermissionDenied(reason)
-    batch = Batch.objects.filter(pk=batch_id).first()
+    batch = Batch.objects.filter(public_id=batch_id).first()
     if batch is None:
         raise NotFound
     return members_of(batch)

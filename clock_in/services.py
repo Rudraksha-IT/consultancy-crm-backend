@@ -131,6 +131,7 @@ def times_of(session: WorkSession) -> SessionTimes:
     """The times the rules in `clock_in.days` need."""
     return SessionTimes(
         id=session.pk,
+        public_id=session.public_id,
         clocked_in_at=session.clocked_in_at,
         clocked_out_at=session.clocked_out_at,
         not_clocked_out=session.not_clocked_out,

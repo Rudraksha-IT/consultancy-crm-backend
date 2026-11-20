@@ -10,6 +10,8 @@ from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Lower
 
+from config.public_ids import public_id_field
+
 FEE_TYPE_NAME_MAX_LENGTH = 60
 # A Fee's or Payment's note: long enough to keep every purpose typed before Fee Types.
 NOTE_MAX_LENGTH = 200
@@ -17,6 +19,9 @@ NOTE_MAX_LENGTH = 200
 
 class FeeType(models.Model):
     """One Fee Type: its name, its place in every list, and whether it is still offered."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     name = models.CharField(max_length=FEE_TYPE_NAME_MAX_LENGTH)
     position = models.PositiveIntegerField()

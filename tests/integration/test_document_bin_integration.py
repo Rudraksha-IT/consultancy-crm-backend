@@ -174,7 +174,7 @@ class TestPuttingADocumentInTheBin:
         assert shown["id"] == str(document.public_id)
         assert [f["file_name"] for f in shown["files"]] == ["passport.pdf", "page-2.pdf"]
         assert shown["bin"]["reason"] == REASON
-        assert shown["bin"]["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert shown["bin"]["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         assert response.json()["done"] == total_before - 1
         stored = reloaded(abc, document)
         assert stored is not None
@@ -311,7 +311,7 @@ class TestPuttingADocumentInTheBin:
         log_in(abc, first)
         [shown] = abc.client.get("/api/notifications/").json()["results"]
         assert shown["kind"] == "bin_added"
-        assert shown["by"] == {"id": mine[0].pk, "name": "Bikash Thapa"}
+        assert shown["by"] == {"id": str(mine[0].public_id), "name": "Bikash Thapa"}
         assert shown["student"] == {"id": str(student.public_id), "name": student.name}
         assert shown["bin"] == {"item": "Passport", "reason": REASON}
 
@@ -353,7 +353,7 @@ class TestPuttingOneFileInTheBin:
         [in_bin] = shown["binned_files"]
         assert (in_bin["id"], in_bin["file_name"]) == (str(second.public_id), "page-2.pdf")
         assert in_bin["bin"]["reason"] == REASON
-        assert in_bin["bin"]["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert in_bin["bin"]["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         [entry] = history_of(abc, student)
         assert (entry.kind, entry.after) == (HistoryKind.DOCUMENT_BINNED, "page-2.pdf of Passport")
 
@@ -685,7 +685,7 @@ class TestTheBinTab:
         assert first["document"] == {"id": str(other.public_id), "name": "+2 Transcript"}
         assert [f["id"] for f in first["files"]] == [str(page.public_id)]
         assert first["student"] == {"id": str(student.public_id), "name": student.name}
-        assert first["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert first["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         assert first["reason"] == REASON
         assert second["kind"] == "document"
         assert [f["file_name"] for f in second["files"]] == ["passport.pdf", "page-2.pdf"]
@@ -1004,7 +1004,7 @@ class TestWhatTheChecklistTellsTheViewer:
 
         body = checklist(abc, student).json()
 
-        assert (body["deletes_for_good"], body["viewer_id"]) == (False, me.pk)
+        assert (body["deletes_for_good"], body["viewer_id"]) == (False, str(me.public_id))
 
     def test_an_admin_deletes_for_good(self, abc: ConsultancyContext) -> None:
         student = make_student(abc, named_staff(abc, "Other Counsellor"), Stage.COUNSELLING)
@@ -1012,7 +1012,7 @@ class TestWhatTheChecklistTellsTheViewer:
 
         body = checklist(abc, student).json()
 
-        assert (body["deletes_for_good"], body["viewer_id"]) == (True, admin.pk)
+        assert (body["deletes_for_good"], body["viewer_id"]) == (True, str(admin.public_id))
 
     def test_a_platform_admin_puts_in_the_bin_and_has_no_staff_id(
         self, abc: ConsultancyContext, platform_site: PlatformContext

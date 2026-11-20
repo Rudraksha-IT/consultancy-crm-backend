@@ -91,7 +91,7 @@ class TestNewVisitor:
         visit = visits["results"][0]
         assert visit["kind"] == "new"
         assert visit["purpose"] == "First visit"
-        assert visit["recorded_by"] == {"id": desk.pk, "name": "Ramesh KC"}
+        assert visit["recorded_by"] == {"id": str(desk.public_id), "name": "Ramesh KC"}
 
     def test_a_refused_visitor_logs_no_visit(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
@@ -118,7 +118,7 @@ class TestLogVisit:
         body = response.json()
         assert body["kind"] == "follow_up"
         assert body["purpose"] == "Bringing documents: Passport copy"
-        assert body["recorded_by"] == {"id": staff.pk, "name": staff.name}
+        assert body["recorded_by"] == {"id": str(staff.public_id), "name": staff.name}
         [visit] = stored_visits(abc, student)
         assert visit.purpose == "Bringing documents: Passport copy"
         assert visit.recorded_by_id == staff.pk

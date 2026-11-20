@@ -11,6 +11,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from exports.exceptions import ExportRecordIsAppendOnlyError
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 
@@ -41,6 +42,9 @@ class AppendOnlyQuerySet(models.QuerySet["ExportRecord"]):
 
 class ExportRecord(models.Model):
     """One CSV export of one list."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     list = models.CharField(max_length=LIST_MAX_LENGTH, choices=ExportList.choices)
     # The list's filters as they were checked and used, e.g. {"stage": "applying"}.

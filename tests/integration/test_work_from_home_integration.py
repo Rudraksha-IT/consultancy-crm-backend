@@ -95,12 +95,12 @@ def client_as(office: ConsultancyContext, staff: Staff) -> APIClient:
     return client
 
 
-def person_url(staff_id: int) -> str:
+def person_url(staff_id: object) -> str:
     """One person's Work From Home dates (Admins)."""
     return f"/api/clock/staff/{staff_id}/work-from-home/"
 
 
-def action_url(dates_id: int, action: str) -> str:
+def action_url(dates_id: object, action: str) -> str:
     """Approve, decline, cancel or end one set of dates."""
     return f"/api/clock/work-from-home/{dates_id}/{action}/"
 
@@ -321,7 +321,7 @@ class TestTheHomeLabel:
         client_as(abc, person).post(IN_URL, format="json")
         abc.log_in_as(Role.ADMIN)
 
-        month = abc.client.get(MONTH_URL, {"staff": person.pk}).json()
+        month = abc.client.get(MONTH_URL, {"staff": str(person.public_id)}).json()
 
         assert next(d for d in month["days"] if d["date"] == TODAY.isoformat())["home"] is True
 
@@ -348,8 +348,8 @@ class TestAsking:
         assert told["kind"] == "work_from_home_asked"
         assert told["by"]["name"] == me.name
         assert told["work_from_home"] == {
-            "id": dates.pk,
-            "staff_id": me.pk,
+            "id": str(dates.public_id),
+            "staff_id": str(me.public_id),
             "starts_on": TOMORROW.isoformat(),
             "ends_on": NEXT_WEEK.isoformat(),
             "status": "waiting",
@@ -493,7 +493,7 @@ class TestCancelling:
         me = abc.log_in_as(Role.COUNSELLOR)
         dates = store(abc, me, TOMORROW, None)
 
-        response = abc.client.post(action_url(dates.pk, "cancel"), format="json")
+        response = abc.client.post(action_url(dates.public_id, "cancel"), format="json")
 
         assert response.status_code == status.HTTP_409_CONFLICT
         assert response.json() == NOT_WAITING
@@ -505,7 +505,7 @@ class TestCancelling:
         dates = store(abc, other, TOMORROW, None, WorkFromHomeStatus.WAITING)
         abc.log_in_as(role)
 
-        response = abc.client.post(action_url(dates.pk, "cancel"), format="json")
+        response = abc.client.post(action_url(dates.public_id, "cancel"), format="json")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert stored(abc)[0].status == WorkFromHomeStatus.WAITING
@@ -573,7 +573,7 @@ class TestAnswering:
         dates = store(abc, abc.add_staff(Role.COUNSELLOR), TOMORROW, None, state)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(action_url(dates.pk, action), format="json")
+        response = abc.client.post(action_url(dates.public_id, action), format="json")
 
         assert response.status_code == status.HTTP_409_CONFLICT
         assert response.json() == NOT_WAITING
@@ -589,8 +589,8 @@ class TestAnswering:
         me = abc.log_in_as(role)
         mine = store(abc, me, TOMORROW, None, state)
 
-        theirs = abc.client.post(action_url(dates.pk, action), format="json")
-        own = abc.client.post(action_url(mine.pk, action), format="json")
+        theirs = abc.client.post(action_url(dates.public_id, action), format="json")
+        own = abc.client.post(action_url(mine.public_id, action), format="json")
 
         assert theirs.status_code == own.status_code == status.HTTP_403_FORBIDDEN
         assert theirs.json() == own.json() == ONLY_ADMIN
@@ -628,7 +628,7 @@ class TestSettingDirectly:
         admin = abc.log_in_as(Role.ADMIN)
 
         response = abc.client.post(
-            person_url(person.pk),
+            person_url(person.public_id),
             {"starts_on": TODAY.isoformat(), "ends_on": None, "reason": "Works from Pokhara"},
             format="json",
         )
@@ -650,19 +650,19 @@ class TestSettingDirectly:
         store(abc, abc.add_staff(Role.FRONT_DESK), TODAY, None)
         abc.log_in_as(Role.ADMIN)
 
-        answer = abc.client.get(person_url(person.pk)).json()
+        answer = abc.client.get(person_url(person.public_id)).json()
 
-        assert answer["staff"]["id"] == person.pk
+        assert answer["staff"]["id"] == str(person.public_id)
         assert answer["needs_dates"] is True
-        assert [d["staff_id"] for d in answer["results"]] == [person.pk]
+        assert [d["staff_id"] for d in answer["results"]] == [str(person.public_id)]
 
     def test_an_admin_needs_no_dates(self, abc: ConsultancyContext) -> None:
         other_admin = abc.add_staff(Role.ADMIN, email=f"admin2@{abc.host}")
         abc.log_in_as(Role.ADMIN)
 
-        listed = abc.client.get(person_url(other_admin.pk)).json()
+        listed = abc.client.get(person_url(other_admin.public_id)).json()
         response = abc.client.post(
-            person_url(other_admin.pk),
+            person_url(other_admin.public_id),
             {"starts_on": TODAY.isoformat(), "reason": "x"},
             format="json",
         )
@@ -692,7 +692,7 @@ class TestSettingDirectly:
     ) -> None:
         me = abc.log_in_as(role)
 
-        for staff_id in (me.pk, abc.add_staff(Role.ADMIN).pk):
+        for staff_id in (me.public_id, abc.add_staff(Role.ADMIN).public_id):
             seen = abc.client.get(person_url(staff_id))
             set_ = abc.client.post(
                 person_url(staff_id), {"starts_on": TODAY.isoformat(), "reason": "x"}, format="json"
@@ -706,7 +706,7 @@ class TestSettingDirectly:
         abc.log_in_as(Role.ADMIN)
 
         response = abc.client.post(
-            person_url(person.pk),
+            person_url(person.public_id),
             {
                 "starts_on": TODAY.isoformat(),
                 "ends_on": YESTERDAY.isoformat(),
@@ -726,7 +726,7 @@ class TestEnding:
         dates = store(abc, person, YESTERDAY, None)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(action_url(dates.pk, "end"), format="json")
+        response = abc.client.post(action_url(dates.public_id, "end"), format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert (response.json()["status"], response.json()["ends_on"]) == (
@@ -744,7 +744,7 @@ class TestEnding:
         dates = store(abc, abc.add_staff(Role.COUNSELLOR), TOMORROW, NEXT_WEEK)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(action_url(dates.pk, "end"), format="json")
+        response = abc.client.post(action_url(dates.public_id, "end"), format="json")
 
         assert response.json()["status"] == "ended"
         assert stored(abc)[0].status == WorkFromHomeStatus.ENDED
@@ -764,7 +764,7 @@ class TestEnding:
         dates = store(abc, abc.add_staff(Role.COUNSELLOR), date(2026, 11, 1), ends_on, state)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(action_url(dates.pk, "end"), format="json")
+        response = abc.client.post(action_url(dates.public_id, "end"), format="json")
 
         assert response.status_code == status.HTTP_409_CONFLICT
         assert response.json() == CANT_END
@@ -780,7 +780,7 @@ class TestHomeWaiting:
 
         waiting = abc.client.get(WAITING_URL).json()["work_from_home_requests"]
 
-        assert waiting == {"count": 2, "first_staff_id": first.pk}
+        assert waiting == {"count": 2, "first_staff_id": str(first.public_id)}
 
     def test_a_counsellor_sees_none(self, abc: ConsultancyContext) -> None:
         me = abc.log_in_as(Role.COUNSELLOR)
@@ -801,15 +801,17 @@ class TestHomeWaiting:
         assert client.get(NOTIFICATIONS_URL).json()["unread_count"] == 0
 
 
+# A record UUID that no office has (ADR 0027).
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
 ENDPOINTS = [
     ("get", MINE_URL),
     ("post", MINE_URL),
-    ("post", action_url(1, "cancel")),
-    ("post", action_url(1, "approve")),
-    ("post", action_url(1, "decline")),
-    ("post", action_url(1, "end")),
-    ("get", person_url(1)),
-    ("post", person_url(1)),
+    ("post", action_url(SOME_UUID, "cancel")),
+    ("post", action_url(SOME_UUID, "approve")),
+    ("post", action_url(SOME_UUID, "decline")),
+    ("post", action_url(SOME_UUID, "end")),
+    ("get", person_url(SOME_UUID)),
+    ("post", person_url(SOME_UUID)),
 ]
 
 
@@ -837,9 +839,9 @@ class TestWhoMay:
         [
             ("put", MINE_URL),
             ("delete", MINE_URL),
-            ("get", action_url(1, "approve")),
-            ("delete", action_url(1, "end")),
-            ("patch", person_url(1)),
+            ("get", action_url(SOME_UUID, "approve")),
+            ("delete", action_url(SOME_UUID, "end")),
+            ("patch", person_url(SOME_UUID)),
         ],
     )
     def test_only_the_methods_needed_are_allowed(
@@ -902,6 +904,7 @@ class TestNoAddressKept:
         assert me.pk in [s.staff_id for s in sessions(abc)]
         assert {field.name for field in WorkFromHome._meta.get_fields()} == {
             "id",
+            "public_id",
             "staff",
             "starts_on",
             "ends_on",
