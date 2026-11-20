@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from applications.appointments import next_appointment
 from applications.models import Application, Visa
+from course_files.answers import live_files_answer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -84,6 +85,8 @@ def application_answer(application: Application) -> dict[str, object]:
         "offered_on": None if offered_on is None else offered_on.isoformat(),
         "offer_letter": _offer_letter(documents),
         "documents": _documents_answer(documents),
+        # The Course's PDF brochures in use, shown under the Application (spec 57).
+        "course_files": live_files_answer(course.files.all()),
     }
 
 

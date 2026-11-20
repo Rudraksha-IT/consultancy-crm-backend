@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from catalogue.models import Course, University
 from catalogue.types import ImportResult
+from course_files.answers import live_files_answer
 from documents.models import DocumentRequirement
 
 
@@ -16,7 +17,8 @@ def _documents(requirements: list[DocumentRequirement]) -> list[dict[str, object
 
 
 def course_answer(course: Course) -> dict[str, object]:
-    """One Course with its Intakes ("YYYY-MM", AD), oldest first."""
+    """One Course with its Intakes ("YYYY-MM", AD), oldest first, and its Course Files."""
+    files = list(course.files.all())
     return {
         "id": course.pk,
         "university_id": course.university_id,
@@ -25,6 +27,10 @@ def course_answer(course: Course) -> dict[str, object]:
         "intakes": [intake.month for intake in course.intakes.all()],
         "archived": course.archived,
         "documents": _documents(list(course.document_requirements.all())),
+        # Its PDF brochures in use, oldest first (spec 53), and how many it keeps counting the
+        # Bin: a Course with any can't be deleted (spec 60).
+        "files": live_files_answer(files),
+        "file_count": len(files),
         # How many Applications use it: such a Course can't be deleted (issue 92).
         "applications": _uses(course),
     }

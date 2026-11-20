@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from django.core.paginator import EmptyPage, Paginator
 from rest_framework import status
@@ -18,6 +19,9 @@ from catalogue.answers import course_answer
 from catalogue.models import Course
 from catalogue.permissions import CanChangeCatalogue, CanReadCatalogue
 from catalogue.services import course_by_id
+from course_files.answers import binned_course_file_answer
+from course_files.models import CourseFile
+from course_files.services import binned_course_files
 from documents.answers import (
     bin_item_answer,
     checklist_answer,
@@ -28,6 +32,7 @@ from documents.answers import (
     paperwork_totals,
 )
 from documents.bin import (
+    BinItem,
     BinTarget,
     bin_items,
     delete_for_good,
@@ -726,7 +731,7 @@ class BinView(APIView):
         query = BinQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         try:
-            page = Paginator(bin_items(), BIN_PER_PAGE).page(query.page_number())
+            page = Paginator(_everything_in_bin(), BIN_PER_PAGE).page(query.page_number())
         except EmptyPage as error:
             raise NotFound from error
         return Response(
@@ -734,9 +739,27 @@ class BinView(APIView):
                 "count": page.paginator.count,
                 "page": page.number,
                 "page_size": BIN_PER_PAGE,
-                "results": [bin_item_answer(item) for item in page],
+                "results": [_bin_row(item) for item in page],
             }
         )
+
+
+def _everything_in_bin() -> list[BinItem | CourseFile]:
+    """Documents and their files, and Course Files (spec 56), newest first, each with its kind."""
+    items: list[BinItem | CourseFile] = [*bin_items(), *binned_course_files()]
+    return sorted(items, key=_binned_at, reverse=True)
+
+
+def _binned_at(item: BinItem | CourseFile) -> tuple[datetime, int, int]:
+    if isinstance(item, BinItem):
+        return item.binned_at, 0, item.document.pk
+    at = item.binned_at
+    assert at is not None  # noqa: S101  # only Course Files in the Bin are listed
+    return at, 1, item.pk
+
+
+def _bin_row(item: BinItem | CourseFile) -> dict[str, object]:
+    return bin_item_answer(item) if isinstance(item, BinItem) else binned_course_file_answer(item)
 
 
 class BinFileLinkView(APIView):

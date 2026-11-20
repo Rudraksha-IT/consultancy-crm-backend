@@ -75,6 +75,7 @@ def profile_of(student_id: int) -> Student:
             "test_scores",
             "work_experience",
             "applications__course__university",
+            "applications__course__files",
             "applications__documents__document_type",
             "applications__documents__files",
             "visas__application__course__university",

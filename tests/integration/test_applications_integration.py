@@ -160,6 +160,7 @@ class TestAddingAnApplication:
                 "offered_on": None,
                 "offer_letter": None,
                 "documents": [],
+                "course_files": [],
             }
         ]
         assert body["chosen_offer_id"] is None

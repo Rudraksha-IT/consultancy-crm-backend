@@ -101,6 +101,7 @@ TENANT_APPS = [
     "catalogue",
     "applications",
     "documents",
+    "course_files",
     "fee_types",
     "payments",
     "fees",

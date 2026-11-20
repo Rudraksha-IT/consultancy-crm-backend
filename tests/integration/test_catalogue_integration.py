@@ -369,6 +369,8 @@ class TestAddCourse:
             "archived": False,
             "documents": [],
             "applications": 0,
+            "files": [],
+            "file_count": 0,
         }
 
     def test_intakes_are_kept_in_order_without_repeats(self, abc: ConsultancyContext) -> None:
@@ -711,6 +713,8 @@ class TestCatalogueList:
                             "archived": False,
                             "documents": [],
                             "applications": 0,
+                            "files": [],
+                            "file_count": 0,
                         }
                     ],
                 }

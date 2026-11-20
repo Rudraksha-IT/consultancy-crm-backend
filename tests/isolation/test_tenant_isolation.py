@@ -5752,3 +5752,138 @@ class TestFeesByTypeIsolation:
         ]
 
         assert [answer.status_code for answer in answers] == [401, 401]
+
+
+_COURSE_PDF = b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n"
+
+
+def _course_with_file(office: ConsultancyContext, name: str) -> tuple[int, int]:
+    """A Course in `office` with one Course File uploaded by its Admin: (course id, file id)."""
+    university = office.client.post(
+        "/api/catalogue/universities/",
+        {"name": f"{name} University", "country": "australia"},
+        format="json",
+    ).json()
+    year = timezone.localdate().year + 1
+    course = office.client.post(
+        f"/api/catalogue/universities/{university['id']}/courses/",
+        {"name": f"{name} course", "level": "master", "intakes": [f"{year}-03"]},
+        format="json",
+    ).json()
+    upload = SimpleUploadedFile("brochure.pdf", _COURSE_PDF, content_type="application/pdf")
+    file = office.client.post(
+        f"/api/catalogue/courses/{course['id']}/files/",
+        {"file": upload, "name": f"{name} brochure"},
+        format="multipart",
+    )
+    assert file.status_code == status.HTTP_201_CREATED
+    return int(course["id"]), int(file.json()["id"])
+
+
+class TestCourseFileIsolation:
+    """Ticket 10: Course Files are kept, listed, opened and binned only in their own office."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext]:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        return abc, xyz
+
+    def test_files_are_kept_under_each_offices_own_prefix(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+
+        _course_with_file(abc, "ABC")
+        _course_with_file(xyz, "XYZ")
+
+        keys = sorted(FakeDocumentStorage.files)
+        assert [key.split("/", 2)[:2] for key in keys] == [
+            ["abcedu", "course-files"],
+            ["xyzoverseas", "course-files"],
+        ]
+
+    def test_another_offices_course_file_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        course_id, file_id = _course_with_file(abc, "ABC")
+        with tenant_context(xyz.consultancy):
+            assert not Course.objects.filter(pk=course_id).exists()
+
+        answers = [
+            xyz.client.get(f"/api/catalogue/course-files/{file_id}/link/"),
+            xyz.client.patch(
+                f"/api/catalogue/course-files/{file_id}/", {"name": "Mine"}, format="json"
+            ),
+            xyz.client.delete(f"/api/catalogue/course-files/{file_id}/"),
+            xyz.client.post(
+                f"/api/catalogue/courses/{course_id}/files/",
+                {
+                    "file": SimpleUploadedFile("x.pdf", _COURSE_PDF, "application/pdf"),
+                    "name": "Intruder",
+                },
+                format="multipart",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 4
+        mine = abc.client.get(f"/api/catalogue/course-files/{file_id}/link/")
+        assert mine.status_code == status.HTTP_200_OK
+
+    def test_the_same_id_changes_only_its_own_office(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, abc_file = _course_with_file(abc, "ABC")
+        _, xyz_file = _course_with_file(xyz, "XYZ")
+        assert abc_file == xyz_file
+
+        xyz.client.patch(
+            f"/api/catalogue/course-files/{xyz_file}/", {"name": "Renamed"}, format="json"
+        )
+        xyz.client.delete(f"/api/catalogue/course-files/{xyz_file}/")
+
+        abc_bin = abc.client.get("/api/documents/bin/").json()
+        xyz_bin = xyz.client.get("/api/documents/bin/").json()
+        assert abc_bin["count"] == 0
+        assert [row["course_file"]["name"] for row in xyz_bin["results"]] == ["Renamed"]
+        abc_course = abc.client.get("/api/catalogue/universities/").json()["results"][0]
+        assert abc_course["courses"][0]["files"][0]["name"] == "ABC brochure"
+
+    def test_another_offices_bin_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, file_id = _course_with_file(abc, "ABC")
+        abc.client.delete(f"/api/catalogue/course-files/{file_id}/")
+        bin_url = f"/api/documents/bin/course-files/{file_id}/"
+
+        answers = [
+            xyz.client.get(f"{bin_url}link/"),
+            xyz.client.post(f"{bin_url}restore/", {}, format="json"),
+            xyz.client.delete(bin_url),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 1
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        course_id, file_id = _course_with_file(abc, "ABC")
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+
+        answers = [
+            intruder.get(f"/api/catalogue/course-files/{file_id}/link/"),
+            intruder.delete(f"/api/catalogue/course-files/{file_id}/"),
+            intruder.post(f"/api/documents/bin/course-files/{file_id}/restore/", {}, format="json"),
+            intruder.post(f"/api/catalogue/courses/{course_id}/files/", {}, format="multipart"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 4

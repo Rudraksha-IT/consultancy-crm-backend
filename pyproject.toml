@@ -78,5 +78,5 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["access", "applications", "auth_tokens", "batches", "catalogue", "central_login", "codes", "commission", "communication", "config", "configuration", "documents", "emails", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "notifications", "students", "tasks", "tenancy", "home", "visits", "reports", "office_networks", "clock_in", "transfer_requests", "jobs", "two_factor"]
+source = ["access", "applications", "auth_tokens", "batches", "catalogue", "course_files", "central_login", "codes", "commission", "communication", "config", "configuration", "documents", "emails", "expenses", "fees", "history", "modules", "operations", "payments", "platform_admin", "staff", "notifications", "students", "tasks", "tenancy", "home", "visits", "reports", "office_networks", "clock_in", "transfer_requests", "jobs", "two_factor"]
 omit = ["*/migrations/*", "config/wsgi.py", "config/asgi.py", "manage.py"]

@@ -22,6 +22,7 @@ from catalogue.serializers import (
 )
 from catalogue.types import CourseEdit, UniversityEdit
 from config.serializers import StrictSerializer
+from course_files.models import CourseFile
 from documents.serializers import DocumentTypeListField
 from modules.serializers import StrictBooleanField
 from students.models import Country
@@ -40,6 +41,13 @@ ARCHIVE_FIRST_MESSAGE = "Archive the course and save before deleting it."
 def used_by_message(count: int, what: str) -> str:
     """Why something stays archived: "Used by 2 applications, so it stays archived."."""
     return f"Used by {count} {what}{'' if count == 1 else 's'}, so it stays archived."
+
+
+def kept_files_message(count: int, *, of_courses: bool = False) -> str:
+    """Why a Course or University stays archived while it keeps Course Files (spec 60)."""
+    files = "1 Course File" if count == 1 else f"{count} Course Files"
+    whose = "Its courses have" if of_courses else "It has"
+    return f"{whose} {files} (counting the Bin), so it stays archived."
 
 
 class CourseEditRowSerializer(StrictSerializer[None]):
@@ -119,12 +127,7 @@ class UniversityEditSerializer(StrictSerializer[None]):
         if len(set(deleted)) != len(deleted) or not own:
             raise serializers.ValidationError({"deleted_courses": [NOT_THIS_UNIVERSITYS_MESSAGE]})
         for course_id in deleted:
-            course = self.stored[course_id]
-            if not course.archived:
-                raise serializers.ValidationError({"deleted_courses": [ARCHIVE_FIRST_MESSAGE]})
-            uses: int = getattr(course, "application_count", 0)
-            if uses:
-                message = used_by_message(uses, "application")
+            if (message := _why_kept(self.stored[course_id])) is not None:
                 raise serializers.ValidationError({"deleted_courses": [message]})
 
     def _row_errors(
@@ -162,6 +165,17 @@ class UniversityEditSerializer(StrictSerializer[None]):
         on_page = {other["id"] for other in rows if "id" in other} | set(deleted)
         left_out = {c.name.lower() for pk, c in self.stored.items() if pk not in on_page}
         return name in earlier or name in left_out
+
+
+def _why_kept(course: Course) -> str | None:
+    """Why a Course can't be deleted: not archived, it keeps Course Files, or it is used."""
+    if not course.archived:
+        return ARCHIVE_FIRST_MESSAGE
+    files = CourseFile.objects.filter(course=course).count()
+    if files:
+        return kept_files_message(files)
+    uses: int = getattr(course, "application_count", 0)
+    return used_by_message(uses, "application") if uses else None
 
 
 def _details(error: serializers.ValidationError) -> list[object]:
