@@ -42,7 +42,11 @@ POSTGRES_USER                .env.postgres,.env.backend   var     required  fixe
 POSTGRES_PASSWORD            .env.postgres,.env.backend   secret  required  dbpass
 
 # --- Shared by Django and Next.js ---------------------------------------------------------------
-PRODUCT_DOMAIN               .env.backend,.env.frontend   var     required  -
+# PRODUCT_DOMAIN is the one place the domain is kept: an organisation secret (Rudraksha-IT ->
+# Settings -> Secrets and variables -> Actions), shared with both code repositories, so the
+# deploy jobs reach deploy.<it> as well. A secret, not a variable: the repositories are public,
+# and a secret is hidden in their workflow logs.
+PRODUCT_DOMAIN               .env.backend,.env.frontend   secret  required  -
 INTERNAL_API_TOKEN           .env.backend,.env.frontend   secret  required  -
 PLATFORM_SUBDOMAIN           .env.backend,.env.frontend   var     optional  -
 CENTRAL_LOGIN_SUBDOMAIN      .env.backend,.env.frontend   var     optional  -
