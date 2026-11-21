@@ -340,7 +340,7 @@ def _tokens_for_this_device(admin: PlatformAdmin, device: str) -> TokenPair:
 def _build_overview(consultancy: Consultancy, host: str) -> ConsultancyOverview:
     """Return the Platform's summary of a Consultancy reached at the given host."""
     return ConsultancyOverview(
-        id=consultancy.pk,
+        id=consultancy.public_id,
         name=consultancy.name,
         subdomain=subdomain_from_host(host),
         host=host,

@@ -6,6 +6,7 @@ mailbox; the broken mail backend (tests/fakes.py) stands in for a mail server th
 
 from __future__ import annotations
 
+import re
 from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,9 @@ from tests.integration.test_stage_and_counsellor_integration import (
     make_student,
     named_staff,
 )
+
+# A UUID written as text.
+UUID_TEXT = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 if TYPE_CHECKING:
     from pytest_django.fixtures import Settings
@@ -283,7 +287,9 @@ class TestSendingToOneStudent:
             SEND_FAILED,
             "sita@example.com",
         )
-        assert "550" not in str(answer)
+        # The mail server's own words ("550 mailbox unavailable") never reach the answer; UUIDs
+        # are taken out first, as one can hold "550" by chance.
+        assert "550" not in re.sub(UUID_TEXT, "", str(answer))
         [failure] = json_logs.with_message("outside call failed: provider=email ")
         assert failure["level"] == "ERROR"
         for private in ("sita@example.com", "Private subject", "Private words", CONTACT_EMAIL):

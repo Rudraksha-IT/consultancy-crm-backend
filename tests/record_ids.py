@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from django.db.models import Model
+    from django.http import HttpResponseBase
 
 # Keys that name a record: "id", "student_id", "attachment_ids", ...
 _ID_SUFFIXES = ("_id", "_ids")
@@ -55,3 +61,31 @@ def is_uuid(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
+# Numbers allowed under an id-like key, each with its reason. Only add one that is not a record.
+NOT_RECORD_NUMBERS: dict[str, str] = {}
+
+
+def record_numbers_in_response(response: HttpResponseBase) -> list[str]:
+    """Where a JSON answer names a record by a number (the guard of ticket 19)."""
+    if response.streaming or "json" not in response.get("Content-Type", ""):
+        return []
+    content = getattr(response, "content", b"")
+    if not content:
+        return []
+    try:
+        answer = json.loads(content)
+    except ValueError:
+        return []
+    return [place for place in record_numbers_in(answer) if _key(place) not in NOT_RECORD_NUMBERS]
+
+
+def _key(place: str) -> str:
+    """The last key of a place (`results[0].student_id` -> `student_id`)."""
+    return place.rsplit(".", 1)[-1].split("[", 1)[0]
+
+
+def number_of(model: type[Model], public_id: object) -> int:
+    """The database number of the record with this UUID, for checks on logs (they keep numbers)."""
+    return int(model._default_manager.values_list("pk", flat=True).get(public_id=public_id))

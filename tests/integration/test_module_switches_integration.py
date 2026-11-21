@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -47,14 +48,14 @@ MODULE_URLS = {
 MODULES = list(MODULE_URLS)
 
 
-def modules_url(consultancy_id: int) -> str:
+def modules_url(consultancy_id: object) -> str:
     """Return the URL that saves a Consultancy's Module switches."""
     return f"{CONSULTANCIES_URL}{consultancy_id}/modules/"
 
 
 def save(platform_site: PlatformContext, office: ConsultancyContext, body: object) -> Any:  # noqa: ANN401  # JSON response
     """Save Module switches for `office` as the logged-in Platform Admin."""
-    return platform_site.client.put(modules_url(office.consultancy.pk), body, format="json")
+    return platform_site.client.put(modules_url(office.consultancy.public_id), body, format="json")
 
 
 @pytest.fixture
@@ -130,7 +131,7 @@ class TestSaveFeatures:
         assert office.client.get(MODULE_URLS[module]).status_code == 200
 
     def test_unknown_consultancy_is_not_found(self, platform: PlatformContext) -> None:
-        response = platform.client.put(modules_url(999_999), ALL_ON, format="json")
+        response = platform.client.put(modules_url(uuid.uuid4()), ALL_ON, format="json")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -203,7 +204,7 @@ class TestRefusedInput:
     ) -> None:
         call = getattr(platform.client, method)
 
-        response = call(modules_url(office.consultancy.pk), ALL_ON, format="json")
+        response = call(modules_url(office.consultancy.public_id), ALL_ON, format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -225,7 +226,7 @@ class TestWhoCanSwitch:
         client = platform_site.new_client()
         use_access_token(client, office.tokens_for(staff).access)
 
-        response = client.put(modules_url(office.consultancy.pk), ALL_ON, format="json")
+        response = client.put(modules_url(office.consultancy.public_id), ALL_ON, format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert office.client.get(CONTEXT_URL).json()["modules"] == ALWAYS_ON
@@ -233,7 +234,9 @@ class TestWhoCanSwitch:
     def test_the_endpoint_does_not_exist_on_a_consultancy_subdomain(
         self, office: ConsultancyContext
     ) -> None:
-        response = office.client.put(modules_url(office.consultancy.pk), ALL_ON, format="json")
+        response = office.client.put(
+            modules_url(office.consultancy.public_id), ALL_ON, format="json"
+        )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 

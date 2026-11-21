@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 
 def _summary(admin: PlatformAdmin) -> dict[str, object]:
-    return {"id": admin.pk, "name": admin.name, "email": admin.email}
+    return {"id": admin.public_id, "name": admin.name, "email": admin.email}
 
 
 class PlatformLoginView(APIView):
@@ -370,9 +370,9 @@ def visit_answer(visit: SupportVisit) -> dict[str, object]:
     if ended_at is None and visit.ends_by <= timezone.now():
         ended_at = visit.ends_by
     return {
-        "id": visit.pk,
+        "id": visit.public_id,
         "platform_admin": {"name": visit.platform_admin.name},
-        "consultancy": {"id": visit.consultancy.pk, "name": visit.consultancy.name},
+        "consultancy": {"id": visit.consultancy.public_id, "name": visit.consultancy.name},
         "reason": visit.reason,
         "consultancy_status": visit.consultancy_status,
         "started_at": visit.started_at.isoformat(),

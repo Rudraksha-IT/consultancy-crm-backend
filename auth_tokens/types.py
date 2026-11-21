@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from auth_tokens.models import TokenKind
 from platform_admin.models import PlatformAdmin
@@ -25,11 +26,15 @@ class TokenClaims:
 
     tenant_schema: str
     kind: TokenKind
-    user_id: int
+    # Whom the token is for, by UUID (ADR 0027): a Staff member or a Platform Admin.
+    user: UUID
     auth_version: int
     jti: str
     device: str
     # The Support Access visit a `support_access` token belongs to; None for every other kind.
+    visit: UUID | None = None
+    # Their database numbers, once the person is found (0 and None until then).
+    user_id: int = 0
     visit_id: int | None = None
 
 

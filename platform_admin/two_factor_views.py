@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 
 def _summary(admin: PlatformAdmin) -> dict[str, object]:
-    return {"id": admin.pk, "name": admin.name, "email": admin.email}
+    return {"id": admin.public_id, "name": admin.name, "email": admin.email}
 
 
 def _as_platform_admin(person: Person) -> PlatformAdmin:

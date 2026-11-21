@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -130,7 +131,7 @@ def enter_visit(consultancy: Consultancy, entry_code: str) -> PlatformVisitor:
 
 
 def find_visitor(
-    visit_id: int, platform_admin_id: int, auth_version: int, consultancy_schema: str
+    visit: uuid.UUID, platform_admin: uuid.UUID, auth_version: int, consultancy_schema: str
 ) -> PlatformVisitor | None:
     """Return who a `support_access` token is for while its visit is open, or None.
 
@@ -138,11 +139,11 @@ def find_visitor(
     past its end; the Platform Admin must still be active with an unchanged `auth_version`.
     """
     now = timezone.now()
-    visit = (
+    found = (
         SupportVisit.objects.select_related("platform_admin")
         .filter(
-            pk=visit_id,
-            platform_admin_id=platform_admin_id,
+            public_id=visit,
+            platform_admin__public_id=platform_admin,
             platform_admin__is_active=True,
             platform_admin__auth_version=auth_version,
             consultancy__schema_name=consultancy_schema,
@@ -152,7 +153,7 @@ def find_visitor(
         )
         .first()
     )
-    return None if visit is None else visitor_for(visit)
+    return None if found is None else visitor_for(found)
 
 
 def end_visit(visit_id: int) -> None:
@@ -187,6 +188,8 @@ def visitor_for(visit: SupportVisit) -> PlatformVisitor:
     )
     visitor.platform_admin_id = admin.pk
     visitor.support_visit_id = visit.pk
+    visitor.platform_admin_public_id = admin.public_id
+    visitor.support_visit_public_id = visit.public_id
     return visitor
 
 

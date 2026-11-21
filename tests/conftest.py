@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from django.conf import settings as django_settings
 from django.db import connection
+from django.http import HttpResponseBase
 from django_tenants.utils import schema_context, tenant_context
 from pytest_django import DjangoDbBlocker
 from pytest_django.fixtures import Settings
@@ -34,6 +35,7 @@ from tenancy.models import Consultancy
 from tenancy.services import create_consultancy
 from tenancy.subdomains import build_host, get_platform_host
 from tests.fakes import FakeDocumentStorage
+from tests.record_ids import record_numbers_in_response
 
 __all__ = ["build_host"]
 
@@ -224,6 +226,24 @@ def json_logs_at() -> Iterator[LogsAt]:
     """Apply the standard JSON logging at a level the test chooses (`LOG_LEVEL`)."""
     yield capture_json_logs
     restore_logging()
+
+
+_ORIGINAL_REQUEST = APIClient.request
+
+
+def _guarded_request(self: APIClient, **request: object) -> HttpResponseBase:
+    """Send the request, then fail if the JSON answer names a record by number (ADR 0027)."""
+    response = _ORIGINAL_REQUEST(self, **request)
+    found = record_numbers_in_response(response)
+    where = f"{request.get('REQUEST_METHOD', '?')} {request.get('PATH_INFO', '?')}"
+    assert not found, f"{where} answered record numbers at {found}"
+    return response
+
+
+@pytest.fixture(autouse=True)
+def no_record_numbers_in_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every API answer in the suite names records only by UUID (the guard; issue 19)."""
+    monkeypatch.setattr(APIClient, "request", _guarded_request)
 
 
 @pytest.fixture(autouse=True)

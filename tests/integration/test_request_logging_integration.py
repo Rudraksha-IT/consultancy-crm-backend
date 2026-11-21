@@ -11,6 +11,7 @@ from rest_framework import status
 
 from config.correlation import get_correlation_id
 from staff.models import Role
+from tenancy.models import Consultancy
 from tests.conftest import (
     PLATFORM_TEST_PASSWORD,
     TEST_PASSWORD,
@@ -20,6 +21,7 @@ from tests.conftest import (
     api_client,
     run_queued_jobs,
 )
+from tests.record_ids import number_of
 
 CONSULTANCY_URL = "/api/consultancy/"
 LOGIN_URL = "/api/auth/login/"
@@ -215,7 +217,7 @@ class TestStaffEvents:
         ops = platform_site.log_in()
 
         platform_site.client.put(
-            f"{CONSULTANCIES_URL}{acme.consultancy.pk}/theme/", THEME, format="json"
+            f"{CONSULTANCIES_URL}{acme.consultancy.public_id}/theme/", THEME, format="json"
         )
 
         consultancy_id = acme.consultancy.pk
@@ -264,10 +266,13 @@ class TestPlatformEvents:
             format="json",
         )
 
-        json_logs.only(f"Consultancy set up: consultancy_id={created['id']}")
+        json_logs.only(
+            f"Consultancy set up: consultancy_id={number_of(Consultancy, created['id'])}"
+        )
         changed = json_logs.with_message("Consultancy Status changed: ")
         assert len(changed) == 1
-        assert f"consultancy_id={created['id']}, from=evaluation, to=terminated" in str(
+        number = number_of(Consultancy, created["id"])
+        assert f"consultancy_id={number}, from=evaluation, to=terminated" in str(
             changed[0]["message"]
         )
         assert "Left us" not in json_logs.text()

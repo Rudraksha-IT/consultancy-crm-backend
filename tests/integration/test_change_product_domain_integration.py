@@ -1,7 +1,7 @@
 """`change_product_domain` moves every office's address to a new product domain.
 
 Run when the product moves to its own domain: only the domain part of each office's host
-changes (`polar.old.example` becomes `polar.new.example`); the subdomain, the schema and every
+changes (`acme.old.example` becomes `acme.new.example`); the subdomain, the schema and every
 record stay as they are. A dry run by default; `--apply` changes everything in one step.
 """
 

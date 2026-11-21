@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from uuid import UUID
 
 from modules.types import Module
 from tenancy.models import SetupState
@@ -33,7 +34,7 @@ class ConsultancyOnboarding:
 class ConsultancyOverview:
     """One row of the Platform's Consultancy list."""
 
-    id: int
+    id: UUID
     name: str
     subdomain: str
     host: str

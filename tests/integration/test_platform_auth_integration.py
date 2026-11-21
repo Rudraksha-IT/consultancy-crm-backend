@@ -46,7 +46,9 @@ class TestPlatformLogin:
             format="json",
         )
 
-        me = {"platform_admin": {"id": admin.pk, "name": admin.name, "email": admin.email}}
+        me = {
+            "platform_admin": {"id": str(admin.public_id), "name": admin.name, "email": admin.email}
+        }
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["platform_admin"] == me["platform_admin"]
         use_access_token(platform_site.client, response.json()["access"])

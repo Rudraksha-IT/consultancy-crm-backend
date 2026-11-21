@@ -71,6 +71,8 @@ from tests.support_access import start as start_visit
 from transfer_requests.models import TransferRequest, TransferRequestStatus
 from visits.models import Visit
 
+# A UUID no record has, fixed so every test worker collects the same tests.
+NO_RECORD_ID = "00000000-0000-4000-8000-000000000000"
 LOGIN_URL = "/api/auth/login/"
 REFRESH_URL = "/api/auth/refresh/"
 LOGOUT_URL = "/api/auth/logout/"
@@ -312,9 +314,9 @@ class TestPlatformTeamAndBrandIsolation:
         [
             ("get", "/api/platform/admins/"),
             ("post", "/api/platform/admins/"),
-            ("post", "/api/platform/admins/1/deactivate/"),
-            ("post", "/api/platform/admins/1/resend/"),
-            ("post", "/api/platform/admins/1/reactivate/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/deactivate/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/resend/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/reactivate/"),
             ("post", "/api/platform/brand/logo/"),
             ("delete", "/api/platform/brand/logo/"),
             ("patch", "/api/platform/me/"),
@@ -355,7 +357,7 @@ class TestThemeIsolation:
         platform_site.log_in()
 
         platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/theme/",
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/theme/",
             NEW_THEME,
             format="json",
         )
@@ -373,7 +375,7 @@ class TestThemeIsolation:
         use_access_token(client, access)
 
         response = client.put(
-            f"/api/platform/consultancies/{xyz.consultancy.pk}/theme/",
+            f"/api/platform/consultancies/{xyz.consultancy.public_id}/theme/",
             NEW_THEME,
             format="json",
         )
@@ -535,7 +537,7 @@ class TestModuleIsolation:
         platform_site.log_in()
 
         platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/modules/",
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/modules/",
             {
                 "batches": True,
                 "communication": True,
@@ -559,7 +561,7 @@ class TestModuleIsolation:
         platform_site.log_in()
         for office in (abc, xyz):
             platform_site.client.put(
-                f"/api/platform/consultancies/{office.consultancy.pk}/modules/",
+                f"/api/platform/consultancies/{office.consultancy.public_id}/modules/",
                 {
                     "batches": True,
                     "communication": True,
@@ -4505,12 +4507,12 @@ class TestConsultancyStatusIsolation:
         if value in {"past_due", "suspended"}:
             paid_until = (timezone.localdate() + timedelta(days=30)).isoformat()
             platform_site.client.post(
-                f"/api/platform/consultancies/{abc.consultancy.pk}/status/",
+                f"/api/platform/consultancies/{abc.consultancy.public_id}/status/",
                 {"status": "active", "paid_until": paid_until},
                 format="json",
             )
         reply = platform_site.client.post(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/status/",
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/status/",
             {"status": value, "reason": "Unpaid"},
             format="json",
         )
@@ -5504,9 +5506,9 @@ class TestConsultancySetupIsolation:
         for client in (abc.new_client(), xyz.new_client(), platform_site.new_client()):
             use_access_token(client, access)
             assert client.post(self.CREATE, body, format="json").status_code in {401, 403, 404}
-            retry = f"{self.CREATE}{xyz.consultancy.pk}/retry-setup/"
+            retry = f"{self.CREATE}{xyz.consultancy.public_id}/retry-setup/"
             assert client.post(retry).status_code in {401, 403, 404}
-            add_admin = f"{self.CREATE}{xyz.consultancy.pk}/admins/"
+            add_admin = f"{self.CREATE}{xyz.consultancy.public_id}/admins/"
             admin_body = {"name": "Intruder", "email": "intruder@x.test"}
             assert client.post(add_admin, admin_body, format="json").status_code in {
                 401,

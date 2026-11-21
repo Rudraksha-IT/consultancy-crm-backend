@@ -9,6 +9,7 @@ nothing behind, and Try again sets it up from the start.
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
@@ -42,6 +43,7 @@ from tests.conftest import (
     run_queued_jobs,
     use_access_token,
 )
+from tests.record_ids import number_of
 
 CONSULTANCIES_URL = "/api/platform/consultancies/"
 OFFICE_URL = "/api/consultancy/"
@@ -75,15 +77,18 @@ def create(client: APIClient, **overrides: object) -> dict[str, Any]:
     return body
 
 
-def retry_url(consultancy_id: int) -> str:
+def retry_url(consultancy_id: object) -> str:
     """The Try again endpoint of one Consultancy."""
     return f"{CONSULTANCIES_URL}{consultancy_id}/retry-setup/"
 
 
-def stored(consultancy_id: int) -> Consultancy:
-    """The Consultancy as stored now."""
+def stored(consultancy_id: int | str) -> Consultancy:
+    """The Consultancy as stored now, by its number or the UUID an answer names it by."""
+    key = (
+        {"pk": consultancy_id} if isinstance(consultancy_id, int) else {"public_id": consultancy_id}
+    )
     with schema_context(PUBLIC_SCHEMA):
-        found: Consultancy = Consultancy.objects.get(pk=consultancy_id)
+        found: Consultancy = Consultancy.objects.get(**key)
     return found
 
 
@@ -230,7 +235,10 @@ class TestTheJobRunsEndToEnd:
 
         assert stored(body["id"]).setup_state == SetupState.READY
         with schema_context(PUBLIC_SCHEMA):
-            assert ConsultancyStatusChange.objects.filter(consultancy_id=body["id"]).count() == 1
+            assert (
+                ConsultancyStatusChange.objects.filter(consultancy__public_id=body["id"]).count()
+                == 1
+            )
 
     def test_a_schema_left_half_migrated_is_finished_on_the_next_run(
         self, platform_site: PlatformContext, ops: PlatformAdmin, monkeypatch: pytest.MonkeyPatch
@@ -300,8 +308,9 @@ class TestAFailureLeavesNothing:
         assert (job.state, job.error) == (JobState.FAILED, SETUP_FAILED)
         assert stored(body["id"]).setup_state == SetupState.FAILED
         assert mail.outbox == []
+        number = stored(body["id"]).pk
         failed = json_logs.only(
-            f"job failed: job_id={job.pk} kind={CREATE_CONSULTANCY} consultancy_id={body['id']}"
+            f"job failed: job_id={job.pk} kind={CREATE_CONSULTANCY} consultancy_id={number}"
         )
         assert failed["level"] == "ERROR"
         assert "RuntimeError" in failed["exception"]
@@ -439,7 +448,7 @@ class TestRefusedInput:
     ) -> None:
         abc = make_consultancy("ABC Education", "abcedu")
 
-        response = platform_site.client.post(retry_url(abc.consultancy.pk))
+        response = platform_site.client.post(retry_url(abc.consultancy.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": NOT_FAILED}
@@ -458,13 +467,13 @@ class TestRefusedInput:
     def test_try_again_on_an_unknown_office_is_not_found(
         self, platform_site: PlatformContext, ops: PlatformAdmin
     ) -> None:
-        assert platform_site.client.post(retry_url(999_999)).status_code == 404
+        assert platform_site.client.post(retry_url(uuid.uuid4())).status_code == 404
 
     @pytest.mark.parametrize("method", ["get", "put", "patch", "delete"])
     def test_try_again_takes_only_post(
         self, platform_site: PlatformContext, ops: PlatformAdmin, method: str
     ) -> None:
-        response = getattr(platform_site.client, method)(retry_url(1))
+        response = getattr(platform_site.client, method)(retry_url(uuid.uuid4()))
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -472,7 +481,7 @@ class TestRefusedInput:
         client = platform_site.new_client()
 
         assert client.post(CONSULTANCIES_URL, new_consultancy(), format="json").status_code == 401
-        assert client.post(retry_url(1)).status_code == status.HTTP_401_UNAUTHORIZED
+        assert client.post(retry_url(uuid.uuid4())).status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_staff_cannot_create_or_try_again(
         self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
@@ -482,7 +491,7 @@ class TestRefusedInput:
         use_access_token(client, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
 
         assert client.post(CONSULTANCIES_URL, new_consultancy(), format="json").status_code == 401
-        assert client.post(retry_url(abc.consultancy.pk)).status_code == 401
+        assert client.post(retry_url(abc.consultancy.public_id)).status_code == 401
         assert jobs() == []
 
     def test_these_endpoints_do_not_exist_on_an_office_host(
@@ -491,7 +500,7 @@ class TestRefusedInput:
         abc = make_consultancy("ABC Education", "abcedu")
         abc.log_in_as(Role.ADMIN)
 
-        assert abc.client.post(retry_url(abc.consultancy.pk)).status_code == 404
+        assert abc.client.post(retry_url(abc.consultancy.public_id)).status_code == 404
 
 
 class TestNothingWorksOnAnOfficeNotReady:
@@ -572,7 +581,9 @@ class TestLogs:
 
         [job] = jobs()
         assert job.correlation_id == request_id
-        done = json_logs.only(f"Consultancy set up: consultancy_id={created['id']}")
+        done = json_logs.only(
+            f"Consultancy set up: consultancy_id={number_of(Consultancy, created['id'])}"
+        )
         assert done["correlation_id"] == request_id
         assert done["tenant"] == HOST
 
@@ -622,7 +633,7 @@ class TestIsolation:
     ) -> None:
         abc: ConsultancyContext = make_consultancy("ABC Education", "abcedu")
 
-        response = platform_site.client.post(retry_url(abc.consultancy.pk))
+        response = platform_site.client.post(retry_url(abc.consultancy.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored(abc.consultancy.pk).setup_state == SetupState.READY

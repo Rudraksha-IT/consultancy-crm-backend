@@ -55,12 +55,12 @@ DEFAULT_THEME = {
 TERMINATE = {"status": "terminated", "reason": "Contract ended"}
 
 
-def status_url(consultancy_id: int) -> str:
+def status_url(consultancy_id: object) -> str:
     """Return the URL that changes a Consultancy's Status."""
     return f"{CONSULTANCIES_URL}{consultancy_id}/status/"
 
 
-def terminate(client: APIClient, consultancy_id: int) -> Any:  # noqa: ANN401  # the response
+def terminate(client: APIClient, consultancy_id: object) -> Any:  # noqa: ANN401  # the response
     """Terminate a Consultancy through the API."""
     return client.post(status_url(consultancy_id), TERMINATE, format="json")
 
@@ -114,7 +114,7 @@ class TestCreateConsultancy:
         consultancy_id = create(platform_site.client).json()["id"]
         run_queued_jobs()
 
-        with tenant_context(Consultancy.objects.get(pk=consultancy_id)):
+        with tenant_context(Consultancy.objects.get(public_id=consultancy_id)):
             assert not Staff.objects.exists()
 
     def test_letters_and_numbers_subdomain_is_reachable(
@@ -221,7 +221,7 @@ class TestListConsultancies:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == [
             {
-                "id": abc.consultancy.pk,
+                "id": str(abc.consultancy.public_id),
                 "name": "ABC Education",
                 "subdomain": "abcedu",
                 "host": abc.host,
@@ -234,7 +234,7 @@ class TestListConsultancies:
                 "setup_state": "ready",
             },
             {
-                "id": xyz.consultancy.pk,
+                "id": str(xyz.consultancy.public_id),
                 "name": "XYZ Overseas",
                 "subdomain": "xyzoverseas",
                 "host": xyz.host,
@@ -256,7 +256,7 @@ class TestTerminateConsultancy:
         abc = make_consultancy("ABC Education", "abcedu")
         platform_site.log_in()
 
-        response = terminate(platform_site.client, abc.consultancy.pk)
+        response = terminate(platform_site.client, abc.consultancy.public_id)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "terminated"
@@ -270,7 +270,7 @@ class TestTerminateConsultancy:
         counsellor = abc.add_staff(Role.COUNSELLOR)
         platform_site.log_in()
 
-        terminate(platform_site.client, abc.consultancy.pk)
+        terminate(platform_site.client, abc.consultancy.public_id)
 
         assert staff_login(abc.host, counsellor.email) == status.HTTP_404_NOT_FOUND
 
@@ -281,7 +281,7 @@ class TestTerminateConsultancy:
         abc.log_in_as(Role.ADMIN)
         platform_site.log_in()
 
-        terminate(platform_site.client, abc.consultancy.pk)
+        terminate(platform_site.client, abc.consultancy.public_id)
 
         assert abc.client.get(STAFF_CONTEXT_URL).status_code == status.HTTP_404_NOT_FOUND
 
@@ -292,7 +292,7 @@ class TestTerminateConsultancy:
         counsellor = abc.add_staff(Role.COUNSELLOR)
         platform_site.log_in()
 
-        terminate(platform_site.client, abc.consultancy.pk)
+        terminate(platform_site.client, abc.consultancy.public_id)
 
         with tenant_context(abc.consultancy):
             assert Staff.objects.filter(email=counsellor.email).exists()
@@ -305,7 +305,7 @@ class TestTerminateConsultancy:
         xyz_counsellor = xyz.add_staff(Role.COUNSELLOR)
         platform_site.log_in()
 
-        terminate(platform_site.client, abc.consultancy.pk)
+        terminate(platform_site.client, abc.consultancy.public_id)
 
         assert staff_login(xyz.host, xyz_counsellor.email) == status.HTTP_200_OK
 
@@ -332,7 +332,7 @@ class TestPlatformEndpointAccess:
         client = platform_site.new_client()
         use_access_token(client, tokens.access)
 
-        response = terminate(client, abc.consultancy.pk)
+        response = terminate(client, abc.consultancy.public_id)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert Consultancy.objects.get(pk=abc.consultancy.pk).status == "evaluation"

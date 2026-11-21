@@ -40,7 +40,7 @@ def theme_with(**overrides: Any) -> dict[str, Any]:  # noqa: ANN401  # JSON test
 
 def theme_url(office: ConsultancyContext) -> str:
     """The Platform endpoint that sets an office's Theme."""
-    return f"{PLATFORM_CONSULTANCIES_URL}{office.consultancy.pk}/theme/"
+    return f"{PLATFORM_CONSULTANCIES_URL}{office.consultancy.public_id}/theme/"
 
 
 def put_theme(client: APIClient, office: ConsultancyContext, body: object) -> Any:  # noqa: ANN401
@@ -100,7 +100,7 @@ class TestPlatformAdminChoosesTheme:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["theme"] == GLACIER_STORED
-        assert response.json()["id"] == abc.consultancy.pk
+        assert response.json()["id"] == str(abc.consultancy.public_id)
         assert theme_of(abc) == GLACIER_STORED
         abc.log_in_as(Role.TEACHER)
         assert abc.client.get(CONTEXT_URL).json()["theme"] == GLACIER_STORED

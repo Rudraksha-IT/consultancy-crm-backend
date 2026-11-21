@@ -1,7 +1,7 @@
 """Moving every office's address to a new product domain (`change_product_domain`).
 
-Only the domain part of each office host changes (`polar.old.example` becomes
-`polar.new.example`); the subdomain, the schema and every record stay. The Platform and
+Only the domain part of each office host changes (`acme.old.example` becomes
+`acme.new.example`); the subdomain, the schema and every record stay. The Platform and
 Central login hosts are never stored: they follow `PRODUCT_DOMAIN` by themselves.
 """
 

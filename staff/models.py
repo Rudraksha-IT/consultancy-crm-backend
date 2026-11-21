@@ -122,6 +122,9 @@ class PlatformVisitor(Staff):
 
     platform_admin_id: int
     support_visit_id: int
+    # Their ids outside the server, which login tokens carry (ADR 0027).
+    platform_admin_public_id: uuid.UUID
+    support_visit_public_id: uuid.UUID
 
     class Meta:
         proxy = True

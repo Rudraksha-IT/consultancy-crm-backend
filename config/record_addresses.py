@@ -18,8 +18,10 @@ from expenses.models import Expense
 from fee_types.models import FeeType
 from notifications.models import Notification
 from office_networks.models import OfficeNetwork
+from platform_admin.models import PlatformAdmin
 from staff.models import Staff
 from tasks.models import Task
+from tenancy.models import Consultancy
 from transfer_requests.models import TransferRequest
 
 register_record_converters(
@@ -41,5 +43,7 @@ register_record_converters(
         "work_from_home": WorkFromHome,
         "office_network": OfficeNetwork,
         "transfer_request": TransferRequest,
+        "consultancy": Consultancy,
+        "platform_admin": PlatformAdmin,
     }
 )
