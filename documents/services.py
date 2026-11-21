@@ -11,7 +11,7 @@ import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
@@ -19,6 +19,7 @@ from django.db.models.functions import Lower
 
 from applications.models import Application
 from applications.statuses import ApplicationStatus
+from document_examples.services import TypeGuide, guides_for
 from documents.checklist import (
     AppliedCourse,
     Checklist,
@@ -72,8 +73,12 @@ class StudentChecklist:
 
     checklist: Checklist
     documents: Mapping[int, Document]
-    # The Document Types asked for this Student alone (spec 63b), by id.
-    asked: tuple[int, ...] = ()
+    # The Document Types asked for this Student alone (spec 63b), by UUID (ADR 0027).
+    asked: tuple[uuid.UUID, ...] = ()
+    # Each listed type's instruction and example files (Document Examples, spec 64), by type id.
+    guides: Mapping[int, TypeGuide] = field(default_factory=dict)
+    # Each listed type's UUID, its id outside the server, by type id.
+    type_ids: Mapping[int, uuid.UUID] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -168,10 +173,17 @@ def checklist_of(student: Student) -> StudentChecklist:
     required = _required_by_student([student.pk])[student.pk]
     checklist = build_checklist(required, [_held(d) for d in documents])
     asked = DocumentRequirement.objects.filter(student=student).values_list(
-        "document_type_id", flat=True
+        "document_type__public_id", flat=True
     )
+    type_ids = DocumentType.objects.filter(
+        pk__in=[item.type_id for item in checklist.items]
+    ).values_list("pk", "public_id")
     return StudentChecklist(
-        checklist, {document.pk: document for document in documents}, tuple(asked)
+        checklist,
+        {document.pk: document for document in documents},
+        tuple(asked),
+        guides_for(item.type_id for item in checklist.items),
+        dict(type_ids),
     )
 
 
@@ -259,7 +271,7 @@ def _store_files(document: Document, files: tuple[NewFile, ...], by: Staff) -> N
     If one can't be stored, those already stored are removed too, and the error is raised so the
     transaction leaves no row pointing at nothing.
     """
-    prefix = f"{get_active_schema_name()}/documents/{document.student_id}/"
+    prefix = f"{get_active_schema_name()}/documents/{document.student.public_id}/"
     stored: list[str] = []
     try:
         for file in files:

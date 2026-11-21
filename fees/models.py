@@ -5,21 +5,26 @@ from __future__ import annotations
 from django.db import models
 from django.db.models import Q
 
+from config.public_ids import public_id_field
+from fee_types.models import NOTE_MAX_LENGTH, FeeType
 from payments.models import MAX_AMOUNT
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 
-PURPOSE_MAX_LENGTH = 200
-
 
 class Fee(models.Model):
-    """One Fee for a Student: what it's for and the amount in whole NPR.
+    """One Fee for a Student: its Fee Type, an optional note and the amount in whole NPR.
 
     Balances are worked out from Fees and Payments and never stored (`fees.balance`).
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="fees")
-    purpose = models.CharField(max_length=PURPOSE_MAX_LENGTH)
+    fee_type = models.ForeignKey(FeeType, on_delete=models.PROTECT, related_name="+")
+    # Optional, needed for Other; fees typed before Fee Types keep their old text here.
+    note = models.CharField(max_length=NOTE_MAX_LENGTH, blank=True, default="")
     amount = models.PositiveBigIntegerField()
     # None when a Platform Admin did it during Support Access; the name says who (issue 27).
     added_by = models.ForeignKey(Staff, on_delete=models.PROTECT, null=True, related_name="+")
@@ -36,4 +41,4 @@ class Fee(models.Model):
         )
 
     def __str__(self) -> str:
-        return self.purpose
+        return f"Fee {self.pk}"

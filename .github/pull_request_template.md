@@ -46,7 +46,10 @@ Branch from dev, merge into dev with "Squash and merge". Release dev -> main wit
 
 - [ ] No secrets, keys or real `.env` values committed (`sample.env.*` holds placeholders only)
 - [ ] No real client name (use ACME) and no real people's names or emails
-- [ ] Fits the 1 GiB micro EC2 budget (memory, image size, no heavy new dependency)
+- [ ] Fits the shared server's budget (memory, image size, no heavy new dependency)
+- [ ] Backend first: when this needs a change in the other app, the backend change is merged and
+      deployed before the frontend one (ADR 0024)
+- [ ] Migrations work with the code that is live now (add first, remove in a later deploy)
 - [ ] README or settings samples updated if behaviour or a setting changed
 
 #### Related to / Depends on

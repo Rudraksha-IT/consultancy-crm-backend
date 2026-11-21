@@ -49,7 +49,7 @@ def employee_answer(staff: Staff, set_up: bool | None = None) -> dict[str, objec
     a list passes `set_up` it looked up for everyone at once.
     """
     return {
-        "id": staff.pk,
+        "id": str(staff.public_id),
         "name": staff.name,
         "email": staff.email,
         "mobile": staff.mobile,
@@ -63,9 +63,9 @@ def employee_answer(staff: Staff, set_up: bool | None = None) -> dict[str, objec
 
 
 def office_of(request: Request) -> Office:
-    """The office's name and its sign-up page, at the address the request came in on."""
-    name = str(get_request_consultancy(request).name)
-    return Office(name=name, join_link=request.build_absolute_uri(JOIN_PATH))
+    """The office and its sign-up page, at the address the request came in on."""
+    consultancy = get_request_consultancy(request)
+    return Office(consultancy=consultancy, join_link=request.build_absolute_uri(JOIN_PATH))
 
 
 def _refused(error: EmployeeChangeRefusedError) -> Response:
@@ -184,7 +184,7 @@ class EmployeeAssignedStudentsView(_AdminView):
         staff = get_object_or_404(Staff, pk=staff_id)
         return Response(
             [
-                {"id": student.pk, "name": student.name, "stage": student.stage}
+                {"id": student.public_id, "name": student.name, "stage": student.stage}
                 for student in students_still_assigned_to(staff)
             ]
         )
@@ -197,4 +197,6 @@ class CounsellorChoicesView(APIView):
 
     def get(self, request: Request) -> Response:
         """Return each one's id, name and Role."""
-        return Response([{"id": s.pk, "name": s.name, "role": s.role} for s in list_counsellors()])
+        return Response(
+            [{"id": str(s.public_id), "name": s.name, "role": s.role} for s in list_counsellors()]
+        )

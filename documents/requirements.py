@@ -15,10 +15,12 @@ from django.db import transaction
 from django.db.models import Count, ProtectedError, Q, QuerySet
 
 from catalogue.models import Course
+from document_examples.services import live_examples_prefetch
 from documents.exceptions import (
     AlreadyUploadedError,
     DocumentTypeInUseError,
     EveryoneNeedsTypeError,
+    KeepsExamplesError,
     NotAskedError,
 )
 from documents.groups import DocumentGroup
@@ -73,7 +75,8 @@ def configured_types() -> QuerySet[DocumentType]:
         used_by_courses=_requirements_with(course__isnull=False),
         used_by_students=_requirements_with(student__isnull=False),
         used_by_documents=Count("documents", distinct=True),
-    )
+        example_count=Count("examples", distinct=True),
+    ).prefetch_related(live_examples_prefetch())
 
 
 def uses_of(document_type: DocumentType) -> TypeUses:
@@ -228,13 +231,17 @@ def remove_document_type(type_id: int, by: Staff) -> None:
         DocumentType.DoesNotExist: There is no such type here.
         EveryoneNeedsTypeError: Every Student needs it.
         DocumentTypeInUseError: Something asks for it, or a file of it is uploaded.
+        KeepsExamplesError: It has Document Examples, even in the Bin.
     """
     with transaction.atomic():
         document_type = DocumentType.objects.select_for_update().get(pk=type_id)
         if document_type.needed_by_everyone:
             raise EveryoneNeedsTypeError(document_type.name)
-        if uses_of(configured_types().get(pk=type_id)).is_used:
+        configured = configured_types().get(pk=type_id)
+        if uses_of(configured).is_used:
             raise DocumentTypeInUseError
+        if getattr(configured, "example_count", 0):
+            raise KeepsExamplesError
         try:
             with transaction.atomic():
                 document_type.delete()

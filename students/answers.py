@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from django.utils import timezone
 
@@ -24,13 +25,13 @@ from transfer_requests.services import waiting_request_for
 
 
 def _counsellor(staff: Staff | None) -> dict[str, object] | None:
-    return None if staff is None else {"id": staff.pk, "name": staff.name}
+    return None if staff is None else {"id": staff.public_id, "name": staff.name}
 
 
 def student_row(student: Student) -> dict[str, object]:
     """One Student as the Student list shows them."""
     return {
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "phone": student.phone,
         "email": student.email,
@@ -57,7 +58,7 @@ def student_answer(student: Student) -> dict[str, object]:
 def academic_record_answer(record: AcademicRecord) -> dict[str, object]:
     """One qualification in a Student's academic history."""
     return {
-        "id": record.pk,
+        "id": record.public_id,
         "level": record.level,
         "institution": record.institution,
         "finished_year": record.finished_year,
@@ -68,7 +69,7 @@ def academic_record_answer(record: AcademicRecord) -> dict[str, object]:
 def test_score_answer(score: TestScore) -> dict[str, object]:
     """One English test result, the score as text with one decimal ("6.5")."""
     return {
-        "id": score.pk,
+        "id": score.public_id,
         "test": score.test,
         "overall": f"{Decimal(score.overall):.1f}",
         "taken_on": None if score.taken_on is None else score.taken_on.isoformat(),
@@ -79,12 +80,20 @@ def test_score_answer(score: TestScore) -> dict[str, object]:
 def work_experience_answer(job: WorkExperience) -> dict[str, object]:
     """One job, its months as "YYYY-MM"; no end month means they still work there."""
     return {
-        "id": job.pk,
+        "id": job.public_id,
         "employer": job.employer,
         "job_title": job.job_title,
         "started_on": _month(job.started_on),
         "ended_on": None if job.ended_on is None else _month(job.ended_on),
     }
+
+
+def _chosen_offer_id(student: Student) -> UUID | None:
+    """The chosen Application's UUID, from the Applications already loaded with the Student."""
+    if student.chosen_offer_id is None:
+        return None
+    chosen = next(a for a in student.applications.all() if a.pk == student.chosen_offer_id)
+    return chosen.public_id
 
 
 def _month(day: date) -> str:
@@ -144,7 +153,7 @@ def student_profile(student: Student, viewer: Staff) -> dict[str, object]:
         "stage_changes": [history_entry_answer(e) for e in stage_changes_of(student)],
         "progress": _progress_answer(student),
         "applications": [application_answer(a) for a in student.applications.all()],
-        "chosen_offer_id": student.chosen_offer_id,
+        "chosen_offer_id": _chosen_offer_id(student),
         "visas": [visa_answer(visa) for visa in student.visas.all()],
         "documents": progress_answer(checklist_of(student).checklist),
         "details_version": student.details_version,

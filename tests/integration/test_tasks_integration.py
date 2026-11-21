@@ -48,13 +48,13 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def task_url(task: Task | int) -> str:
     """One Task."""
-    pk = task if isinstance(task, int) else task.pk
+    pk = task if isinstance(task, int | str) else task.public_id
     return f"/api/tasks/{pk}/"
 
 
-def student_tasks_url(student: Student | int) -> str:
+def student_tasks_url(student: Student | int | str) -> str:
     """A Student's open Tasks."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/tasks/"
 
 
@@ -68,7 +68,7 @@ def good_body(assignee: Staff, /, **changes: object) -> dict[str, object]:
     return {
         "title": "Call Sita about her IELTS score",
         "due_on": day(1).isoformat(),
-        "assignee": assignee.pk,
+        "assignee": str(assignee.public_id),
         **changes,
     }
 
@@ -125,12 +125,12 @@ class TestCreating:
         log_in(abc, desk)
         student = make_student(abc, counsellor, name="Manisha Rai")
 
-        response = create(abc, counsellor, student=student.pk)
+        response = create(abc, counsellor, student=str(student.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         [task] = stored_tasks(abc)
         assert response.json() == {
-            "id": task.pk,
+            "id": str(task.public_id),
             "title": "Call Sita about her IELTS score",
             "due_on": day(1).isoformat(),
             "priority": "normal",
@@ -138,9 +138,9 @@ class TestCreating:
             "timing": "upcoming",
             "is_done": False,
             "done_at": None,
-            "assignee": {"id": counsellor.pk, "name": "Bikash Thapa"},
-            "created_by": {"id": desk.pk, "name": "Ramesh KC"},
-            "student": {"id": student.pk, "name": "Manisha Rai"},
+            "assignee": {"id": str(counsellor.public_id), "name": "Bikash Thapa"},
+            "created_by": {"id": str(desk.public_id), "name": "Ramesh KC"},
+            "student": {"id": str(student.public_id), "name": "Manisha Rai"},
             "can_mark_done": True,
         }
         assert task.created_by_id == desk.pk
@@ -173,7 +173,9 @@ class TestCreating:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, stage=Stage.LOST, lost_reason="Went elsewhere")
 
-        assert create(abc, me, student=student.pk).status_code == status.HTTP_201_CREATED
+        assert (
+            create(abc, me, student=str(student.public_id)).status_code == status.HTTP_201_CREATED
+        )
 
     def test_the_student_can_be_null(self, abc: ConsultancyContext) -> None:
         me = abc.log_in_as(Role.COUNSELLOR)
@@ -189,7 +191,7 @@ class TestCreating:
         me = abc.log_in_as(Role.TEACHER)
         student = make_student(abc)
 
-        response = create(abc, me, student=student.pk)
+        response = create(abc, me, student=str(student.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_FOR_TEACHERS
@@ -292,7 +294,7 @@ class TestRefusedInput:
         with tenant_context(abc.consultancy):
             Staff.objects.filter(pk=other.pk).update(status=left)
 
-        response = create(abc, me, assignee=other.pk)
+        response = create(abc, me, assignee=str(other.public_id))
 
         assert response.json() == ASSIGNEE_MESSAGE
         assert stored_tasks(abc) == []
@@ -467,8 +469,8 @@ class TestMyTasks:
         [given] = abc.client.get(TASKS_URL, {"view": "given"}).json()["results"]
         [mine] = abc.client.get(TASKS_URL).json()["results"]
 
-        assert given["assignee"] == {"id": leaver.pk, "name": "Bikash Thapa"}
-        assert mine["created_by"] == {"id": leaver.pk, "name": "Bikash Thapa"}
+        assert given["assignee"] == {"id": str(leaver.public_id), "name": "Bikash Thapa"}
+        assert mine["created_by"] == {"id": str(leaver.public_id), "name": "Bikash Thapa"}
 
 
 class TestMarkingDone:
@@ -659,7 +661,7 @@ class TestStudentTasks:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me)
 
-        create(abc, me, student=student.pk)
+        create(abc, me, student=str(student.public_id))
 
         assert abc.client.get(student_tasks_url(student)).json()["count"] == 1
 
@@ -674,7 +676,7 @@ class TestProfileCount:
         make_task(abc, counsellor, student=make_student(abc, name="Aarav Sharma"))
         abc.log_in_as(Role.FRONT_DESK)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["open_tasks"] == 2
 
@@ -793,7 +795,7 @@ class TestModel:
         staff = abc.add_staff(Role.COUNSELLOR)
         student = make_student(abc)
 
-        assert AssigneeField().to_representation(staff) == staff.pk
-        assert StudentLinkField().to_representation(student) == student.pk
+        assert AssigneeField().to_representation(staff) == str(staff.public_id)
+        assert StudentLinkField().to_representation(student) == str(student.public_id)
         assert StudentLinkField().to_representation(None) is None
         assert DoneField().to_representation(value=True) is True

@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db import models
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 
@@ -33,6 +34,9 @@ class VisitReason(models.TextChoices):
 
 class Visit(models.Model):
     """One time a Student came to the office, and why."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="visits")
     at = models.DateTimeField(default=timezone.now)

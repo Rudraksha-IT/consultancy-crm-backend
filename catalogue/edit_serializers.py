@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 from django.db.models import Count
 from rest_framework import serializers
@@ -21,11 +22,11 @@ from catalogue.serializers import (
     university_name_field,
 )
 from catalogue.types import CourseEdit, UniversityEdit
-from config.serializers import StrictSerializer
+from config.serializers import RecordIdField, StrictSerializer
+from course_files.models import CourseFile
 from documents.serializers import DocumentTypeListField
 from modules.serializers import StrictBooleanField
 from students.models import Country
-from students.profile_serializers import StrictIntegerField
 from students.serializers import StrictChoiceField
 
 # More Courses than any University offers; keeps one save small.
@@ -42,10 +43,17 @@ def used_by_message(count: int, what: str) -> str:
     return f"Used by {count} {what}{'' if count == 1 else 's'}, so it stays archived."
 
 
-class CourseEditRowSerializer(StrictSerializer[None]):
-    """One Course on the edit page: a stored one (with its id) or a new one."""
+def kept_files_message(count: int, *, of_courses: bool = False) -> str:
+    """Why a Course or University stays archived while it keeps Course Files (spec 60)."""
+    files = "1 Course File" if count == 1 else f"{count} Course Files"
+    whose = "Its courses have" if of_courses else "It has"
+    return f"{whose} {files} (counting the Bin), so it stays archived."
 
-    id = StrictIntegerField(required=False, min_value=1)
+
+class CourseEditRowSerializer(StrictSerializer[None]):
+    """One Course on the edit page: a stored one (with its UUID) or a new one."""
+
+    id = RecordIdField(required=False)
     name = course_name_field(required=True)
     level = StrictChoiceField(choices=CourseLevel.choices)
     # An archived Course may have none; an active one is checked by the page as a whole.
@@ -63,15 +71,14 @@ class UniversityEditSerializer(StrictSerializer[None]):
     courses: serializers.ListSerializer[None] = serializers.ListSerializer(
         child=CourseEditRowSerializer(), max_length=MAX_COURSES_PER_SAVE
     )
-    deleted_courses = serializers.ListField(
-        child=StrictIntegerField(min_value=1), max_length=MAX_COURSES_PER_SAVE
-    )
+    deleted_courses = serializers.ListField(child=RecordIdField(), max_length=MAX_COURSES_PER_SAVE)
 
     def __init__(self, university: University, data: object) -> None:
         super().__init__(data=data)
         self.university = university
+        # By UUID (ADR 0027): the page names Courses only that way.
         self.stored = {
-            course.pk: course
+            course.public_id: course
             for course in Course.objects.filter(university=university)
             .prefetch_related("intakes")
             .annotate(application_count=Count("applications"))
@@ -87,7 +94,7 @@ class UniversityEditSerializer(StrictSerializer[None]):
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Ids are this University's, each once; deletions are allowed; every row is sound."""
         rows: list[dict[str, Any]] = attrs["courses"]
-        deleted: list[int] = attrs["deleted_courses"]
+        deleted: list[UUID] = attrs["deleted_courses"]
         sent = [row["id"] for row in rows if "id" in row]
         if len(set(sent)) != len(sent) or not set(sent) <= self.stored.keys():
             raise serializers.ValidationError({"courses": [NOT_THIS_UNIVERSITYS_MESSAGE]})
@@ -109,22 +116,28 @@ class UniversityEditSerializer(StrictSerializer[None]):
             name=data["name"],
             country=Country(data["country"]),
             archived=data["archived"],
-            courses=tuple(_course_edit(row) for row in data["courses"]),
-            deleted_courses=tuple(data["deleted_courses"]),
+            courses=tuple(self._course_edit(row) for row in data["courses"]),
+            deleted_courses=tuple(self.stored[course].pk for course in data["deleted_courses"]),
         )
 
-    def _check_deleted(self, deleted: Sequence[int], kept: set[int]) -> None:
+    def _course_edit(self, row: Mapping[str, Any]) -> CourseEdit:
+        stored = self.stored.get(row["id"]) if "id" in row else None
+        return CourseEdit(
+            id=None if stored is None else stored.pk,
+            name=row["name"],
+            level=CourseLevel(row["level"]),
+            intakes=tuple(row["intakes"]),
+            archived=row["archived"],
+            documents=tuple(row["documents"]),
+        )
+
+    def _check_deleted(self, deleted: Sequence[UUID], kept: set[UUID]) -> None:
         """Each deleted Course is this University's, once, saved as archived and unused."""
         own = set(deleted) <= self.stored.keys() and not set(deleted) & kept
         if len(set(deleted)) != len(deleted) or not own:
             raise serializers.ValidationError({"deleted_courses": [NOT_THIS_UNIVERSITYS_MESSAGE]})
         for course_id in deleted:
-            course = self.stored[course_id]
-            if not course.archived:
-                raise serializers.ValidationError({"deleted_courses": [ARCHIVE_FIRST_MESSAGE]})
-            uses: int = getattr(course, "application_count", 0)
-            if uses:
-                message = used_by_message(uses, "application")
+            if (message := _why_kept(self.stored[course_id])) is not None:
                 raise serializers.ValidationError({"deleted_courses": [message]})
 
     def _row_errors(
@@ -132,7 +145,7 @@ class UniversityEditSerializer(StrictSerializer[None]):
         index: int,
         row: Mapping[str, Any],
         rows: Sequence[Mapping[str, Any]],
-        deleted: Sequence[int],
+        deleted: Sequence[UUID],
     ) -> dict[str, list[str]]:
         """What's wrong with one Course on the page, by field; empty when it's fine."""
         errors: dict[str, list[str]] = {}
@@ -141,7 +154,7 @@ class UniversityEditSerializer(StrictSerializer[None]):
         intakes: list[str] = row["intakes"]
         if not intakes and not row["archived"]:
             errors["intakes"] = [NEEDS_AN_INTAKE_MESSAGE]
-        stored = self.stored.get(row.get("id", 0))
+        stored = self.stored.get(row["id"]) if "id" in row else None
         kept = set() if stored is None else {intake.month for intake in stored.intakes.all()}
         try:
             refuse_gone_by(intakes, kept)
@@ -154,7 +167,7 @@ class UniversityEditSerializer(StrictSerializer[None]):
         index: int,
         row: Mapping[str, Any],
         rows: Sequence[Mapping[str, Any]],
-        deleted: Sequence[int],
+        deleted: Sequence[UUID],
     ) -> bool:
         """An earlier row, or a Course left out of the page, already has this name."""
         name = str(row["name"]).lower()
@@ -164,17 +177,17 @@ class UniversityEditSerializer(StrictSerializer[None]):
         return name in earlier or name in left_out
 
 
+def _why_kept(course: Course) -> str | None:
+    """Why a Course can't be deleted: not archived, it keeps Course Files, or it is used."""
+    if not course.archived:
+        return ARCHIVE_FIRST_MESSAGE
+    files = CourseFile.objects.filter(course=course).count()
+    if files:
+        return kept_files_message(files)
+    uses: int = getattr(course, "application_count", 0)
+    return used_by_message(uses, "application") if uses else None
+
+
 def _details(error: serializers.ValidationError) -> list[object]:
     detail = error.detail
     return list(detail) if isinstance(detail, list) else [detail]
-
-
-def _course_edit(row: Mapping[str, Any]) -> CourseEdit:
-    return CourseEdit(
-        id=row.get("id"),
-        name=row["name"],
-        level=CourseLevel(row["level"]),
-        intakes=tuple(row["intakes"]),
-        archived=row["archived"],
-        documents=tuple(row["documents"]),
-    )

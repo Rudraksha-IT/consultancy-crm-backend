@@ -1,17 +1,45 @@
 from __future__ import annotations
 
 
-class SendFailedError(Exception):
-    """The SMS company or email server didn't send it; `reason` is safe to show and store."""
+class NoContactEmailError(Exception):
+    """The office has no contact email yet, so nothing can be sent to Students (ADR 0023)."""
+
+
+class ReadyMadeOffError(Exception):
+    """The ready-made email belongs to a switched-off Module (Accounts or Batches): not found."""
+
+
+class ReadyMadeRefusedError(Exception):
+    """This Staff member may not send this ready-made email; `reason` is safe to show."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
 
 
-class NotSetUpError(Exception):
-    """The channel has no account saved yet, so nothing can be sent on it."""
+class ReadyMadeUnavailableError(Exception):
+    """The ready-made email can't be used now (e.g. nothing left to pay); `reason` says why."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
-class NoMobileError(Exception):
-    """The Staff member has no Nepali mobile number to send a test SMS to."""
+class RecordNotChosenError(Exception):
+    """The record the email is about is missing, not this Student's, or not one to pick."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class AttachmentRefusedError(Exception):
+    """The files named can't go with this email; `reason` is safe to show."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class AttachmentsUnreadableError(Exception):
+    """Storage couldn't give back a file to attach, so nothing was sent."""

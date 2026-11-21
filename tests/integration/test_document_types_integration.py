@@ -37,7 +37,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def type_url(type_id: int) -> str:
+def type_url(type_id: object) -> str:
     """One Document Type."""
     return f"{TYPES_URL}{type_id}/"
 
@@ -53,10 +53,10 @@ def stored_types(office: ConsultancyContext) -> list[tuple[str, bool]]:
         return list(DocumentType.objects.order_by("pk").values_list("name", "needed_by_everyone"))
 
 
-def type_id(office: ConsultancyContext, name: str) -> int:
+def type_id(office: ConsultancyContext, name: str) -> str:
     """The id of one of the office's Document Types."""
     with tenant_context(office.consultancy):
-        return int(DocumentType.objects.get(name=name).pk)
+        return str(DocumentType.objects.get(name=name).public_id)
 
 
 class TestListingTypes:
@@ -72,7 +72,16 @@ class TestListingTypes:
         assert [(t["name"], t["needed_by_everyone"]) for t in results] == [
             (name, True) for name in DEFAULT_TYPES
         ]
-        assert set(results[0]) == {"id", "name", "needed_by_everyone", "usual_group", "used_by"}
+        assert set(results[0]) == {
+            "id",
+            "name",
+            "needed_by_everyone",
+            "usual_group",
+            "used_by",
+            "instruction",
+            "examples",
+            "example_count",
+        }
 
     @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])
     def test_only_admins_may_manage_them(self, abc: ConsultancyContext, role: Role) -> None:
@@ -106,6 +115,9 @@ class TestAddingTypes:
             "needed_by_everyone": False,
             "usual_group": "applying",
             "used_by": {"countries": 0, "courses": 0, "students": 0, "documents": 0},
+            "instruction": "",
+            "examples": [],
+            "example_count": 0,
         }
 
     def test_one_needed_by_everyone_joins_every_checklist(self, abc: ConsultancyContext) -> None:
@@ -114,7 +126,7 @@ class TestAddingTypes:
 
         add_type(abc, name="Birth certificate", needed_by_everyone=True)
 
-        body = abc.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/documents/").json()
         assert body["items"][-1]["document_type"]["name"] == "Birth certificate"
         assert body["total"] == len(DEFAULT_TYPES) + 1
 
@@ -242,6 +254,9 @@ class TestMovingTypes:
             "needed_by_everyone": False,
             "usual_group": "visa",
             "used_by": {"countries": 0, "courses": 0, "students": 0, "documents": 0},
+            "instruction": "",
+            "examples": [],
+            "example_count": 0,
         }
         assert ("Sponsor Letter", False) in stored_types(abc)
 
@@ -331,11 +346,11 @@ class TestDocumentsPage:
         assert names_in_order(body) == ["Asha Missing", "Bina Rejected", "Chandra Correct"]
         assert body["results"][1] == {
             "student": {
-                "id": one_rejected.pk,
+                "id": str(one_rejected.public_id),
                 "name": "Bina Rejected",
                 "stage": "applying",
                 "country": "australia",
-                "assigned_counsellor": {"id": me.pk, "name": "Bikash Thapa"},
+                "assigned_counsellor": {"id": str(me.public_id), "name": "Bikash Thapa"},
             },
             "done": 7,
             "total": 8,
@@ -346,7 +361,7 @@ class TestDocumentsPage:
         }
         assert body["totals"] == {"rejected": 1, "waiting": 0, "missing": 8, "verified": 15}
         assert (body["count"], body["page"], body["page_size"]) == (3, 1, 25)
-        assert missing_all.pk == body["results"][0]["student"]["id"]
+        assert str(missing_all.public_id) == body["results"][0]["student"]["id"]
 
     def test_rejected_weighs_more_than_waiting_which_weighs_more_than_missing(
         self, abc: ConsultancyContext

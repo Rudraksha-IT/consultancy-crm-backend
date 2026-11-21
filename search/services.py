@@ -100,7 +100,7 @@ def _students_for(viewer: Staff, batches_on: bool) -> QuerySet[Student] | None:
     mine = BatchMembership.objects.filter(batch__teacher=viewer)
     first_class = mine.filter(student=OuterRef("pk")).order_by("batch__name", "batch_id")
     return Student.objects.filter(pk__in=mine.values("student_id")).annotate(
-        class_id=Subquery(first_class.values("batch_id")[:1]),
+        class_id=Subquery(first_class.values("batch__public_id")[:1]),
         class_name=Subquery(first_class.values("batch__name")[:1]),
     )
 

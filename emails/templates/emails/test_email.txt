@@ -1,0 +1,5 @@
+Hello {{ name }},
+
+This is a test email from {{ brand }}. If you can read it, email is working: the server reached the email account set in the deploy values.
+
+You asked for it from the Platform's Settings. Nothing else needs doing.

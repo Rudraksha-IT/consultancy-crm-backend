@@ -14,6 +14,9 @@ from catalogue.services import UNIVERSITIES_PER_PAGE
 from staff.models import Role
 from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs, PlatformContext
 
+# A record UUID that no office has (ADR 0027).
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
 if TYPE_CHECKING:
     from pytest_django import DjangoAssertNumQueries
     from rest_framework.response import _MonkeyPatchedResponse
@@ -37,17 +40,17 @@ INJECTION_STRINGS = [
 ]
 
 
-def university_url(university_id: int) -> str:
+def university_url(university_id: object) -> str:
     """One University."""
     return f"{UNIVERSITIES_URL}{university_id}/"
 
 
-def courses_url(university_id: int) -> str:
+def courses_url(university_id: object) -> str:
     """Where a University's Courses are added."""
     return f"{UNIVERSITIES_URL}{university_id}/courses/"
 
 
-def course_url(course_id: int) -> str:
+def course_url(course_id: object) -> str:
     """One Course."""
     return f"/api/catalogue/courses/{course_id}/"
 
@@ -75,7 +78,9 @@ def course_body(**changes: object) -> dict[str, object]:
     }
 
 
-def add_course(client: APIClient, university_id: int, **changes: object) -> _MonkeyPatchedResponse:
+def add_course(
+    client: APIClient, university_id: object, **changes: object
+) -> _MonkeyPatchedResponse:
     """POST a new Course to a University."""
     return client.post(courses_url(university_id), course_body(**changes), format="json")
 
@@ -126,7 +131,7 @@ class TestAddUniversity:
             "courses": [],
         }
         with tenant_context(abc.consultancy):
-            assert University.objects.get(pk=body["id"]).name == "Deakin University"
+            assert University.objects.get(public_id=body["id"]).name == "Deakin University"
 
     @pytest.mark.parametrize("role", NOT_ADMINS)
     def test_only_an_admin_can_add_one(self, abc: ConsultancyContext, role: Role) -> None:
@@ -222,6 +227,8 @@ class TestAddUniversity:
         admin = abc.log_in_as(Role.ADMIN)
 
         university_id = add_university(abc.client).json()["id"]
+        with tenant_context(abc.consultancy):  # logs keep the number
+            university_id = University.objects.get(public_id=university_id).pk
 
         line = json_logs.only(
             f"University added: university_id={university_id}, by_staff_id={admin.pk}"
@@ -235,7 +242,7 @@ class TestChangeUniversity:
         university = make_university(abc)
 
         response = abc.client.patch(
-            university_url(university.pk),
+            university_url(university.public_id),
             {"name": "Deakin University Melbourne", "country": "uk"},
             format="json",
         )
@@ -248,7 +255,9 @@ class TestChangeUniversity:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = abc.client.patch(university_url(university.pk), {"country": "uk"}, format="json")
+        response = abc.client.patch(
+            university_url(university.public_id), {"country": "uk"}, format="json"
+        )
 
         assert response.json()["name"] == "Deakin University"
         assert response.json()["country"] == "uk"
@@ -258,10 +267,10 @@ class TestChangeUniversity:
         university = make_university(abc)
 
         archived = abc.client.patch(
-            university_url(university.pk), {"archived": True}, format="json"
+            university_url(university.public_id), {"archived": True}, format="json"
         )
         restored = abc.client.patch(
-            university_url(university.pk), {"archived": False}, format="json"
+            university_url(university.public_id), {"archived": False}, format="json"
         )
 
         assert archived.json()["archived"] is True
@@ -275,7 +284,7 @@ class TestChangeUniversity:
         other = make_university(abc, "Federation University")
 
         response = abc.client.patch(
-            university_url(other.pk), {"name": "DEAKIN UNIVERSITY"}, format="json"
+            university_url(other.public_id), {"name": "DEAKIN UNIVERSITY"}, format="json"
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -286,7 +295,7 @@ class TestChangeUniversity:
         university = make_university(abc, "Deakin university")
 
         response = abc.client.patch(
-            university_url(university.pk), {"name": "Deakin University"}, format="json"
+            university_url(university.public_id), {"name": "Deakin University"}, format="json"
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -297,7 +306,7 @@ class TestChangeUniversity:
         university = make_university(abc)
 
         response = abc.client.patch(
-            university_url(university.pk), {"archived": True}, format="json"
+            university_url(university.public_id), {"archived": True}, format="json"
         )
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -320,7 +329,7 @@ class TestChangeUniversity:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = abc.client.patch(university_url(university.pk), body, format="json")
+        response = abc.client.patch(university_url(university.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -336,7 +345,9 @@ class TestChangeUniversity:
         university = make_university(abc)
         method = "post"
 
-        response = getattr(abc.client, method)(university_url(university.pk), {}, format="json")
+        response = getattr(abc.client, method)(
+            university_url(university.public_id), {}, format="json"
+        )
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         with tenant_context(abc.consultancy):
@@ -346,7 +357,7 @@ class TestChangeUniversity:
         admin = abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        abc.client.patch(university_url(university.pk), {"archived": True}, format="json")
+        abc.client.patch(university_url(university.public_id), {"archived": True}, format="json")
 
         json_logs.only(f"University changed: university_id={university.pk}, by_staff_id={admin.pk}")
 
@@ -356,19 +367,21 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk)
+        response = add_course(abc.client, university.public_id)
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
         assert body == {
             "id": body["id"],
-            "university_id": university.pk,
+            "university_id": str(university.public_id),
             "name": "Master of Information Technology",
             "level": "master",
             "intakes": [f"{Y1}-03", f"{Y1}-07"],
             "archived": False,
             "documents": [],
             "applications": 0,
+            "files": [],
+            "file_count": 0,
         }
 
     def test_intakes_are_kept_in_order_without_repeats(self, abc: ConsultancyContext) -> None:
@@ -376,7 +389,9 @@ class TestAddCourse:
         university = make_university(abc)
 
         response = add_course(
-            abc.client, university.pk, intakes=[f"{Y1}-11", f"{Y1}-03", f"{Y1}-11", f"{Y1}-07"]
+            abc.client,
+            university.public_id,
+            intakes=[f"{Y1}-11", f"{Y1}-03", f"{Y1}-11", f"{Y1}-07"],
         )
 
         assert response.json()["intakes"] == [f"{Y1}-03", f"{Y1}-07", f"{Y1}-11"]
@@ -388,7 +403,7 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk, level=level)
+        response = add_course(abc.client, university.public_id, level=level)
 
         assert response.status_code == status.HTTP_201_CREATED
 
@@ -397,9 +412,11 @@ class TestAddCourse:
     ) -> None:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
-        add_course(abc.client, university.pk)
+        add_course(abc.client, university.public_id)
 
-        response = add_course(abc.client, university.pk, name="master of information technology")
+        response = add_course(
+            abc.client, university.public_id, name="master of information technology"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"name": ["This university already has a course with this name."]}
@@ -410,9 +427,9 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         deakin = make_university(abc, "Deakin University")
         federation = make_university(abc, "Federation University")
-        add_course(abc.client, deakin.pk)
+        add_course(abc.client, deakin.public_id)
 
-        response = add_course(abc.client, federation.pk)
+        response = add_course(abc.client, federation.public_id)
 
         assert response.status_code == status.HTTP_201_CREATED
 
@@ -421,7 +438,7 @@ class TestAddCourse:
         abc.log_in_as(role)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk)
+        response = add_course(abc.client, university.public_id)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         with tenant_context(abc.consultancy):
@@ -438,7 +455,7 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk, intakes=[])
+        response = add_course(abc.client, university.public_id, intakes=[])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"intakes": ["Add at least one intake."]}
@@ -448,7 +465,7 @@ class TestAddCourse:
         university = make_university(abc)
         intakes = [f"{2027 + n // 12}-{n % 12 + 1:02d}" for n in range(25)]
 
-        response = add_course(abc.client, university.pk, intakes=intakes)
+        response = add_course(abc.client, university.public_id, intakes=intakes)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"intakes": ["A course can have at most 24 intakes."]}
@@ -479,7 +496,7 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk, **changes)
+        response = add_course(abc.client, university.public_id, **changes)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         with tenant_context(abc.consultancy):
@@ -495,7 +512,7 @@ class TestAddCourse:
 
         body = course_body(**{field: 1})
 
-        response = abc.client.post(courses_url(university.pk), body, format="json")
+        response = abc.client.post(courses_url(university.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -507,7 +524,7 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = add_course(abc.client, university.pk, name=text)
+        response = add_course(abc.client, university.public_id, name=text)
 
         assert response.json()["name"] == text
 
@@ -516,7 +533,7 @@ class TestAddCourse:
         abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        response = getattr(abc.client, method)(courses_url(university.pk), {}, format="json")
+        response = getattr(abc.client, method)(courses_url(university.public_id), {}, format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -524,7 +541,9 @@ class TestAddCourse:
         admin = abc.log_in_as(Role.ADMIN)
         university = make_university(abc)
 
-        course_id = add_course(abc.client, university.pk).json()["id"]
+        course_id = add_course(abc.client, university.public_id).json()["id"]
+        with tenant_context(abc.consultancy):  # logs keep the number
+            course_id = Course.objects.get(public_id=course_id).pk
 
         json_logs.only(
             f"Course added: course_id={course_id}, university_id={university.pk}, "
@@ -541,7 +560,7 @@ class TestChangeCourse:
         course = make_course(abc, make_university(abc), intakes=(f"{Y1}-02", f"{Y1}-07"))
 
         response = abc.client.patch(
-            course_url(course.pk),
+            course_url(course.public_id),
             {"name": "Bachelor of Nursing (Honours)", "level": "master", "intakes": [f"{Y2}-02"]},
             format="json",
         )
@@ -560,7 +579,7 @@ class TestChangeCourse:
             kept_id = Intake.objects.get(month=f"{Y1}-02").pk
 
         abc.client.patch(
-            course_url(course.pk), {"intakes": [f"{Y1}-02", f"{Y1}-11"]}, format="json"
+            course_url(course.public_id), {"intakes": [f"{Y1}-02", f"{Y1}-11"]}, format="json"
         )
 
         with tenant_context(abc.consultancy):
@@ -574,7 +593,9 @@ class TestChangeCourse:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc, make_university(abc), intakes=(f"{Y1}-02",))
 
-        response = abc.client.patch(course_url(course.pk), {"level": "diploma"}, format="json")
+        response = abc.client.patch(
+            course_url(course.public_id), {"level": "diploma"}, format="json"
+        )
 
         assert response.json()["name"] == "Bachelor of Nursing"
         assert response.json()["intakes"] == [f"{Y1}-02"]
@@ -583,8 +604,10 @@ class TestChangeCourse:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc, make_university(abc))
 
-        archived = abc.client.patch(course_url(course.pk), {"archived": True}, format="json")
-        restored = abc.client.patch(course_url(course.pk), {"archived": False}, format="json")
+        archived = abc.client.patch(course_url(course.public_id), {"archived": True}, format="json")
+        restored = abc.client.patch(
+            course_url(course.public_id), {"archived": False}, format="json"
+        )
 
         assert archived.json()["archived"] is True
         assert restored.json()["archived"] is False
@@ -596,7 +619,7 @@ class TestChangeCourse:
         other = make_course(abc, university, "Bachelor of IT")
 
         response = abc.client.patch(
-            course_url(other.pk), {"name": "Bachelor of nursing"}, format="json"
+            course_url(other.public_id), {"name": "Bachelor of nursing"}, format="json"
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -607,7 +630,7 @@ class TestChangeCourse:
         abc.log_in_as(role)
         course = make_course(abc, make_university(abc))
 
-        response = abc.client.patch(course_url(course.pk), {"archived": True}, format="json")
+        response = abc.client.patch(course_url(course.public_id), {"archived": True}, format="json")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -628,7 +651,7 @@ class TestChangeCourse:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc, make_university(abc), intakes=(f"{Y1}-02",))
 
-        response = abc.client.patch(course_url(course.pk), body, format="json")
+        response = abc.client.patch(course_url(course.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         with tenant_context(abc.consultancy):
@@ -646,7 +669,7 @@ class TestChangeCourse:
         abc.log_in_as(Role.ADMIN)
         course = make_course(abc, make_university(abc))
 
-        response = getattr(abc.client, method)(course_url(course.pk), {}, format="json")
+        response = getattr(abc.client, method)(course_url(course.public_id), {}, format="json")
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         with tenant_context(abc.consultancy):
@@ -656,7 +679,7 @@ class TestChangeCourse:
         admin = abc.log_in_as(Role.ADMIN)
         course = make_course(abc, make_university(abc))
 
-        abc.client.patch(course_url(course.pk), {"archived": True}, format="json")
+        abc.client.patch(course_url(course.public_id), {"archived": True}, format="json")
 
         json_logs.only(f"Course changed: course_id={course.pk}, by_staff_id={admin.pk}")
 
@@ -697,20 +720,22 @@ class TestCatalogueList:
             "page_size": UNIVERSITIES_PER_PAGE,
             "results": [
                 {
-                    "id": university.pk,
+                    "id": str(university.public_id),
                     "name": "Deakin University",
                     "country": "australia",
                     "archived": False,
                     "courses": [
                         {
-                            "id": course.pk,
-                            "university_id": university.pk,
+                            "id": str(course.public_id),
+                            "university_id": str(university.public_id),
                             "name": "Bachelor of Nursing",
                             "level": "bachelor",
                             "intakes": [f"{Y1}-02", f"{Y1}-07"],
                             "archived": False,
                             "documents": [],
                             "applications": 0,
+                            "files": [],
+                            "file_count": 0,
                         }
                     ],
                 }
@@ -843,9 +868,9 @@ class TestCatalogueAccess:
         [
             ("get", UNIVERSITIES_URL),
             ("post", UNIVERSITIES_URL),
-            ("patch", university_url(1)),
-            ("post", courses_url(1)),
-            ("patch", course_url(1)),
+            ("patch", university_url(SOME_UUID)),
+            ("post", courses_url(SOME_UUID)),
+            ("patch", course_url(SOME_UUID)),
         ],
     )
     def test_nobody_logged_in_is_refused(

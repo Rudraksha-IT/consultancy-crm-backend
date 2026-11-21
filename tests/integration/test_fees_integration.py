@@ -8,6 +8,7 @@ import pytest
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
+from fee_types.models import FeeType
 from fees.models import Fee
 from history.models import HistoryEntry, HistoryKind
 from modules.services import switch_modules
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 LIST_URL = "/api/accounts/student-fees/"
 AMOUNT_MESSAGE = "Enter a whole amount from NPR 1 to NPR 10,00,00,000."
-PURPOSE_MESSAGE = "Say what the fee is for."
+CHOOSE_MESSAGE = "Choose a Fee Type."
 NOT_YOUR_STUDENT = {
     "detail": "Not your Student. Only their counsellor or an Admin can change them."
 }
@@ -45,35 +46,63 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def fees_url(student: Student | int) -> str:
+def fees_url(student: Student | int | str) -> str:
     """One Student's Fees."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/fees/"
 
 
-def fee_url(fee: Fee | int) -> str:
+def fee_url(fee: Fee | int | str) -> str:
     """One Fee."""
-    pk = fee if isinstance(fee, int) else fee.pk
+    pk = fee if isinstance(fee, int | str) else fee.public_id
     return f"/api/fees/{pk}/"
 
 
-def make_fee(office: ConsultancyContext, student: Student, by: Staff, **fields: object) -> Fee:
-    """Store a Fee directly."""
-    details: dict[str, object] = {"purpose": "Visa processing", "amount": 40000, **fields}
+def make_fee(
+    office: ConsultancyContext,
+    student: Student,
+    by: Staff,
+    fee_type: str = "Visa fee",
+    **fields: object,
+) -> Fee:
+    """Store a Fee directly, of the Fee Type with this name."""
+    details: dict[str, object] = {"amount": 40000, **fields}
     with tenant_context(office.consultancy):
-        return Fee.objects.create(student=student, added_by=by, added_by_name=by.name, **details)
+        return Fee.objects.create(
+            student=student,
+            fee_type=FeeType.objects.get(name=fee_type),
+            added_by=by,
+            added_by_name=by.name,
+            **details,
+        )
+
+
+def with_ids(office: ConsultancyContext, body: object) -> object:
+    """The body with a `fee_type` given by name sent as that Fee Type's id."""
+    if isinstance(body, dict) and isinstance(body.get("fee_type"), str):
+        with tenant_context(office.consultancy):
+            found = FeeType.objects.filter(name=body["fee_type"]).first()
+        return {**body, "fee_type": str(found.public_id) if found else body["fee_type"]}
+    return body
 
 
 def add(office: ConsultancyContext, student: Student, body: object) -> _MonkeyPatchedResponse:
-    """POST a new Fee for the Student."""
-    return office.client.post(fees_url(student), body, format="json")
+    """POST a new Fee for the Student (a Fee Type by name is sent as its id)."""
+    return office.client.post(fees_url(student), with_ids(office, body), format="json")
+
+
+def put_fee(office: ConsultancyContext, fee: Fee | int, body: object) -> _MonkeyPatchedResponse:
+    """PUT a Fee's new details (a Fee Type by name is sent as its id)."""
+    return office.client.put(fee_url(fee), with_ids(office, body), format="json")
 
 
 def stored_fees(office: ConsultancyContext, student: Student) -> list[tuple[str, int]]:
     """The Student's Fees as stored, oldest first."""
     with tenant_context(office.consultancy):
         return list(
-            Fee.objects.filter(student=student).order_by("pk").values_list("purpose", "amount")
+            Fee.objects.filter(student=student)
+            .order_by("pk")
+            .values_list("fee_type__name", "amount")
         )
 
 
@@ -93,8 +122,8 @@ class TestStudentFees:
     def test_an_admin_sees_the_fees_paid_and_balance(self, abc: ConsultancyContext) -> None:
         admin = named_staff(abc, "Anita Admin", Role.ADMIN)
         _, student = counsellor_and_student(abc)
-        first = make_fee(abc, student, admin, purpose="Application processing", amount=25000)
-        second = make_fee(abc, student, admin, purpose="Visa processing", amount=40000)
+        first = make_fee(abc, student, admin, fee_type="Application fee", amount=25000)
+        second = make_fee(abc, student, admin, fee_type="Visa fee", amount=40000)
         make_payment(abc, student, admin, amount=30000)
         log_in(abc, admin)
 
@@ -104,15 +133,17 @@ class TestStudentFees:
         assert response.json() == {
             "fees": [
                 {
-                    "id": first.pk,
-                    "purpose": "Application processing",
+                    "id": str(first.public_id),
+                    "fee_type": {"id": str(first.fee_type.public_id), "name": "Application fee"},
+                    "note": "",
                     "amount": 25000,
                     "added_by": {"name": "Anita Admin"},
                     "added_at": first.added_at.isoformat(),
                 },
                 {
-                    "id": second.pk,
-                    "purpose": "Visa processing",
+                    "id": str(second.public_id),
+                    "fee_type": {"id": str(second.fee_type.public_id), "name": "Visa fee"},
+                    "note": "",
                     "amount": 40000,
                     "added_by": {"name": "Anita Admin"},
                     "added_at": second.added_at.isoformat(),
@@ -207,30 +238,31 @@ class TestAddFee:
         counsellor, student = counsellor_and_student(abc)
         log_in(abc, counsellor)
 
-        response = add(abc, student, {"purpose": "Visa processing", "amount": 40000})
+        response = add(abc, student, {"fee_type": "Visa fee", "amount": 40000})
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
-        assert [(fee["purpose"], fee["amount"]) for fee in body["fees"]] == [
-            ("Visa processing", 40000)
+        assert [(fee["fee_type"]["name"], fee["amount"]) for fee in body["fees"]] == [
+            ("Visa fee", 40000)
         ]
         assert body["fees"][0]["added_by"] == {"name": "Bikash Thapa"}
         assert body["balance"] is None
-        assert stored_fees(abc, student) == [("Visa processing", 40000)]
+        assert stored_fees(abc, student) == [("Visa fee", 40000)]
         with tenant_context(abc.consultancy):
-            assert str(Fee.objects.get(student=student)) == "Visa processing"
+            fee = Fee.objects.get(student=student)
+        assert str(fee) == f"Fee {fee.pk}"
         [entry] = entries(abc, student, HistoryKind.FEE_ADDED)
         assert (entry.by_name, entry.before, entry.after) == (
             "Bikash Thapa",
             "",
-            "Visa processing, NPR 40,000",
+            "Visa fee, NPR 40,000",
         )
 
     def test_an_admin_adds_a_fee_to_any_student(self, abc: ConsultancyContext) -> None:
         _, student = counsellor_and_student(abc)
         abc.log_in_as(Role.ADMIN)
 
-        response = add(abc, student, {"purpose": "IELTS class", "amount": 15000})
+        response = add(abc, student, {"fee_type": "IELTS class", "amount": 15000})
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["balance"] == {"paid": 0, "still_to_pay": 15000, "overpaid": 0}
@@ -239,15 +271,18 @@ class TestAddFee:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc, stage=Stage.LOST, lost_reason="Moved abroad")
 
-        assert add(abc, student, {"purpose": "Other", "amount": 100}).status_code == 201
+        assert (
+            add(abc, student, {"fee_type": "Other", "note": "Courier", "amount": 100}).status_code
+            == 201
+        )
 
-    def test_the_purpose_is_trimmed(self, abc: ConsultancyContext) -> None:
+    def test_the_note_is_trimmed(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
 
-        add(abc, student, {"purpose": "  Visa processing  ", "amount": 40000})
+        response = add(abc, student, {"fee_type": "Visa fee", "note": "  first  ", "amount": 1})
 
-        assert stored_fees(abc, student) == [("Visa processing", 40000)]
+        assert response.json()["fees"][0]["note"] == "first"
 
     @pytest.mark.parametrize(
         ("role", "reason"),
@@ -263,7 +298,7 @@ class TestAddFee:
         _, student = counsellor_and_student(abc)
         abc.log_in_as(role)
 
-        response = add(abc, student, {"purpose": "Visa processing", "amount": 40000})
+        response = add(abc, student, {"fee_type": "Visa fee", "amount": 40000})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == reason
@@ -277,7 +312,7 @@ class TestAddFee:
             student.save()
         log_in(abc, counsellor)
 
-        response = add(abc, student, {"purpose": "Visa processing", "amount": 40000})
+        response = add(abc, student, {"fee_type": "Visa fee", "amount": 40000})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -285,7 +320,7 @@ class TestAddFee:
         abc.log_in_as(Role.ADMIN)
 
         response = abc.client.post(
-            fees_url(999_999), {"purpose": "Visa", "amount": 1}, format="json"
+            fees_url(999_999), {"fee_type": "Visa fee", "amount": 1}, format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -294,14 +329,14 @@ class TestAddFee:
         admin = abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
 
-        add(abc, student, {"purpose": "Secret purpose", "amount": 40000})
+        add(abc, student, {"fee_type": "Other", "note": "Secret note", "amount": 40000})
 
         [line] = json_logs.with_message("Fee added")
         assert line["message"] == (
             f"Fee added: fee_id={stored_fee_id(abc, student)}, student_id={student.pk}, "
             f"by_staff_id={admin.pk}"
         )
-        assert "Secret purpose" not in json_logs.text()
+        assert "Secret note" not in json_logs.text()
         assert "40000" not in json_logs.text()
 
 
@@ -321,32 +356,37 @@ class TestRefusedFeeInput:
         "amount", [0, -5, 100_000_001, 12.5, "40000", True, None, [40000], {"n": 1}]
     )
     def test_bad_amounts(self, abc: ConsultancyContext, student: Student, amount: object) -> None:
-        response = add(abc, student, {"purpose": "Visa processing", "amount": amount})
+        response = add(abc, student, {"fee_type": "Visa fee", "amount": amount})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"amount": [AMOUNT_MESSAGE]}
         assert stored_fees(abc, student) == []
 
-    @pytest.mark.parametrize("purpose", ["", "   ", None, 12, True, ["Visa"], {"a": "b"}])
-    def test_bad_purposes(self, abc: ConsultancyContext, student: Student, purpose: object) -> None:
-        response = add(abc, student, {"purpose": purpose, "amount": 40000})
+    @pytest.mark.parametrize("fee_type", ["", None, 12_345, True, ["Visa fee"], {"a": "b"}])
+    def test_bad_fee_types(
+        self, abc: ConsultancyContext, student: Student, fee_type: object
+    ) -> None:
+        response = add(abc, student, {"fee_type": fee_type, "amount": 40000})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {"purpose": [PURPOSE_MESSAGE]}
+        assert response.json() == {"fee_type": [CHOOSE_MESSAGE]}
 
-    def test_an_over_long_purpose(self, abc: ConsultancyContext, student: Student) -> None:
-        response = add(abc, student, {"purpose": "x" * 201, "amount": 40000})
+    def test_an_over_long_note(self, abc: ConsultancyContext, student: Student) -> None:
+        response = add(abc, student, {"fee_type": "Visa fee", "note": "x" * 201, "amount": 1})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {"purpose": ["Use at most 200 characters."]}
+        assert response.json() == {"note": ["Use at most 200 characters."]}
 
-    def test_the_longest_purpose_is_kept(self, abc: ConsultancyContext, student: Student) -> None:
-        assert add(abc, student, {"purpose": "x" * 200, "amount": 1}).status_code == 201
+    def test_other_needs_a_note(self, abc: ConsultancyContext, student: Student) -> None:
+        response = add(abc, student, {"fee_type": "Other", "amount": 1})
+
+        assert response.json() == {"note": ["Add a short note for Other."]}
+        assert stored_fees(abc, student) == []
 
     def test_control_characters_are_refused(
         self, abc: ConsultancyContext, student: Student
     ) -> None:
-        response = add(abc, student, {"purpose": "Visa\nprocessing", "amount": 40000})
+        response = add(abc, student, {"fee_type": "Other", "note": "Visa\nfee", "amount": 1})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored_fees(abc, student) == []
@@ -355,19 +395,19 @@ class TestRefusedFeeInput:
         response = add(abc, student, {})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {"purpose": [PURPOSE_MESSAGE], "amount": [AMOUNT_MESSAGE]}
+        assert response.json() == {"fee_type": [CHOOSE_MESSAGE], "amount": [AMOUNT_MESSAGE]}
 
     @pytest.mark.parametrize("field", ["student", "added_by", "added_at", "id", "paid"])
     def test_unknown_fields_are_refused_and_never_stored(
         self, abc: ConsultancyContext, student: Student, field: str
     ) -> None:
-        response = add(abc, student, {"purpose": "Visa", "amount": 1, field: 1})
+        response = add(abc, student, {"fee_type": "Visa fee", "amount": 1, field: 1})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
         assert stored_fees(abc, student) == []
 
-    @pytest.mark.parametrize("body", [[{"purpose": "Visa", "amount": 1}], "Visa", 1])
+    @pytest.mark.parametrize("body", [[{"fee_type": "Visa fee", "amount": 1}], "Visa", 1])
     def test_a_body_that_is_not_an_object(
         self, abc: ConsultancyContext, student: Student, body: object
     ) -> None:
@@ -377,19 +417,18 @@ class TestRefusedFeeInput:
         assert stored_fees(abc, student) == []
 
     def test_a_form_body_is_refused(self, abc: ConsultancyContext, student: Student) -> None:
-        response = abc.client.post(fees_url(student), {"purpose": "Visa", "amount": "1"})
+        response = abc.client.post(fees_url(student), {"fee_type": "Visa fee", "amount": "1"})
 
         assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
     @pytest.mark.parametrize("text", INJECTION_STRINGS)
-    def test_injection_shaped_purposes_are_kept_as_plain_text(
+    def test_injection_shaped_notes_are_kept_as_plain_text(
         self, abc: ConsultancyContext, student: Student, text: str
     ) -> None:
-        response = add(abc, student, {"purpose": text, "amount": 1})
+        response = add(abc, student, {"fee_type": "Other", "note": text, "amount": 1})
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.json()["fees"][0]["purpose"] == text
-        assert stored_fees(abc, student) == [(text, 1)]
+        assert response.json()["fees"][0]["note"] == text.strip()
 
     @pytest.mark.parametrize("method", ["put", "patch", "delete"])
     def test_only_get_and_post_on_a_students_fees(
@@ -405,20 +444,19 @@ class TestChangeFee:
         self, abc: ConsultancyContext
     ) -> None:
         counsellor, student = counsellor_and_student(abc)
-        fee = make_fee(abc, student, counsellor, purpose="Visa processing", amount=40000)
+        fee = make_fee(abc, student, counsellor, fee_type="Visa fee", amount=40000)
         log_in(abc, counsellor)
 
-        response = abc.client.put(
-            fee_url(fee), {"purpose": "Visa processing", "amount": 45000}, format="json"
-        )
+        body = {"fee_type": "College / tuition fee", "note": "first year", "amount": 45000}
+        response = put_fee(abc, fee, body)
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["total"] == 45000
-        assert stored_fees(abc, student) == [("Visa processing", 45000)]
+        assert stored_fees(abc, student) == [("College / tuition fee", 45000)]
         [entry] = entries(abc, student, HistoryKind.FEE_EDITED)
         assert (entry.before, entry.after) == (
-            "Visa processing, NPR 40,000",
-            "Visa processing, NPR 45,000",
+            "Visa fee, NPR 40,000",
+            "College / tuition fee (first year), NPR 45,000",
         )
 
     def test_who_added_it_stays_the_same(self, abc: ConsultancyContext) -> None:
@@ -426,18 +464,16 @@ class TestChangeFee:
         fee = make_fee(abc, student, counsellor)
         abc.log_in_as(Role.ADMIN)
 
-        body = abc.client.put(fee_url(fee), {"purpose": "Visa", "amount": 1}, format="json").json()
+        body = put_fee(abc, fee, {"fee_type": "Visa fee", "amount": 1}).json()
 
         assert body["fees"][0]["added_by"] == {"name": "Bikash Thapa"}
 
     def test_no_change_writes_no_history(self, abc: ConsultancyContext) -> None:
         admin = abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
-        fee = make_fee(abc, student, admin, purpose="Visa processing", amount=40000)
+        fee = make_fee(abc, student, admin, fee_type="Visa fee", amount=40000)
 
-        response = abc.client.put(
-            fee_url(fee), {"purpose": "Visa processing", "amount": 40000}, format="json"
-        )
+        response = put_fee(abc, fee, {"fee_type": "Visa fee", "amount": 40000})
 
         assert response.status_code == status.HTTP_200_OK
         assert entries(abc, student, HistoryKind.FEE_EDITED) == []
@@ -457,37 +493,35 @@ class TestChangeFee:
         fee = make_fee(abc, student, counsellor)
         abc.log_in_as(role)
 
-        response = abc.client.put(fee_url(fee), {"purpose": "Visa", "amount": 1}, format="json")
+        response = put_fee(abc, fee, {"fee_type": "Visa fee", "amount": 1})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == reason
-        assert stored_fees(abc, student) == [("Visa processing", 40000)]
+        assert stored_fees(abc, student) == [("Visa fee", 40000)]
 
     def test_refused_input_changes_nothing(self, abc: ConsultancyContext) -> None:
         admin = abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
         fee = make_fee(abc, student, admin)
 
-        response = abc.client.put(
-            fee_url(fee), {"purpose": "Visa", "amount": "1", "student": 3}, format="json"
-        )
+        response = put_fee(abc, fee, {"fee_type": "Visa fee", "amount": "1", "student": 3})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
-        assert stored_fees(abc, student) == [("Visa processing", 40000)]
+        assert stored_fees(abc, student) == [("Visa fee", 40000)]
 
     def test_both_fields_are_needed(self, abc: ConsultancyContext) -> None:
         admin = abc.log_in_as(Role.ADMIN)
         fee = make_fee(abc, make_student(abc), admin)
 
-        response = abc.client.put(fee_url(fee), {"amount": 5}, format="json")
+        response = put_fee(abc, fee, {"amount": 5})
 
-        assert response.json() == {"purpose": [PURPOSE_MESSAGE]}
+        assert response.json() == {"fee_type": [CHOOSE_MESSAGE]}
 
     def test_an_unknown_fee_is_not_found(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.put(fee_url(999_999), {"purpose": "Visa", "amount": 1}, format="json")
+        response = put_fee(abc, 999_999, {"fee_type": "Visa fee", "amount": 1})
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -506,7 +540,7 @@ class TestDeleteFee:
         self, abc: ConsultancyContext
     ) -> None:
         counsellor, student = counsellor_and_student(abc)
-        fee = make_fee(abc, student, counsellor, purpose="Visa processing", amount=40000)
+        fee = make_fee(abc, student, counsellor, fee_type="Visa fee", amount=40000)
         log_in(abc, counsellor)
 
         response = abc.client.delete(fee_url(fee))
@@ -516,7 +550,7 @@ class TestDeleteFee:
         [entry] = entries(abc, student, HistoryKind.FEE_DELETED)
         assert (entry.by_name, entry.before, entry.after) == (
             "Bikash Thapa",
-            "Visa processing, NPR 40,000",
+            "Visa fee, NPR 40,000",
             "",
         )
 
@@ -583,13 +617,13 @@ class TestStudentFeesList:
             },
             "results": [
                 {
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
                     "fees": 80000,
                     "paid": 0,
                     "still_to_pay": 80000,
                 },
                 {
-                    "student": {"id": aarav.pk, "name": "Aarav Sharma"},
+                    "student": {"id": str(aarav.public_id), "name": "Aarav Sharma"},
                     "fees": 65000,
                     "paid": 15000,
                     "still_to_pay": 50000,
@@ -683,10 +717,14 @@ class TestProfileFlag:
     def test_the_profile_says_who_may_change_fees(self, abc: ConsultancyContext) -> None:
         counsellor, student = counsellor_and_student(abc)
         log_in(abc, counsellor)
-        assert abc.client.get(f"/api/students/{student.pk}/").json()["can_change_fees"] is True
+        assert (
+            abc.client.get(f"/api/students/{student.public_id}/").json()["can_change_fees"] is True
+        )
 
         abc.log_in_as(Role.FRONT_DESK)
-        assert abc.client.get(f"/api/students/{student.pk}/").json()["can_change_fees"] is False
+        assert (
+            abc.client.get(f"/api/students/{student.public_id}/").json()["can_change_fees"] is False
+        )
 
 
 class TestAccountsModuleOff:
@@ -702,7 +740,7 @@ class TestAccountsModuleOff:
         student = make_student(office)
         fee = make_fee(office, student, admin)
         office.log_in_as(role)
-        body = {"purpose": "Visa", "amount": 1}
+        body = with_ids(office, {"fee_type": "Visa fee", "amount": 1})
 
         answers = [
             office.client.get(fees_url(student)),
@@ -713,7 +751,7 @@ class TestAccountsModuleOff:
         ]
 
         assert [answer.status_code for answer in answers] == [404] * 5
-        assert stored_fees(office, student) == [("Visa processing", 40000)]
+        assert stored_fees(office, student) == [("Visa fee", 40000)]
 
     def test_switching_back_on_brings_the_fees_back(
         self, office: ConsultancyContext, platform_site: PlatformContext

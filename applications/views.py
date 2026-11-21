@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.parsers import JSONParser, MultiPartParser
@@ -47,6 +49,7 @@ from applications.services import (
     choose_offer,
     start_visa,
 )
+from config.public_ids import pk_for
 from documents.exceptions import (
     DocumentStorageError,
     TooManyDocumentsError,
@@ -85,7 +88,7 @@ VISA_NOT_CHOSEN_MESSAGE = "This visa isn't for the chosen offer."
 VISA_ANSWERED_MESSAGE = "This visa is already {status}. To change it, set its status by hand."
 
 
-def _workable_student(request: Request, student_id: int) -> Student:
+def _workable_student(request: Request, student_id: UUID) -> Student:
     """The Student, if the Staff member may work on their Applications and Visas; else 404/403."""
     try:
         student = profile_of(student_id)
@@ -97,7 +100,23 @@ def _workable_student(request: Request, student_id: int) -> Student:
     return student
 
 
-def _profile(request: Request, student_id: int, code: int = status.HTTP_200_OK) -> Response:
+def _own_application(student: Student, application_id: UUID) -> int:
+    """The database number of one of the Student's Applications; 404 for any other."""
+    found = pk_for(student.applications.all(), application_id)
+    if not found:
+        raise NotFound
+    return found
+
+
+def _own_visa(student: Student, visa_id: UUID) -> int:
+    """The database number of one of the Student's Visas; 404 for any other."""
+    found = pk_for(student.visas.all(), visa_id)
+    if not found:
+        raise NotFound
+    return found
+
+
+def _profile(request: Request, student_id: UUID, code: int = status.HTTP_200_OK) -> Response:
     student = profile_of(student_id)
     return Response(student_profile(student, viewer=get_request_staff(request)), status=code)
 
@@ -113,7 +132,7 @@ class _ApplicationView(APIView):
 class ApplicationListView(_ApplicationView):
     """Add an Application to a Student (POST; spec 52)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add it as Applied and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = NewApplicationSerializer(data=request.data)
@@ -132,14 +151,17 @@ class ApplicationListView(_ApplicationView):
 class ApplicationView(_ApplicationView):
     """Change one Application's Status (PATCH; spec 53-56)."""
 
-    def patch(self, request: Request, student_id: int, application_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, application_id: UUID) -> Response:
         """Set the Status, let the Stage follow, and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = StatusChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
             change_application_status(
-                student, application_id, serializer.status_value(), by=get_request_staff(request)
+                student,
+                _own_application(student, application_id),
+                serializer.status_value(),
+                by=get_request_staff(request),
             )
         except Application.DoesNotExist as error:
             raise NotFound from error
@@ -161,7 +183,7 @@ class OfferLetterListView(_ApplicationView):
     # A form with one file; nothing else is read.
     parser_classes = (MultiPartParser,)
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Store the letter, make the Application Offer, and return the Student's profile."""
         student = _workable_student(request, student_id)
         serializer = OfferLetterSerializer(data=request.data, context={"student": student})
@@ -191,13 +213,17 @@ class ChosenOfferView(_ApplicationView):
 
     parser_classes = (JSONParser,)
 
-    def put(self, request: Request, student_id: int) -> Response:
+    def put(self, request: Request, student_id: UUID) -> Response:
         """Set the Chosen Offer and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = ChosenOfferSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            choose_offer(student, serializer.application_id(), by=get_request_staff(request))
+            choose_offer(
+                student,
+                pk_for(student.applications.all(), serializer.application_id()),
+                by=get_request_staff(request),
+            )
         except NoOfferError:
             # expected refusal, answered with its status; the request line logs it
             return _refused("application", CHOOSE_APPLICATION_MESSAGE)
@@ -213,13 +239,17 @@ class ChosenOfferView(_ApplicationView):
 class VisaListView(_ApplicationView):
     """Add a Visa, once sent to the embassy, for one of a Student's Applications (POST; spec 58)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add it as Applied, let the Stage follow, and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = NewVisaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            start_visa(student, serializer.application_id(), by=get_request_staff(request))
+            start_visa(
+                student,
+                pk_for(student.applications.all(), serializer.application_id()),
+                by=get_request_staff(request),
+            )
         except NotChosenOfferError:
             # expected refusal, answered with its status; the request line logs it
             return _refused("application", NOT_CHOSEN_MESSAGE)
@@ -238,14 +268,17 @@ class VisaListView(_ApplicationView):
 class VisaView(_ApplicationView):
     """Change one Visa's Status (PATCH; spec 59-61)."""
 
-    def patch(self, request: Request, student_id: int, visa_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, visa_id: UUID) -> Response:
         """Set the Status, let the Stage follow, and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = VisaStatusChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
             change_visa_status(
-                student, visa_id, serializer.status_value(), by=get_request_staff(request)
+                student,
+                _own_visa(student, visa_id),
+                serializer.status_value(),
+                by=get_request_staff(request),
             )
         except Visa.DoesNotExist as error:
             raise NotFound from error
@@ -264,13 +297,18 @@ class VisaView(_ApplicationView):
 class VisaDatesView(_ApplicationView):
     """Book, move or clear one Visa's Biometrics, Medical or Interview (PATCH; spec 62a)."""
 
-    def patch(self, request: Request, student_id: int, visa_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, visa_id: UUID) -> Response:
         """Change the dates sent (null clears one) and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = VisaDatesSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            change_visa_dates(student, visa_id, serializer.change(), by=get_request_staff(request))
+            change_visa_dates(
+                student,
+                _own_visa(student, visa_id),
+                serializer.change(),
+                by=get_request_staff(request),
+            )
         except Visa.DoesNotExist as error:
             raise NotFound from error
         except VisaNotWaitingError:
@@ -287,14 +325,17 @@ class VisaLetterView(_ApplicationView):
     # A form with one file; nothing else is read.
     parser_classes = (MultiPartParser,)
 
-    def post(self, request: Request, student_id: int, visa_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID, visa_id: UUID) -> Response:
         """Store the letter (and the result), and return the Student's profile as stored."""
         student = _workable_student(request, student_id)
         serializer = VisaLetterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
             add_visa_letter(
-                student, visa_id, serializer.to_new_visa_letter(), by=get_request_staff(request)
+                student,
+                _own_visa(student, visa_id),
+                serializer.to_new_visa_letter(),
+                by=get_request_staff(request),
             )
         except Visa.DoesNotExist as error:
             raise NotFound from error

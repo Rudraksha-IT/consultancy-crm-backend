@@ -40,7 +40,7 @@ CLOCK_ANYWHERE_ROLES = (Role.ADMIN,)
 BATCH_ROLES = (Role.ADMIN, Role.COUNSELLOR, Role.TEACHER)
 # Roles that create and edit classes and fill them, and see everyone enrolled (spec 83-84, 86a).
 BATCH_MANAGING_ROLES = (Role.ADMIN, Role.COUNSELLOR)
-# Roles that see Students' messages and send SMS or email to one (spec 89, 91); not Teachers.
+# Roles that see the emails sent to Students and email them (ADR 0023); not Teachers.
 MESSAGE_ROLES = (Role.ADMIN, Role.COUNSELLOR, Role.FRONT_DESK)
 # Roles that log a Student's office Visits and see them (spec 23a-23c); not Teachers.
 VISIT_ROLES = (Role.ADMIN, Role.COUNSELLOR, Role.FRONT_DESK)
@@ -122,7 +122,7 @@ class StudentAction(StrEnum):
     RECORD_PAYMENT = "record_payment"
     # See every Payment, and change or delete one (spec 74-75).
     MANAGE_PAYMENTS = "manage_payments"
-    # See Students' messages, and send an SMS or email to any Student (spec 89, 91).
+    # See the emails sent to Students, and email any Student (ADR 0023).
     MESSAGE = "message"
     # Log any Student's Visit to the office, and see Visits (spec 23a-23c).
     LOG_VISIT = "log_visit"

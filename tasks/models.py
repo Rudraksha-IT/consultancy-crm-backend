@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db import models
 from django.db.models import Q
 
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 
@@ -34,6 +35,9 @@ class Task(models.Model):
     even after they leave. An "Only me" Task (spec 77b) is one someone gave themselves, about no
     Student; nobody else ever sees it.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     title = models.CharField(max_length=TITLE_MAX_LENGTH)
     due_on = models.DateField()

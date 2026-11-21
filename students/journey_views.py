@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -26,7 +28,7 @@ from students.profile import profile_of
 STUDENT_CHANGED_MESSAGE = "Someone else just changed this Student. Refresh the page."
 
 
-def _allowed_student(request: Request, student_id: int, action: StudentAction) -> Student:
+def _allowed_student(request: Request, student_id: UUID, action: StudentAction) -> Student:
     """The Student, if the Staff member may do `action`; 404 or 403 with the reason otherwise."""
     try:
         student = profile_of(student_id)
@@ -53,7 +55,7 @@ class _StudentView(APIView):
 class StudentStageView(_StudentView):
     """Move the Student's Stage by hand, mark them Lost, or bring them back (spec 38-40)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Make the move and return the profile as stored."""
         student = _allowed_student(request, student_id, StudentAction.SET_STAGE)
         serializer = StageChangeSerializer(data=request.data)
@@ -74,7 +76,7 @@ class StudentStageView(_StudentView):
 class StudentAssignView(_StudentView):
     """Give a Student with no counsellor their first one (spec 28, 44)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Assign the counsellor sent and return the profile as stored."""
         student = _allowed_student(request, student_id, StudentAction.ASSIGN)
         serializer = CounsellorPickSerializer(data=request.data)
@@ -90,7 +92,7 @@ class StudentAssignView(_StudentView):
 class StudentTransferView(_StudentView):
     """Transfer the Student to another counsellor (spec 42, 43)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Transfer them and return the profile as stored."""
         student = _allowed_student(request, student_id, StudentAction.TRANSFER)
         serializer = CounsellorPickSerializer(data=request.data)

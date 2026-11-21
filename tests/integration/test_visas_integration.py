@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -54,16 +55,16 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def visas_url(student: Student | int) -> str:
+def visas_url(student: Student | int | str) -> str:
     """Where a Student's Visas are started."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/visas/"
 
 
-def visa_url(student: Student | int, visa: Visa | int) -> str:
+def visa_url(student: Student | int | str, visa: Visa | int | str) -> str:
     """One of a Student's Visas."""
-    pk = student if isinstance(student, int) else student.pk
-    visa_pk = visa if isinstance(visa, int) else visa.pk
+    pk = student if isinstance(student, int | str) else student.public_id
+    visa_pk = visa if isinstance(visa, int | str) else visa.public_id
     return f"/api/students/{pk}/visas/{visa_pk}/"
 
 
@@ -96,14 +97,14 @@ def make_visa(
 
 
 def start(
-    office: ConsultancyContext, student: Student | int, **body: object
+    office: ConsultancyContext, student: Student | int | str, **body: object
 ) -> _MonkeyPatchedResponse:
     """POST a new Visa."""
     return office.client.post(visas_url(student), body, format="json")
 
 
 def change(
-    office: ConsultancyContext, student: Student, visa: Visa | int, **body: object
+    office: ConsultancyContext, student: Student, visa: Visa | int | str, **body: object
 ) -> _MonkeyPatchedResponse:
     """PATCH a Visa's Status."""
     return office.client.patch(visa_url(student, visa), body, format="json")
@@ -120,17 +121,24 @@ class TestStartingAVisa:
         _, student = counselled_student(abc, Stage.OFFER)
         application = offer_application(abc, student)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
         [visa] = stored_visas(abc, student)
         assert body["visas"] == [
             {
-                "id": visa.pk,
-                "application_id": application.pk,
-                "university": {"id": application.course.university_id, "name": "Deakin University"},
-                "course": {"id": application.course_id, "name": "Master of IT", "level": "master"},
+                "id": str(visa.public_id),
+                "application_id": str(application.public_id),
+                "university": {
+                    "id": str(application.course.university.public_id),
+                    "name": "Deakin University",
+                },
+                "course": {
+                    "id": str(application.course.public_id),
+                    "name": "Master of IT",
+                    "level": "master",
+                },
                 "status": "applied",
                 "started_on": timezone.localdate().isoformat(),
                 "biometrics_at": None,
@@ -150,7 +158,7 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         abc.log_in_as(Role.ADMIN)
 
-        assert start(abc, student, application=application.pk).status_code == 201
+        assert start(abc, student, application=str(application.public_id)).status_code == 201
 
     def test_another_counsellor_is_refused(self, abc: ConsultancyContext) -> None:
         other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
@@ -158,7 +166,7 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         abc.log_in_as(Role.COUNSELLOR)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_YOUR_STUDENT
@@ -175,7 +183,7 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         abc.log_in_as(role)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == refusal
@@ -191,7 +199,7 @@ class TestStartingAVisa:
         _, student = counselled_student(abc, Stage.APPLYING)
         application = make_application(abc, student, make_course(abc), application_status)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == NOT_CHOSEN
@@ -202,7 +210,7 @@ class TestStartingAVisa:
         someone_else = make_student(abc, me, Stage.VISA, name="Ram Thapa", phone="9841000002")
         theirs = offer_application(abc, someone_else)
 
-        response = start(abc, student, application=theirs.pk)
+        response = start(abc, student, application=str(theirs.public_id))
 
         assert response.json() == NOT_CHOSEN
         assert stored_visas(abc, someone_else) == []
@@ -210,7 +218,7 @@ class TestStartingAVisa:
     def test_an_application_that_does_not_exist_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.VISA)
 
-        assert start(abc, student, application=99_999).json() == NOT_CHOSEN
+        assert start(abc, student, application=str(uuid.uuid4())).json() == NOT_CHOSEN
 
     @pytest.mark.parametrize(
         "application", [None, "1", 1.5, True, [], {}, 0, -1, *INJECTION_STRINGS]
@@ -237,7 +245,7 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         make_visa(abc, student, application, VisaStatus.APPLIED)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == VISA_WAITING
@@ -250,7 +258,7 @@ class TestStartingAVisa:
         make_visa(abc, student, offer_application(abc, student), VisaStatus.APPLIED)
         other = offer_application(abc, student, "RMIT University")
 
-        response = start(abc, student, application=other.pk)
+        response = start(abc, student, application=str(other.public_id))
 
         assert response.json() == VISA_WAITING
         assert len(stored_visas(abc, student)) == 1
@@ -260,12 +268,12 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         first = make_visa(abc, student, application, VisaStatus.REFUSED)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         visas = response.json()["visas"]
         assert [v["status"] for v in visas] == ["applied", "refused"]
-        assert visas[1]["id"] == first.pk
+        assert visas[1]["id"] == str(first.public_id)
         assert response.json()["stage"] == "visa"
 
     def test_a_new_attempt_after_a_granted_one_is_refused(self, abc: ConsultancyContext) -> None:
@@ -273,7 +281,7 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
         make_visa(abc, student, application, VisaStatus.GRANTED)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ALREADY_GRANTED
@@ -283,7 +291,7 @@ class TestStartingAVisa:
         _, student = counselled_student(abc, Stage.VISA)
         application = offer_application(abc, student)
 
-        response = start(abc, student, application=application.pk, status="granted")
+        response = start(abc, student, application=str(application.public_id), status="granted")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -295,7 +303,11 @@ class TestStartingAVisa:
         application = offer_application(abc, student)
 
         response = start(
-            abc, student, application=application.pk, student_id=999, started_on="2020-01-01"
+            abc,
+            student,
+            application=str(application.public_id),
+            student_id=999,
+            started_on="2020-01-01",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -318,7 +330,7 @@ class TestStartingAVisa:
         for _ in range(MAX_VISAS_PER_STUDENT):
             make_visa(abc, student, application, VisaStatus.REFUSED)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == TOO_MANY
@@ -469,7 +481,7 @@ class TestChangingTheStatus:
         visa = make_visa(abc, student, offer_application(abc, student))
         other = offer_application(abc, student, "RMIT University")
 
-        response = change(abc, student, visa, status="refused", application=other.pk)
+        response = change(abc, student, visa, status="refused", application=str(other.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -519,7 +531,9 @@ class TestChangingTheStatus:
         visa = make_visa(abc, student, offer_application(abc, student))
         other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
         abc.client.post(
-            f"/api/students/{student.pk}/transfer/", {"counsellor": other.pk}, format="json"
+            f"/api/students/{student.public_id}/transfer/",
+            {"counsellor": str(other.public_id)},
+            format="json",
         )
 
         response = change(abc, student, visa, status="refused")
@@ -570,7 +584,7 @@ class TestTheStageFollows:
         student = make_student(abc, me, Stage.OFFER)
         application = offer_application(abc, student)
 
-        response = start(abc, student, application=application.pk)
+        response = start(abc, student, application=str(application.public_id))
 
         assert response.json()["stage"] == "visa"
         [entry] = stage_entries(abc, student)
@@ -645,11 +659,13 @@ class TestTheStageFollows:
         first = make_visa(abc, student, application, VisaStatus.APPLIED)
         change(abc, student, first, status="refused")
         abc.client.put(
-            f"/api/students/{student.pk}/chosen-offer/",
-            {"application": application.pk},
+            f"/api/students/{student.public_id}/chosen-offer/",
+            {"application": str(application.public_id)},
             format="json",
         )
-        second_id = start(abc, student, application=application.pk).json()["visas"][0]["id"]
+        second_id = start(abc, student, application=str(application.public_id)).json()["visas"][0][
+            "id"
+        ]
 
         response = change(abc, student, second_id, status="granted")
 
@@ -689,7 +705,7 @@ class TestTheStageFollows:
         visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.APPLIED)
         change(abc, student, visa, status="refused")
 
-        page = abc.client.get(f"/api/students/{student.pk}/history/").json()
+        page = abc.client.get(f"/api/students/{student.public_id}/history/").json()
 
         assert page["results"][0]["kind"] == "stage_changed"
         assert page["results"][0]["after"] == "offer"
@@ -700,7 +716,9 @@ class TestTheStageFollows:
     ) -> None:
         _, student = counselled_student(abc, Stage.OFFER)
         application = offer_application(abc, student)
-        visa_id = start(abc, student, application=application.pk).json()["visas"][0]["id"]
+        visa_id = start(abc, student, application=str(application.public_id)).json()["visas"][0][
+            "id"
+        ]
 
         change(abc, student, visa_id, status="refused")
 
@@ -718,7 +736,7 @@ class TestTheProfile:
         make_visa(abc, student, application, VisaStatus.REFUSED)
         make_visa(abc, student, application, VisaStatus.GRANTED)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert [v["status"] for v in body["visas"]] == ["granted", "refused"]
         assert body["can_change_applications"] is True
@@ -726,7 +744,7 @@ class TestTheProfile:
     def test_a_student_with_no_visa_has_an_empty_list(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc)
 
-        assert abc.client.get(f"/api/students/{student.pk}/").json()["visas"] == []
+        assert abc.client.get(f"/api/students/{student.public_id}/").json()["visas"] == []
 
     @pytest.mark.parametrize("role", [Role.FRONT_DESK, Role.COUNSELLOR])
     def test_others_see_them_but_may_not_change_them(
@@ -737,7 +755,7 @@ class TestTheProfile:
         make_visa(abc, student, offer_application(abc, student))
         abc.log_in_as(role)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert len(body["visas"]) == 1
         assert body["can_change_applications"] is False
@@ -749,7 +767,7 @@ class TestTheProfile:
         with tenant_context(abc.consultancy):
             Application.objects.filter(pk=application.pk).update(status=ApplicationStatus.REJECTED)
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["visas"][0]["university"]["name"] == "Deakin University"
 
@@ -812,13 +830,13 @@ def local_text(at: datetime) -> str:
     return at.astimezone(KATHMANDU).strftime("%Y-%m-%dT%H:%M")
 
 
-def dates_url(student: Student | int, visa: Visa | int) -> str:
+def dates_url(student: Student | int | str, visa: Visa | int | str) -> str:
     """Where one Visa's appointment dates are changed."""
     return f"{visa_url(student, visa)}dates/"
 
 
 def set_dates(
-    office: ConsultancyContext, student: Student, visa: Visa | int, body: object
+    office: ConsultancyContext, student: Student, visa: Visa | int | str, body: object
 ) -> _MonkeyPatchedResponse:
     """PATCH a Visa's appointment dates."""
     return office.client.patch(dates_url(student, visa), body, format="json")

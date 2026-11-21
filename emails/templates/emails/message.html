@@ -1,0 +1,3 @@
+{% for block in blocks %}{% if block.is_list %}<ul style="margin:0 0 14px;padding-left:20px;">{% for line in block.lines %}<li style="margin:0 0 4px;">{{ line }}</li>{% endfor %}</ul>
+{% else %}<p style="margin:0 0 14px;">{% for line in block.lines %}{% if not forloop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
+{% endif %}{% endfor %}

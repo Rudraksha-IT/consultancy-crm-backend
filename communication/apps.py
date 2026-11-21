@@ -4,6 +4,6 @@ from django.apps import AppConfig
 
 
 class CommunicationConfig(AppConfig):
-    """SMS and email to Students from the office's own accounts, per Consultancy schema."""
+    """Email to Students through the product's own account (ADR 0023), per Consultancy schema."""
 
     name = "communication"

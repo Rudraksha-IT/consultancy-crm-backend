@@ -13,6 +13,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from uuid import UUID
 
 from django.db.models import Count as Counted
 from django.db.models import Max, Q, QuerySet, Sum
@@ -72,7 +73,7 @@ class Change:
     before: str = ""
     after: str = ""
     detail: str = ""
-    student_id: int | None = None
+    student_id: UUID | None = None  # the Student's public id (ADR 0027)
     student_name: str = ""
 
 
@@ -219,13 +220,13 @@ def _changes(staff: Staff, start: date, end: date, *, batches_on: bool) -> list[
     moments, limit = _between(start, end), MAX_ENTRIES + 1
     local = timezone.localdate
     found = [
-        Change(e.kind, local(e.at), e.at, e.before, e.after, e.detail, e.student_id, sn)
+        Change(e.kind, local(e.at), e.at, e.before, e.after, e.detail, e.student.public_id, sn)
         for e, sn in _with_name(
             HistoryEntry.objects.filter(moments("at"), by_staff=staff), limit, "at"
         )
     ]
     found += [
-        Change(VISIT_LOGGED, local(v.at), v.at, v.kind, v.purpose, "", v.student_id, sn)
+        Change(VISIT_LOGGED, local(v.at), v.at, v.kind, v.purpose, "", v.student.public_id, sn)
         for v, sn in _with_name(Visit.objects.filter(moments("at"), recorded_by=staff), limit, "at")
     ]
     applications = Application.objects.filter(moments("created_at"), created_by=staff)
@@ -236,7 +237,7 @@ def _changes(staff: Staff, start: date, end: date, *, batches_on: bool) -> list[
             a.created_at,
             after=a.course.university.name,
             detail=a.course.name,
-            student_id=a.student_id,
+            student_id=a.student.public_id,
             student_name=sn,
         )
         for a, sn in _with_name(applications.select_related("course__university"), limit)
@@ -248,7 +249,7 @@ def _changes(staff: Staff, start: date, end: date, *, batches_on: bool) -> list[
             local(v.created_at),
             v.created_at,
             after=v.application.course.university.name,
-            student_id=v.student_id,
+            student_id=v.student.public_id,
             student_name=sn,
         )
         for v, sn in _with_name(visas.select_related("application__course__university"), limit)

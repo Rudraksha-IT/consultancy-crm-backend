@@ -95,7 +95,7 @@ def student_search(query: str, prefix: str = "") -> Q:
 
 
 def assigned_to(counsellor: str, viewer: Staff, prefix: str = "") -> Q:
-    """Students of one counsellor: "me" (the viewer), "none" (no one yet) or a Staff id.
+    """Students of one counsellor: "me" (the viewer), "none" (no one yet) or a Staff UUID.
 
     `prefix` reaches the Student through a relation, e.g. "student__" from an Application.
     """
@@ -104,4 +104,4 @@ def assigned_to(counsellor: str, viewer: Staff, prefix: str = "") -> Q:
         return Q(**{field: viewer})
     if counsellor == COUNSELLOR_NONE:
         return Q(**{f"{field}__isnull": True})
-    return Q(**{f"{field}_id": int(counsellor)})
+    return Q(**{f"{field}__public_id": counsellor})

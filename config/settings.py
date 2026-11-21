@@ -50,7 +50,7 @@ JWT_ACCESS_TOKEN_LIFETIME = read_access_token_lifetime(os.environ)
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=7)
 
 # Two-step login (issue 61). Authenticator secrets are sealed with TWO_FACTOR_SECRETS_KEY, a
-# Fernet key (from Secrets Manager or SSM), never SECRET_KEY. PLATFORM_ADMIN_TWO_FACTOR_DEFAULT
+# Fernet key (from the server's env file), never SECRET_KEY. PLATFORM_ADMIN_TWO_FACTOR_DEFAULT
 # (true/false, default false) is whether a Platform Admin made by the deploy starts with it on;
 # true needs the key. A bad value stops the server at start-up.
 _TWO_FACTOR = read_two_factor_settings(os.environ)
@@ -78,6 +78,8 @@ SHARED_APPS = [
     "central_login",
     # The job queue (issue 60): a table in public, run by the `worker` container.
     "jobs",
+    # The email builder, its templates and the demo command (ADR 0023). No models.
+    "emails",
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "rest_framework",
@@ -99,6 +101,9 @@ TENANT_APPS = [
     "catalogue",
     "applications",
     "documents",
+    "course_files",
+    "document_examples",
+    "fee_types",
     "payments",
     "fees",
     "expenses",
@@ -125,7 +130,9 @@ TENANT_MODEL = "tenancy.Consultancy"
 TENANT_DOMAIN_MODEL = "tenancy.Domain"
 
 MIDDLEWARE = [
-    # First, so every request (even a refused one) is logged with its correlation ID.
+    # The health check (ticket 14), called every few seconds: answered first, never logged.
+    "config.health.HealthMiddleware",
+    # Then every request (even a refused one) is logged with its correlation ID.
     "config.middleware.RequestLogMiddleware",
     "tenancy.middleware.InternalTokenMiddleware",
     "tenancy.middleware.ConsultancyHostMiddleware",
@@ -154,6 +161,10 @@ DATABASES = {
 }
 DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
 
+# How long a deploy's migration waits for a table the running app holds (ticket 14), then fails
+# before the switch, leaving the old version running. Fixed, not a deploy value.
+MIGRATION_LOCK_TIMEOUT_MS = 5000
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Staff live in each Consultancy's schema. Platform Admins are a second user model in public;
@@ -176,8 +187,10 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "config.exceptions.handle_exception",
 }
 
-# Email (Codes for joining and password resets). Locally the console or a catch-all SMTP server
-# (MailHog in Compose); tests replace it with Django's in-memory outbox.
+# Every email the product sends (ADR 0023): Codes, the Central login list and emails to Students,
+# all through this one SMTP account, set only here. Offices never set up an account of their own.
+# Locally the console or a catch-all SMTP server (MailHog in Compose); tests replace it with
+# Django's in-memory outbox.
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
@@ -187,12 +200,14 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() == "true"
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", f"no-reply@{PRODUCT_DOMAIN}")
 
-# Document files (issue 16): private S3, one prefix per Consultancy schema. In AWS the server's IAM
-# role gives access; locally Compose points these at MinIO (and AWS_* keys in the environment).
+# Document files (issue 16): private S3-compatible storage, one prefix per Consultancy schema. In
+# production Cloudflare R2 (ADR 0025; region `auto`, AWS_* keys of an R2 token in the env file);
+# locally Compose points these at MinIO.
 DOCUMENT_STORAGE = os.environ.get("DOCUMENT_STORAGE", "documents.storage.S3DocumentStorage")
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
 DOCUMENTS_S3_REGION = os.environ.get("DOCUMENTS_S3_REGION", "ap-south-1")
-# Empty means AWS S3 itself. The public endpoint signs links for the browser (MinIO locally).
+# The S3 endpoint (R2's account address in production). The public endpoint signs links for the
+# browser (the same R2 address in production; MinIO's published port locally).
 DOCUMENTS_S3_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_ENDPOINT_URL", "")
 DOCUMENTS_S3_PUBLIC_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_PUBLIC_ENDPOINT_URL", "")
 # The files of one Document upload (documents.files.MAX_FILES_AT_ONCE, 10) plus one, so that one
@@ -200,12 +215,7 @@ DOCUMENTS_S3_PUBLIC_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_PUBLIC_ENDPOINT_
 # to a temporary file, not memory.
 DATA_UPLOAD_MAX_NUMBER_FILES = 11
 
-# SMS and email to Students (issue 25) go out on each office's own accounts. Their secrets are
-# sealed with this key (at least 32 characters; see communication.sealing), never SECRET_KEY.
-PROVIDER_SECRETS_KEY = os.environ.get("PROVIDER_SECRETS_KEY", "")
-SMS_GATEWAY = os.environ.get("SMS_GATEWAY", "communication.providers.HttpSmsGateway")
-EMAIL_GATEWAY = os.environ.get("EMAIL_GATEWAY", "communication.providers.SmtpEmailGateway")
-# One message to many Students (issue 26) is sent one by one while the request waits, so it is
+# One email to many Students (issue 26) is sent one by one while the request waits, so it is
 # kept short: at most this many Students, and anyone not reached in this many seconds is recorded
 # as failed. Keep it under gunicorn's --timeout and the Next.js bulk-send timeout.
 BULK_MAX_STUDENTS = 200

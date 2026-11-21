@@ -67,16 +67,18 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def document_url(student: Student | int, document: Document | int) -> str:
+def document_url(student: Student | int | str, document: Document | int | str) -> str:
     """One of a Student's Documents."""
-    pk = student if isinstance(student, int) else student.pk
-    document_pk = document if isinstance(document, int) else document.pk
+    pk = student if isinstance(student, int | str) else student.public_id
+    document_pk = document if isinstance(document, int | str) else document.public_id
     return f"/api/students/{pk}/documents/{document_pk}/"
 
 
-def file_url(student: Student | int, document: Document | int, file: DocumentFile | int) -> str:
+def file_url(
+    student: Student | int | str, document: Document | int | str, file: DocumentFile | int | str
+) -> str:
     """One file of a Student's Document."""
-    file_pk = file if isinstance(file, int) else file.pk
+    file_pk = file if isinstance(file, int | str) else file.public_id
     return f"{document_url(student, document)}files/{file_pk}/"
 
 
@@ -169,10 +171,10 @@ class TestPuttingADocumentInTheBin:
         assert item["state"] == "not_received"
         assert item["document"] is None
         [shown] = item["in_bin"]
-        assert shown["id"] == document.pk
+        assert shown["id"] == str(document.public_id)
         assert [f["file_name"] for f in shown["files"]] == ["passport.pdf", "page-2.pdf"]
         assert shown["bin"]["reason"] == REASON
-        assert shown["bin"]["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert shown["bin"]["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         assert response.json()["done"] == total_before - 1
         stored = reloaded(abc, document)
         assert stored is not None
@@ -190,8 +192,8 @@ class TestPuttingADocumentInTheBin:
 
         item = passport_item(response.json())
         assert item["state"] == "verified"
-        assert item["document"]["id"] == older.pk
-        assert [one["id"] for one in item["in_bin"]] == [newer.pk]
+        assert item["document"]["id"] == str(older.public_id)
+        assert [one["id"] for one in item["in_bin"]] == [str(newer.public_id)]
 
     def test_nobody_can_open_check_or_add_to_it(
         self, abc: ConsultancyContext, mine: tuple[Staff, Student]
@@ -267,10 +269,10 @@ class TestPuttingADocumentInTheBin:
         put_in_bin(abc.client, document_url(student, document))
         put_in_bin(abc.client, file_url(student, kept, page))
 
-        answer = abc.client.get(f"/api/students/{student.pk}/").json()
+        answer = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         [shown] = answer["applications"][0]["documents"]
-        assert shown["id"] == kept.pk
+        assert shown["id"] == str(kept.public_id)
         assert len(shown["files"]) == 1
         assert page.pk not in [f["id"] for f in shown["files"]]
 
@@ -309,8 +311,8 @@ class TestPuttingADocumentInTheBin:
         log_in(abc, first)
         [shown] = abc.client.get("/api/notifications/").json()["results"]
         assert shown["kind"] == "bin_added"
-        assert shown["by"] == {"id": mine[0].pk, "name": "Bikash Thapa"}
-        assert shown["student"] == {"id": student.pk, "name": student.name}
+        assert shown["by"] == {"id": str(mine[0].public_id), "name": "Bikash Thapa"}
+        assert shown["student"] == {"id": str(student.public_id), "name": student.name}
         assert shown["bin"] == {"item": "Passport", "reason": REASON}
 
     def test_it_is_logged_with_ids_only(
@@ -347,11 +349,11 @@ class TestPuttingOneFileInTheBin:
         item = passport_item(response.json())
         assert item["state"] == "waiting"
         shown = item["document"]
-        assert [f["id"] for f in shown["files"]] == [first.pk]
+        assert [f["id"] for f in shown["files"]] == [str(first.public_id)]
         [in_bin] = shown["binned_files"]
-        assert (in_bin["id"], in_bin["file_name"]) == (second.pk, "page-2.pdf")
+        assert (in_bin["id"], in_bin["file_name"]) == (str(second.public_id), "page-2.pdf")
         assert in_bin["bin"]["reason"] == REASON
-        assert in_bin["bin"]["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert in_bin["bin"]["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         [entry] = history_of(abc, student)
         assert (entry.kind, entry.after) == (HistoryKind.DOCUMENT_BINNED, "page-2.pdf of Passport")
 
@@ -597,7 +599,7 @@ class TestTakingItOut:
         item = passport_item(response.json())
         assert (item["state"], item["document"]["id"], item["in_bin"]) == (
             "waiting",
-            document.pk,
+            str(document.public_id),
             [],
         )
         stored = reloaded(abc, document)
@@ -680,10 +682,10 @@ class TestTheBinTab:
         assert body["count"] == 2
         first, second = body["results"]
         assert first["kind"] == "file"
-        assert first["document"] == {"id": other.pk, "name": "+2 Transcript"}
-        assert [f["id"] for f in first["files"]] == [page.pk]
-        assert first["student"] == {"id": student.pk, "name": student.name}
-        assert first["by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert first["document"] == {"id": str(other.public_id), "name": "+2 Transcript"}
+        assert [f["id"] for f in first["files"]] == [str(page.public_id)]
+        assert first["student"] == {"id": str(student.public_id), "name": student.name}
+        assert first["by"] == {"id": str(me.public_id), "name": "Bikash Thapa"}
         assert first["reason"] == REASON
         assert second["kind"] == "document"
         assert [f["file_name"] for f in second["files"]] == ["passport.pdf", "page-2.pdf"]
@@ -734,7 +736,7 @@ class TestTheBinTab:
         [file] = files_of(abc, document)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.get(f"{BIN_URL}files/{file.pk}/link/?action=download")
+        response = abc.client.get(f"{BIN_URL}files/{file.public_id}/link/?action=download")
 
         assert response.status_code == status.HTTP_200_OK
         assert file.storage_key in response.json()["url"]
@@ -748,7 +750,7 @@ class TestTheBinTab:
         [file] = files_of(abc, document)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.get(f"{BIN_URL}files/{file.pk}/link/")
+        response = abc.client.get(f"{BIN_URL}files/{file.public_id}/link/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -759,7 +761,7 @@ class TestTheBinTab:
         _, document = binned(abc, student)
         [file] = files_of(abc, document)
 
-        response = abc.client.get(f"{BIN_URL}files/{file.pk}/link/")
+        response = abc.client.get(f"{BIN_URL}files/{file.public_id}/link/")
 
         assert (response.status_code, response.json()) == (status.HTTP_403_FORBIDDEN, ONLY_ADMINS)
 
@@ -790,7 +792,7 @@ class TestRestoring:
         response = restore(abc.client, document_url(student, document))
 
         assert response.status_code == status.HTTP_200_OK
-        assert passport_item(response.json())["document"]["id"] == document.pk
+        assert passport_item(response.json())["document"]["id"] == str(document.public_id)
         entry = history_of(abc, student)[-1]
         assert (entry.kind, entry.after, entry.detail, entry.by_name) == (
             HistoryKind.DOCUMENT_RESTORED,
@@ -1002,7 +1004,7 @@ class TestWhatTheChecklistTellsTheViewer:
 
         body = checklist(abc, student).json()
 
-        assert (body["deletes_for_good"], body["viewer_id"]) == (False, me.pk)
+        assert (body["deletes_for_good"], body["viewer_id"]) == (False, str(me.public_id))
 
     def test_an_admin_deletes_for_good(self, abc: ConsultancyContext) -> None:
         student = make_student(abc, named_staff(abc, "Other Counsellor"), Stage.COUNSELLING)
@@ -1010,7 +1012,7 @@ class TestWhatTheChecklistTellsTheViewer:
 
         body = checklist(abc, student).json()
 
-        assert (body["deletes_for_good"], body["viewer_id"]) == (True, admin.pk)
+        assert (body["deletes_for_good"], body["viewer_id"]) == (True, str(admin.public_id))
 
     def test_a_platform_admin_puts_in_the_bin_and_has_no_staff_id(
         self, abc: ConsultancyContext, platform_site: PlatformContext
@@ -1018,6 +1020,6 @@ class TestWhatTheChecklistTellsTheViewer:
         visit: Visit = open_as_platform_admin(platform_site, abc)
         student = make_student(abc, named_staff(abc, "Other Counsellor"), Stage.COUNSELLING)
 
-        body = visit.client.get(f"/api/students/{student.pk}/documents/").json()
+        body = visit.client.get(f"/api/students/{student.public_id}/documents/").json()
 
         assert (body["deletes_for_good"], body["viewer_id"]) == (False, None)

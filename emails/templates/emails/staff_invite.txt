@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+You've been added to {{ office }}'s CRM as {{ role }}. Open the sign-up page, enter your work email and this code, then choose your password:
+
+{{ code }}
+{% if link %}
+Sign-up page: {{ link }}
+{% endif %}
+It works for {{ minutes }} minutes, once. After that, ask your Admin to send a new one.
+
+If you weren't expecting it, you can ignore this email.

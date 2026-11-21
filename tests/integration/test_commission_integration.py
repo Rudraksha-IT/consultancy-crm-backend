@@ -47,7 +47,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def status_url(commission: Commission | int) -> str:
     """One Commission's status."""
-    pk = commission if isinstance(commission, int) else commission.pk
+    pk = commission if isinstance(commission, int | str) else commission.public_id
     return f"{LIST_URL}{pk}/status/"
 
 
@@ -88,8 +88,8 @@ def stored(office: ConsultancyContext) -> list[tuple[int, int, str, int, str]]:
 def body_for(student: Student, university: University, **fields: object) -> dict[str, object]:
     """A good body for a new Commission."""
     return {
-        "student": student.pk,
-        "university": university.pk,
+        "student": str(student.public_id),
+        "university": str(university.public_id),
         "intake": "2027-02",
         "amount": 290000,
         **fields,
@@ -146,27 +146,33 @@ class TestList:
             },
             "results": [
                 {
-                    "id": received.pk,
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
-                    "university": {"id": federation.pk, "name": "Federation University"},
+                    "id": str(received.public_id),
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
+                    "university": {
+                        "id": str(federation.public_id),
+                        "name": "Federation University",
+                    },
                     "intake": "2027-01",
                     "amount": 340000,
                     "status": "received",
                     "received_on": "2026-10-20",
                 },
                 {
-                    "id": claimed.pk,
-                    "student": {"id": sita.pk, "name": "Sita Karki"},
-                    "university": {"id": deakin.pk, "name": "Deakin University"},
+                    "id": str(claimed.public_id),
+                    "student": {"id": str(sita.public_id), "name": "Sita Karki"},
+                    "university": {"id": str(deakin.public_id), "name": "Deakin University"},
                     "intake": "2027-02",
                     "amount": 290000,
                     "status": "claim_sent",
                     "received_on": None,
                 },
                 {
-                    "id": waiting.pk,
-                    "student": {"id": student.pk, "name": "Aarav Sharma"},
-                    "university": {"id": federation.pk, "name": "Federation University"},
+                    "id": str(waiting.public_id),
+                    "student": {"id": str(student.public_id), "name": "Aarav Sharma"},
+                    "university": {
+                        "id": str(federation.public_id),
+                        "name": "Federation University",
+                    },
                     "intake": "2027-02",
                     "amount": 260000,
                     "status": "waiting_for_enrolment",
@@ -264,9 +270,9 @@ class TestAddCommission:
         with tenant_context(abc.consultancy):
             commission = Commission.objects.get()
         assert response.json() == {
-            "id": commission.pk,
-            "student": {"id": student.pk, "name": "Aarav Sharma"},
-            "university": {"id": university.pk, "name": "Federation University"},
+            "id": str(commission.public_id),
+            "student": {"id": str(student.public_id), "name": "Aarav Sharma"},
+            "university": {"id": str(university.public_id), "name": "Federation University"},
             "intake": "2027-02",
             "amount": 290000,
             "status": "waiting_for_enrolment",

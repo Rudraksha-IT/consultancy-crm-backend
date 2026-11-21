@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 
 from catalogue.models import University
+from config.public_ids import public_id_field
 from payments.models import MAX_AMOUNT
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
@@ -30,6 +31,9 @@ class Commission(models.Model):
     `received_on` is set when it's marked Received and cleared if it's moved back; Received
     Commission counts as money in on that day.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="commissions")
     university = models.ForeignKey(University, on_delete=models.PROTECT, related_name="+")

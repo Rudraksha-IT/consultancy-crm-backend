@@ -10,7 +10,7 @@ from students.models import Stage
 
 
 def _person(staff: Staff | None) -> dict[str, object] | None:
-    return None if staff is None else {"id": staff.pk, "name": staff.name}
+    return None if staff is None else {"id": staff.public_id, "name": staff.name}
 
 
 def progress_row(row: StudentProgress) -> dict[str, object]:
@@ -19,7 +19,7 @@ def progress_row(row: StudentProgress) -> dict[str, object]:
     counts = row.checklist.counts
     return {
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "stage": student.stage,
             "country": student.country,
@@ -57,8 +57,8 @@ def waiting_answer(waiting: Waiting) -> dict[str, object]:
             "count": waiting.appointment_count,
             "results": [
                 {
-                    "visa_id": one.visa.pk,
-                    "student": {"id": one.visa.student.pk, "name": one.visa.student.name},
+                    "visa_id": one.visa.public_id,
+                    "student": {"id": one.visa.student.public_id, "name": one.visa.student.name},
                     "kind": one.booked.kind.value,
                     "at": moment_text(one.booked.at),
                 }

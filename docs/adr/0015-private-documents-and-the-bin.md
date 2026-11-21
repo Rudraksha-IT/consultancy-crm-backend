@@ -23,5 +23,5 @@ Recorded 2026-11-17 for decisions made in issues 16, 17, 78 and 79.
 
 ## Consequences
 
-- Locally, MinIO stands in for S3; in tests, storage is faked at its interface.
+- In production the storage is Cloudflare R2 (ADR 0025); locally MinIO stands in for it; in tests, storage is faked at its interface.
 - The checklist counts a binned Document as missing.

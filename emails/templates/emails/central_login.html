@@ -1,0 +1,6 @@
+<p style="margin:0 0 14px;">Hello,</p>
+<p style="margin:0 0 14px;">You asked for the login pages of the offices this email belongs to:</p>
+{% for office in offices %}<p style="margin:0 0 8px;font-weight:700;">{{ office.name }}</p>
+{% if office.link %}{% include "emails/parts/button.html" with href=office.link label="Open the login page" %}{% endif %}
+{% endfor %}<p style="margin:0 0 14px;">Open the one you want; your email will already be filled in.</p>
+<p class="em-muted" style="margin:0 0 14px;color:#5f6b7a;">If you didn't ask for this, you can ignore this email.</p>

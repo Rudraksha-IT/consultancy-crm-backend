@@ -49,13 +49,13 @@ TRANSFERRED_ANOTHER_WAY = "The Student was given to a counsellor another way."
 REQUESTER_LEFT = "The person who asked has left the office."
 
 
-def ask_url(student: Student | int) -> str:
+def ask_url(student: Student | int | str) -> str:
     """Where a Transfer Request for the Student is sent."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/transfer-requests/"
 
 
-def action_url(request_id: int, action: str) -> str:
+def action_url(request_id: object, action: str) -> str:
     """Approve, decline or cancel one request."""
     return f"/api/transfer-requests/{request_id}/{action}/"
 
@@ -90,24 +90,24 @@ class Office:
         target = student or self.sarina
         return self.as_(by).client.post(ask_url(target), {"reason": reason}, format="json")
 
-    def asked(self, by: Staff, student: Student | None = None) -> int:
-        """`by` asks for the Student; return the request's id."""
+    def asked(self, by: Staff, student: Student | None = None) -> str:
+        """`by` asks for the Student; return the request's id (its UUID)."""
         response = self.ask(by, student)
         assert response.status_code == status.HTTP_201_CREATED, response.content
-        request_id: int = response.json()["id"]
+        request_id: str = response.json()["id"]
         return request_id
 
     def act(
-        self, by: Staff, request_id: int, action: str, body: dict[str, object] | None = None
+        self, by: Staff, request_id: str | int, action: str, body: dict[str, object] | None = None
     ) -> _MonkeyPatchedResponse:
         """`by` approves, declines or cancels the request."""
         url = action_url(request_id, action)
         return self.as_(by).client.post(url, body or {}, format="json")
 
-    def stored_request(self, request_id: int) -> TransferRequest:
+    def stored_request(self, request_id: str) -> TransferRequest:
         """The request as stored now."""
         with tenant_context(self.office.consultancy):
-            return TransferRequest.objects.get(pk=request_id)
+            return TransferRequest.objects.get(public_id=request_id)
 
     def notifications_of(self, staff: Staff) -> list[str]:
         """The kinds of `staff`'s notifications, newest first."""
@@ -137,11 +137,11 @@ class TestAsking:
 
         assert response.status_code == status.HTTP_201_CREATED
         answer = response.json()
-        assert answer["student"] == {"id": people.sarina.pk, "name": "Sarina Khadka"}
-        assert answer["asked_by"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
+        assert answer["student"] == {"id": str(people.sarina.public_id), "name": "Sarina Khadka"}
+        assert answer["asked_by"] == {"id": str(people.anjali.public_id), "name": "Anjali Gurung"}
         assert answer["reason"] == REASON
         assert answer["status"] == "waiting"
-        assert answer["counsellor"] == {"id": people.bikash.pk, "name": "Bikash Thapa"}
+        assert answer["counsellor"] == {"id": str(people.bikash.public_id), "name": "Bikash Thapa"}
         assert answer["answered_by"] is None
         assert answer["answered_at"] is None
         assert answer["answer_reason"] == ""
@@ -248,17 +248,19 @@ class TestAsking:
 
         assert item["kind"] == "transfer_asked"
         assert item["task"] is None
-        assert item["by"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
-        assert item["student"] == {"id": people.sarina.pk, "name": "Sarina Khadka"}
+        assert item["by"] == {"id": str(people.anjali.public_id), "name": "Anjali Gurung"}
+        assert item["student"] == {"id": str(people.sarina.public_id), "name": "Sarina Khadka"}
         assert item["transfer_request"] == {"id": request_id, "status": "waiting"}
 
     def test_the_request_is_logged_without_the_reason(
         self, people: Office, json_logs: JsonLogs
     ) -> None:
         request_id = people.asked(people.anjali)
+        with tenant_context(people.office.consultancy):  # logs keep the number
+            number = TransferRequest.objects.get(public_id=request_id).pk
 
         [entry] = json_logs.with_message("Transfer request sent")
-        assert f"transfer_request_id={request_id}" in entry["message"]
+        assert f"transfer_request_id={number}" in entry["message"]
         assert REASON not in json_logs.text()
 
     @pytest.mark.parametrize(
@@ -365,7 +367,7 @@ class TestApproving:
         assert answer["status"] == "approved"
         assert answer["answered_by"] == {"name": "Bikash Thapa", "is_platform_admin": False}
         assert answer["taken_from"] == "Bikash Thapa"
-        assert answer["counsellor"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
+        assert answer["counsellor"] == {"id": str(people.anjali.public_id), "name": "Anjali Gurung"}
         assert answer["answered_at"] is not None
         assert stored(people.office, people.sarina).assigned_counsellor_id == people.anjali.pk
 
@@ -386,8 +388,8 @@ class TestApproving:
         request_id = people.asked(people.anjali)
         people.act(people.bikash, request_id, "approve")
 
-        profile = people.as_(people.anjali).client.get(f"/api/students/{people.sarina.pk}/")
-        old = people.as_(people.bikash).client.get(f"/api/students/{people.sarina.pk}/")
+        profile = people.as_(people.anjali).client.get(f"/api/students/{people.sarina.public_id}/")
+        old = people.as_(people.bikash).client.get(f"/api/students/{people.sarina.public_id}/")
 
         assert profile.json()["can_change"] is True
         assert old.json()["can_change"] is False
@@ -413,7 +415,7 @@ class TestApproving:
 
         assert people.notifications_of(people.anjali) == ["transfer_approved"]
         [item] = people.as_(people.anjali).client.get("/api/notifications/").json()["results"]
-        assert item["by"] == {"id": people.bikash.pk, "name": "Bikash Thapa"}
+        assert item["by"] == {"id": str(people.bikash.public_id), "name": "Bikash Thapa"}
         assert item["transfer_request"] == {"id": request_id, "status": "approved"}
 
     @pytest.mark.parametrize("who", ["anjali", "desk", "teacher"])
@@ -652,7 +654,7 @@ class TestClosingByItself:
         sunita = named_staff(people.office, "Sunita Rai")
 
         people.as_(people.admin).client.post(
-            transfer_url(people.sarina), {"counsellor": sunita.pk}, format="json"
+            transfer_url(people.sarina), {"counsellor": str(sunita.public_id)}, format="json"
         )
 
         closed = people.stored_request(request_id)
@@ -666,7 +668,9 @@ class TestClosingByItself:
         request_id = people.asked(people.anjali, lead)
 
         people.as_(people.desk).client.post(
-            f"/api/students/{lead.pk}/assign/", {"counsellor": people.bikash.pk}, format="json"
+            f"/api/students/{lead.public_id}/assign/",
+            {"counsellor": str(people.bikash.public_id)},
+            format="json",
         )
 
         assert people.stored_request(request_id).status == TransferRequestStatus.CLOSED
@@ -677,7 +681,7 @@ class TestClosingByItself:
         people.act(people.admin, answered, "decline")
 
         response = people.as_(people.admin).client.post(
-            f"/api/staff/{people.anjali.pk}/deactivate/", format="json"
+            f"/api/staff/{people.anjali.public_id}/deactivate/", format="json"
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -689,7 +693,7 @@ class TestClosingByItself:
     def test_a_closed_request_cant_be_approved_later(self, people: Office) -> None:
         request_id = people.asked(people.anjali)
         people.as_(people.admin).client.post(
-            f"/api/staff/{people.anjali.pk}/deactivate/", format="json"
+            f"/api/staff/{people.anjali.public_id}/deactivate/", format="json"
         )
 
         response = people.act(people.bikash, request_id, "approve")
@@ -699,7 +703,7 @@ class TestClosingByItself:
 
 
 class TestTheLists:
-    def _three(self, people: Office) -> dict[str, int]:
+    def _three(self, people: Office) -> dict[str, str]:
         """Anjali asks for Sarina; Bikash asks for Dipesh (no counsellor); Anjali for Asmita."""
         dipesh = make_student(people.office, name="Dipesh Rana")
         asmita = make_student(people.office, people.admin, name="Asmita Rai")
@@ -709,7 +713,7 @@ class TestTheLists:
             "asmita": people.asked(people.anjali, asmita),
         }
 
-    def _ids(self, people: Office, staff: Staff, box: str) -> list[int]:
+    def _ids(self, people: Office, staff: Staff, box: str) -> list[str]:
         page = people.as_(staff).client.get(LIST_URL, {"box": box}).json()
         return [item["id"] for item in page["results"]]
 
@@ -751,7 +755,7 @@ class TestTheLists:
         request_id = people.asked(people.anjali)
         people.act(people.bikash, request_id, "decline")
         people.as_(people.admin).client.post(
-            transfer_url(people.sarina), {"counsellor": people.anjali.pk}, format="json"
+            transfer_url(people.sarina), {"counsellor": str(people.anjali.public_id)}, format="json"
         )
 
         [declined] = (
@@ -759,7 +763,10 @@ class TestTheLists:
         )
 
         assert declined["taken_from"] == "Bikash Thapa"
-        assert declined["counsellor"] == {"id": people.anjali.pk, "name": "Anjali Gurung"}
+        assert declined["counsellor"] == {
+            "id": str(people.anjali.public_id),
+            "name": "Anjali Gurung",
+        }
 
     def test_answered_requests_leave_waiting_for_me(self, people: Office) -> None:
         ids = self._three(people)
@@ -823,7 +830,7 @@ class TestTheLists:
 
 class TestOnTheProfile:
     def _profile(self, people: Office, staff: Staff) -> dict[str, object]:
-        response = people.as_(staff).client.get(f"/api/students/{people.sarina.pk}/")
+        response = people.as_(staff).client.get(f"/api/students/{people.sarina.public_id}/")
         answer: dict[str, object] = response.json()
         return answer
 

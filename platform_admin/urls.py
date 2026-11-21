@@ -4,6 +4,7 @@ from django.urls import URLPattern, URLResolver, include, path
 
 from auth_tokens.views import LogoutView, RefreshView
 from platform_admin.brand_views import ProductLogoView
+from platform_admin.email_views import PlatformEmailView, PlatformTestEmailView
 from platform_admin.reset_views import (
     PlatformResetConfirmView,
     PlatformResetRequestView,
@@ -43,6 +44,8 @@ from platform_admin.views import (
 urlpatterns: list[URLPattern | URLResolver] = [
     path("", include("platform_admin.brand_urls")),
     path("brand/logo/", ProductLogoView.as_view(), name="product-logo"),
+    path("email/", PlatformEmailView.as_view(), name="platform-email"),
+    path("email/test/", PlatformTestEmailView.as_view(), name="platform-test-email"),
     path("auth/login/", PlatformLoginView.as_view(), name="platform-login"),
     path("auth/login/next/", PlatformLoginStepView.as_view(), name="platform-login-step"),
     path("auth/refresh/", RefreshView.as_view(), name="platform-refresh"),
@@ -63,17 +66,17 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("auth/join/complete/", PlatformJoinCompleteView.as_view(), name="platform-join-complete"),
     path("admins/", PlatformAdminsView.as_view(), name="platform-admins"),
     path(
-        "admins/<int:admin_id>/resend/",
+        "admins/<platform_admin:admin_id>/resend/",
         PlatformAdminResendView.as_view(),
         name="platform-admin-resend",
     ),
     path(
-        "admins/<int:admin_id>/deactivate/",
+        "admins/<platform_admin:admin_id>/deactivate/",
         PlatformAdminDeactivateView.as_view(),
         name="platform-admin-deactivate",
     ),
     path(
-        "admins/<int:admin_id>/reactivate/",
+        "admins/<platform_admin:admin_id>/reactivate/",
         PlatformAdminReactivateView.as_view(),
         name="platform-admin-reactivate",
     ),
@@ -86,32 +89,32 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("product-domain/", ProductDomainView.as_view(), name="platform-product-domain"),
     path("consultancies/", ConsultancyListView.as_view(), name="platform-consultancies"),
     path(
-        "consultancies/<int:consultancy_id>/admins/",
+        "consultancies/<consultancy:consultancy_id>/admins/",
         ConsultancyAdminsView.as_view(),
         name="platform-consultancy-admins",
     ),
     path(
-        "consultancies/<int:consultancy_id>/status/",
+        "consultancies/<consultancy:consultancy_id>/status/",
         ConsultancyStatusView.as_view(),
         name="platform-consultancy-status",
     ),
     path(
-        "consultancies/<int:consultancy_id>/retry-setup/",
+        "consultancies/<consultancy:consultancy_id>/retry-setup/",
         ConsultancyRetrySetupView.as_view(),
         name="platform-consultancy-retry-setup",
     ),
     path(
-        "consultancies/<int:consultancy_id>/modules/",
+        "consultancies/<consultancy:consultancy_id>/modules/",
         ConsultancyModulesView.as_view(),
         name="platform-consultancy-modules",
     ),
     path(
-        "consultancies/<int:consultancy_id>/support-visits/",
+        "consultancies/<consultancy:consultancy_id>/support-visits/",
         SupportVisitStartView.as_view(),
         name="platform-support-visit-start",
     ),
     path(
-        "consultancies/<int:consultancy_id>/theme/",
+        "consultancies/<consultancy:consultancy_id>/theme/",
         ConsultancyThemeView.as_view(),
         name="platform-consultancy-theme",
     ),

@@ -6,7 +6,8 @@
 3. `migrate_schemas --tenant`: every Consultancy's schema.
 4. `rebuild_staff_directory`: the Central login's index of Staff emails.
 
-A failing step stops the run (and the deploy keeps the running version). One Python process runs
+A failing step stops the run (and the deploy keeps the running version). Every step runs with a
+lock timeout (ticket 14). One Python process runs
 every step, which keeps the start-up cost low on the micro instance.
 """
 
@@ -17,6 +18,7 @@ from typing import Any
 from django.core.management import call_command
 
 from config.commands import LoggedCommand
+from operations.migration_lock import migration_lock_timeout
 
 STEPS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("migrate_schemas", {"shared": True, "interactive": False}),
@@ -32,6 +34,11 @@ class Command(LoggedCommand):
     help = "Migrate the public schema, ensure the Platform Admin, then migrate every office."
 
     def handle(self, *args: Any, **options: Any) -> None:  # noqa: ANN401  # Django's signature
-        """Run each step in order; the first failure stops the rest."""
-        for name, step_options in STEPS:
-            call_command(name, **step_options)
+        """Run each step in order; the first failure stops the rest.
+
+        A step that would wait on a lock longer than `MIGRATION_LOCK_TIMEOUT_MS` fails instead
+        (ticket 14), so a busy table stops the deploy before the switch.
+        """
+        with migration_lock_timeout():
+            for name, step_options in STEPS:
+                call_command(name, **step_options)

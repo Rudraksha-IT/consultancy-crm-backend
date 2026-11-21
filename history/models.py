@@ -11,6 +11,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
+from config.public_ids import public_id_field
 from history.exceptions import HistoryIsAppendOnlyError
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
@@ -28,11 +29,11 @@ class HistoryKind(models.TextChoices):
     COUNSELLOR_ASSIGNED = "counsellor_assigned", "Counsellor assigned"
     # Before and after are the counsellors' names as they were then.
     TRANSFERRED = "transferred", "Transferred"
-    # After is the amount, purpose and method; `detail` is the receipt number.
+    # After is the amount, Fee Type (with its note) and method; `detail` is empty.
     PAYMENT_RECORDED = "payment_recorded", "Payment recorded"
-    # Before and after name only what changed; `detail` is the receipt number (issue 19).
+    # Before and after name only what changed; `detail` is empty (issue 19).
     PAYMENT_EDITED = "payment_edited", "Payment edited"
-    # Before is the deleted Payment in full; `detail` is the receipt number (issue 19).
+    # Before is the deleted Payment in full; `detail` is empty (issue 19).
     PAYMENT_DELETED = "payment_deleted", "Payment deleted"
     # After is the Fee, e.g. "Visa processing, NPR 40,000" (issue 35).
     FEE_ADDED = "fee_added", "Fee added"
@@ -82,6 +83,9 @@ class AppendOnlyQuerySet(models.QuerySet["HistoryEntry"]):
 
 class HistoryEntry(models.Model):
     """One recorded change to a Student."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="history")
     kind = models.CharField(max_length=KIND_MAX_LENGTH, choices=HistoryKind.choices)

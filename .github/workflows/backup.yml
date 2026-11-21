@@ -1,0 +1,82 @@
+name: Backup
+
+# A database backup from GitHub (ticket 15). The server's own timer makes one every 6 hours; this
+# workflow, every night at about 02:00 Nepal time and whenever someone runs it from the Actions
+# tab, also:
+#   1. checks the server's newest backup is recent (fails, so GitHub emails, if the timer stopped);
+#   2. makes one more backup now (kind `github`), copied to R2 like every other;
+#   3. downloads that encrypted copy and keeps it here as a workflow artifact for 7 days.
+# Copies are encrypted on the server with the backup public key; only the private key, kept
+# offline by the product owner, opens them (deploy/fetch-backup.sh --file <artifact>).
+on:
+  schedule:
+    - cron: "15 20 * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why (kept in the server's backup history)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: production
+    # Never at the same time as a deploy (they share this group), and never cancelled halfway.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    timeout-minutes: 45
+    env:
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cloudflared (only when the server is reached through Cloudflare Access)
+        run: .github/scripts/install-cloudflared.sh
+      - name: Is the newest backup recent
+        id: check
+        continue-on-error: true
+        run: .github/scripts/ssh-request.sh backup-check
+      - name: Back up now
+        id: backup
+        env:
+          DEPLOY_REASON: ${{ inputs.reason || 'nightly backup from GitHub' }}
+        run: |
+          .github/scripts/deploy-over-ssh.sh backup | tee "$RUNNER_TEMP/backup.txt"
+          name="$(sed -n 's/^INFO Backup: \([^ ]*\.dump\.age\) .*/\1/p' "$RUNNER_TEMP/backup.txt" | tail -n 1)"
+          if [ -z "$name" ]; then
+            echo "::error::The server didn't name the backup it made."
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: Download the encrypted copy
+        env:
+          NAME: ${{ steps.backup.outputs.name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/backup"
+          .github/scripts/ssh-request.sh fetch "$NAME" > "$RUNNER_TEMP/backup/$NAME"
+          size="$(stat -c %s "$RUNNER_TEMP/backup/$NAME")"
+          if [ "$size" -lt 1024 ]; then
+            echo "::error::The downloaded copy is too small ($size bytes)."
+            exit 1
+          fi
+          echo "- Artifact: \`$NAME\`, $(numfmt --to=iec --suffix=B "$size"), kept 7 days" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.backup.outputs.name }}
+          path: ${{ runner.temp }}/backup/${{ steps.backup.outputs.name }}
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
+      - name: Fail if the server's timer had stopped
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::The server's newest backup was too old before this run: check 'systemctl status crm-backup.timer' and 'journalctl -t crm-backup' on the server."
+          exit 1

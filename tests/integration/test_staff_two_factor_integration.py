@@ -66,12 +66,12 @@ INJECTION_STRINGS = [
 ]
 
 
-def switch_url(staff_id: int) -> str:
+def switch_url(staff_id: object) -> str:
     """Where an Admin switches someone's two-step login on or off."""
     return f"/api/staff/{staff_id}/two-factor/"
 
 
-def reset_url(staff_id: int) -> str:
+def reset_url(staff_id: object) -> str:
     """Where an Admin resets someone's two-step login."""
     return f"/api/staff/{staff_id}/two-factor/reset/"
 
@@ -193,7 +193,7 @@ class TestLogin:
         body = log_in(abc.new_client(), sita)
 
         assert "access" in body
-        assert body["context"]["staff"]["id"] == sita.pk
+        assert body["context"]["staff"]["id"] == str(sita.public_id)
         assert "two_factor" not in body
 
     def test_switched_on_setup_is_forced_and_no_token_given(self, abc: ConsultancyContext) -> None:
@@ -215,7 +215,7 @@ class TestLogin:
         _, body = finish_setup(client, log_in(client, sita)["challenge"])
 
         assert len(body["recovery_codes"]) == 10
-        assert body["context"]["staff"]["id"] == sita.pk
+        assert body["context"]["staff"]["id"] == str(sita.public_id)
         use_access_token(client, body["access"])
         assert client.get(CONTEXT_URL).status_code == status.HTTP_200_OK
         assert [e.what for e in events_of(abc, sita)] == [EventKind.SET_UP]
@@ -392,10 +392,10 @@ class TestEmployees:
         response = abc.client.get(EMPLOYEES_URL)
 
         by_id = {row["id"]: row for row in response.json()}
-        assert by_id[sita.pk]["two_factor_required"] is True
-        assert by_id[sita.pk]["two_factor_set_up"] is True
-        assert by_id[ram.pk]["two_factor_required"] is False
-        assert by_id[ram.pk]["two_factor_set_up"] is False
+        assert by_id[str(sita.public_id)]["two_factor_required"] is True
+        assert by_id[str(sita.public_id)]["two_factor_set_up"] is True
+        assert by_id[str(ram.public_id)]["two_factor_required"] is False
+        assert by_id[str(ram.public_id)]["two_factor_set_up"] is False
         assert secret not in response.content.decode()
         assert all(code not in response.content.decode() for code in codes)
 
@@ -405,7 +405,7 @@ class TestEmployees:
         sita = abc.add_staff(Role.COUNSELLOR)
         device = logged_in(abc, sita)
 
-        response = abc.client.patch(switch_url(sita.pk), {"required": True}, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["two_factor_required"] is True
@@ -423,7 +423,7 @@ class TestEmployees:
         sita = abc.add_staff(Role.COUNSELLOR)
         set_up(abc, sita)
 
-        response = abc.client.patch(switch_url(sita.pk), {"required": False}, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), {"required": False}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["two_factor_required"] is False
@@ -437,7 +437,7 @@ class TestEmployees:
         sita = abc.add_staff(Role.COUNSELLOR)
         device = logged_in(abc, sita)
 
-        response = abc.client.patch(switch_url(sita.pk), {"required": False}, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), {"required": False}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert device.get(CONTEXT_URL).status_code == status.HTTP_200_OK
@@ -464,7 +464,7 @@ class TestEmployees:
         secret, codes = set_up(abc, sita)
         device = logged_in(abc, sita)
 
-        response = abc.client.post(reset_url(sita.pk), format="json")
+        response = abc.client.post(reset_url(sita.public_id), format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["two_factor_required"] is True
@@ -486,7 +486,7 @@ class TestEmployees:
         set_up(abc, sita)
         require(abc, sita, on=False)
 
-        response = abc.client.post(reset_url(sita.pk), format="json")
+        response = abc.client.post(reset_url(sita.public_id), format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert "access" in log_in(abc.new_client(), sita)
@@ -499,8 +499,8 @@ class TestEmployees:
         sita = office.add_staff(Role.COUNSELLOR, email="sita@abcedu.test")
         office.log_in_as(role)
 
-        switch = office.client.patch(switch_url(sita.pk), {"required": True}, format="json")
-        reset = office.client.post(reset_url(sita.pk), format="json")
+        switch = office.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
+        reset = office.client.post(reset_url(sita.public_id), format="json")
 
         assert switch.status_code == status.HTTP_403_FORBIDDEN
         assert reset.status_code == status.HTTP_403_FORBIDDEN
@@ -514,8 +514,10 @@ class TestEmployees:
         admin = office.log_in_as(Role.ADMIN)
         require(office, admin)
 
-        switch = office.client.patch(switch_url(admin.pk), {"required": False}, format="json")
-        reset = office.client.post(reset_url(admin.pk), format="json")
+        switch = office.client.patch(
+            switch_url(admin.public_id), {"required": False}, format="json"
+        )
+        reset = office.client.post(reset_url(admin.public_id), format="json")
 
         assert switch.status_code == status.HTTP_403_FORBIDDEN
         assert "My settings" in switch.json()["detail"]
@@ -527,8 +529,8 @@ class TestEmployees:
         with tenant_context(abc.consultancy):
             Staff.objects.filter(pk=sita.pk).update(status=StaffStatus.DEACTIVATED)
 
-        switch = abc.client.patch(switch_url(sita.pk), {"required": True}, format="json")
-        reset = abc.client.post(reset_url(sita.pk), format="json")
+        switch = abc.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
+        reset = abc.client.post(reset_url(sita.public_id), format="json")
 
         assert switch.status_code == status.HTTP_400_BAD_REQUEST
         assert reset.status_code == status.HTTP_400_BAD_REQUEST
@@ -544,7 +546,7 @@ class TestEmployees:
         settings.TWO_FACTOR_SECRETS_KEY = ""
         sita = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.patch(switch_url(sita.pk), {"required": True}, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored(abc, sita).two_factor_required is False
@@ -564,7 +566,7 @@ class TestEmployees:
     def test_refused_input(self, abc: ConsultancyContext, body: dict[str, object]) -> None:
         sita = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.patch(switch_url(sita.pk), body, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored(abc, sita).two_factor_required is False
@@ -572,17 +574,17 @@ class TestEmployees:
     def test_reset_takes_no_body(self, abc: ConsultancyContext) -> None:
         sita = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.post(reset_url(sita.pk), {"anything": 1}, format="json")
+        response = abc.client.post(reset_url(sita.public_id), {"anything": 1}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_only_the_needed_methods(self, abc: ConsultancyContext) -> None:
         sita = abc.add_staff(Role.COUNSELLOR)
 
-        assert abc.client.get(switch_url(sita.pk)).status_code == 405
-        assert abc.client.post(switch_url(sita.pk), {}, format="json").status_code == 405
-        assert abc.client.get(reset_url(sita.pk)).status_code == 405
-        assert abc.client.delete(reset_url(sita.pk)).status_code == 405
+        assert abc.client.get(switch_url(sita.public_id)).status_code == 405
+        assert abc.client.post(switch_url(sita.public_id), {}, format="json").status_code == 405
+        assert abc.client.get(reset_url(sita.public_id)).status_code == 405
+        assert abc.client.delete(reset_url(sita.public_id)).status_code == 405
 
     def test_a_platform_admin_visitor_can_switch_and_reset_marked_as_platform_admin(
         self, abc: ConsultancyContext, platform_site: PlatformContext
@@ -590,8 +592,8 @@ class TestEmployees:
         sita = abc.add_staff(Role.COUNSELLOR)
         visit = open_as_platform_admin(platform_site, abc)
 
-        switch = visit.client.patch(switch_url(sita.pk), {"required": True}, format="json")
-        reset = visit.client.post(reset_url(sita.pk), format="json")
+        switch = visit.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
+        reset = visit.client.post(reset_url(sita.public_id), format="json")
 
         assert switch.status_code == status.HTTP_200_OK
         assert reset.status_code == status.HTTP_200_OK
@@ -765,7 +767,7 @@ class TestMySettings:
         answer = logged_in(abc, sita).post(MINE_URL, {"action": "on"}, format="json").json()
         _, body = finish_setup(abc.new_client(), answer["challenge"])
 
-        response = abc.client.patch(switch_url(sita.pk), {"required": True}, format="json")
+        response = abc.client.patch(switch_url(sita.public_id), {"required": True}, format="json")
 
         device = abc.new_client()
         use_access_token(device, body["access"])
@@ -863,7 +865,11 @@ class TestEnvDefault:
         platform_site.log_in()
         response = platform_site.client.post(
             "/api/platform/consultancies/",
-            {"name": "Everest Education", "subdomain": "everest"},
+            {
+                "name": "Everest Education",
+                "subdomain": "everest",
+                "contact_email": "info@everest.test",
+            },
             format="json",
         )
         assert response.status_code == status.HTTP_202_ACCEPTED, response.content

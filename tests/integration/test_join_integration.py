@@ -49,7 +49,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 
 @pytest.fixture
-def invited(abc: ConsultancyContext) -> int:
+def invited(abc: ConsultancyContext) -> str:
     """Invite Sita as a Counsellor and return her id; her Code is the last email."""
     admin_client = abc.new_client()
     use_access_token(admin_client, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
@@ -63,7 +63,7 @@ def invited(abc: ConsultancyContext) -> int:
     }
     response = admin_client.post(STAFF_URL, body, format="json")
     assert response.status_code == status.HTTP_201_CREATED
-    staff_id: int = response.json()["id"]
+    staff_id: str = response.json()["id"]
     return staff_id
 
 
@@ -93,10 +93,10 @@ def complete(
     )
 
 
-def stored(consultancy: ConsultancyContext, staff_id: int) -> Staff:
+def stored(consultancy: ConsultancyContext, staff_id: str) -> Staff:
     """The Staff member as stored."""
     with tenant_context(consultancy.consultancy):
-        return Staff.objects.get(pk=staff_id)
+        return Staff.objects.get(public_id=staff_id)
 
 
 @pytest.mark.usefixtures("invited")
@@ -133,7 +133,7 @@ class TestCheckCode:
 
 class TestJoin:
     def test_joining_activates_the_account_and_logs_them_in(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         response = complete(abc, emailed_code())
 
@@ -145,7 +145,7 @@ class TestJoin:
         assert stored(abc, invited).status == StaffStatus.ACTIVE
 
     def test_joining_names_the_device_from_the_browser(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         """Issue 71: joining is a login, so its device is named too."""
         abc.client.defaults["HTTP_X_BROWSER_AGENT"] = (
@@ -158,7 +158,7 @@ class TestJoin:
         assert abc.client.get("/api/me/devices/").json()[0]["name"] == "Firefox on Linux"
 
     def test_they_can_then_log_in_with_their_password(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         complete(abc, emailed_code())
 
@@ -166,7 +166,7 @@ class TestJoin:
 
         assert login.status_code == status.HTTP_200_OK
 
-    def test_the_code_works_only_once(self, abc: ConsultancyContext, invited: int) -> None:
+    def test_the_code_works_only_once(self, abc: ConsultancyContext, invited: str) -> None:
         code = emailed_code()
         complete(abc, code)
 
@@ -176,7 +176,7 @@ class TestJoin:
         assert response.json() == CODE_REFUSED
 
     def test_a_reset_code_cannot_be_used_to_join(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         post(abc.client, "/api/auth/password-reset/", {"email": EMAIL})
 
@@ -186,7 +186,7 @@ class TestJoin:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_a_weak_password_returns_the_unmet_rules_and_keeps_the_code(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         code = emailed_code()
 
@@ -212,21 +212,21 @@ class TestJoin:
         login = post(abc.new_client(), LOGIN_URL, {"email": EMAIL, "password": TEST_PASSWORD})
         assert login.status_code == status.HTTP_200_OK
 
-    def test_a_cancelled_invite_cannot_be_used(self, abc: ConsultancyContext, invited: int) -> None:
+    def test_a_cancelled_invite_cannot_be_used(self, abc: ConsultancyContext, invited: str) -> None:
         code = emailed_code()
         with tenant_context(abc.consultancy):
-            Staff.objects.filter(pk=invited).delete()
+            Staff.objects.filter(public_id=invited).delete()
 
         assert complete(abc, code).json() == CODE_REFUSED
 
     def test_joining_is_logged_with_ids_only(
-        self, abc: ConsultancyContext, invited: int, json_logs: JsonLogs
+        self, abc: ConsultancyContext, invited: str, json_logs: JsonLogs
     ) -> None:
         code = emailed_code()
 
         complete(abc, code)
 
-        json_logs.only(f"Employee joined: staff_id={invited}")
+        json_logs.only(f"Employee joined: staff_id={stored(abc, invited).pk}")
         assert "sita" not in json_logs.text().lower()
         assert code not in json_logs.text()
         assert NEW_PASSWORD not in json_logs.text()
@@ -294,7 +294,7 @@ class TestRefusedInput:
         ],
     )
     def test_bad_bodies_are_refused(
-        self, abc: ConsultancyContext, invited: int, body: object
+        self, abc: ConsultancyContext, invited: str, body: object
     ) -> None:
         response = post(abc.client, COMPLETE_URL, body)
 
@@ -303,7 +303,7 @@ class TestRefusedInput:
         assert stored(abc, invited).role == Role.COUNSELLOR
 
     def test_a_password_with_markup_is_stored_only_as_a_hash(
-        self, abc: ConsultancyContext, invited: int
+        self, abc: ConsultancyContext, invited: str
     ) -> None:
         password = "<script>A1!</script>"  # noqa: S105
 

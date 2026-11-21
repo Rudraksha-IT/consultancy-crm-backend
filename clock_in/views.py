@@ -10,6 +10,8 @@ Working Day; a Platform Admin never clocks (they are not Staff).
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -235,14 +237,14 @@ class MonthView(APIView):
         )
 
     @staticmethod
-    def _whose(viewer: Staff, staff_id: int | None) -> Staff:
-        if staff_id is None or staff_id == viewer.pk:
+    def _whose(viewer: Staff, staff_id: UUID | None) -> Staff:
+        if staff_id is None or staff_id == viewer.public_id:
             if is_platform_visitor(viewer):
                 raise PermissionDenied(PLATFORM_CANT_CLOCK_MESSAGE)
             return viewer
         if why_cannot_manage_working_hours(viewer) is not None:
             raise PermissionDenied(SOMEONE_ELSES_HOURS_MESSAGE)
-        found = Staff.objects.exclude(status=StaffStatus.INVITED).filter(pk=staff_id).first()
+        found = Staff.objects.exclude(status=StaffStatus.INVITED).filter(public_id=staff_id).first()
         if found is None:
             raise NotFound
         return found

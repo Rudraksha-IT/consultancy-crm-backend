@@ -34,6 +34,9 @@ from tests.integration.test_consultancy_status_integration import set_status
 from tests.integration.test_stage_and_counsellor_integration import INJECTION_STRINGS
 from tests.support_access import open_as_platform_admin
 
+# A record UUID that no office has (ADR 0027).
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
 if TYPE_CHECKING:
     from rest_framework.response import _MonkeyPatchedResponse
     from rest_framework.test import APIClient
@@ -137,7 +140,7 @@ def corrections(office: ConsultancyContext) -> list[WorkSessionChange]:
         return list(WorkSessionChange.objects.order_by("pk"))
 
 
-def holiday_url(holiday_id: int) -> str:
+def holiday_url(holiday_id: object) -> str:
     """One holiday."""
     return f"/api/clock/holidays/{holiday_id}/"
 
@@ -154,12 +157,12 @@ def add_holiday(office: ConsultancyContext, day: date, name: str) -> Holiday:
         return Holiday.objects.create(day=day, name=name)
 
 
-def clock_out_url(session_id: int) -> str:
+def clock_out_url(session_id: object) -> str:
     """Set a missing clock-out on one Work Session."""
     return f"/api/clock/sessions/{session_id}/clock-out/"
 
 
-def missed_time_url(staff_id: int) -> str:
+def missed_time_url(staff_id: object) -> str:
     """Add missed time to one Staff member's day."""
     return f"/api/clock/staff/{staff_id}/missed-time/"
 
@@ -286,6 +289,7 @@ class TestClockingIn:
         assert OFFICE_ADDRESS not in str(sessions(abc))
         assert {field.name for field in WorkSession._meta.get_fields()} == {
             "id",
+            "public_id",
             "staff",
             "clocked_in_at",
             "clocked_out_at",
@@ -367,7 +371,10 @@ class TestMyClock:
 
         body = abc.client.get(CLOCK_URL).json()
 
-        assert body["open"] == {"id": open_one.pk, "clocked_in_at": iso(at(TODAY, 9, 30))}
+        assert body["open"] == {
+            "id": str(open_one.public_id),
+            "clocked_in_at": iso(at(TODAY, 9, 30)),
+        }
         assert body["today_minutes"] == 60 + 90
         assert body["last_out"] == iso(at(TODAY, 8))
 
@@ -415,7 +422,12 @@ class TestMyMonth:
         assert body["month"] == "2026-11"
         assert body["today"] == TODAY.isoformat()
         assert body["working_day_minutes"] == 480
-        assert body["staff"] == {"id": me.pk, "name": me.name, "job_title": "", "has_left": False}
+        assert body["staff"] == {
+            "id": str(me.public_id),
+            "name": me.name,
+            "job_title": "",
+            "has_left": False,
+        }
         assert len(body["days"]) == 30
         assert body["figures"] == {
             "days_worked": 4,
@@ -506,7 +518,7 @@ class TestMyMonth:
         other = abc.add_staff(Role.ADMIN, email="boss@abc.test")
         abc.log_in_as(role)
 
-        response = abc.client.get(MONTH_URL, {"staff": other.pk})
+        response = abc.client.get(MONTH_URL, {"staff": str(other.public_id)})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == SOMEONE_ELSES
@@ -520,7 +532,7 @@ class TestMyMonth:
             Staff.objects.filter(pk=other.pk).update(status=StaffStatus.DEACTIVATED)
         abc.log_in_as(Role.ADMIN)
 
-        body = abc.client.get(MONTH_URL, {"staff": other.pk}).json()
+        body = abc.client.get(MONTH_URL, {"staff": str(other.public_id)}).json()
 
         assert body["staff"]["has_left"] is True
         assert body["figures"]["days_worked"] == 1
@@ -541,7 +553,7 @@ class TestMyMonth:
             Staff.objects.filter(pk=invited.pk).update(status=StaffStatus.INVITED)
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.get(MONTH_URL, {"staff": invited.pk})
+        response = abc.client.get(MONTH_URL, {"staff": str(invited.public_id)})
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -565,12 +577,12 @@ class TestWhoIsInNow:
         assert body["clocked_in_count"] == 1
         assert body["office_network"] == "on"
         people = {p["id"]: p for p in body["people"]}
-        assert set(people) == {admin.pk, sita.pk, hari.pk}
-        assert people[sita.pk]["state"] == "in"
-        assert people[sita.pk]["since"] == iso(at(TODAY, 9, 2))
-        assert people[hari.pk]["state"] == "left"
-        assert people[hari.pk]["left_at"] == iso(at(TODAY, 10))
-        assert people[admin.pk]["state"] == "not_in"
+        assert set(people) == {str(admin.public_id), str(sita.public_id), str(hari.public_id)}
+        assert people[str(sita.public_id)]["state"] == "in"
+        assert people[str(sita.public_id)]["since"] == iso(at(TODAY, 9, 2))
+        assert people[str(hari.public_id)]["state"] == "left"
+        assert people[str(hari.public_id)]["left_at"] == iso(at(TODAY, 10))
+        assert people[str(admin.public_id)]["state"] == "not_in"
 
 
 class TestTeamMonth:
@@ -596,16 +608,21 @@ class TestTeamMonth:
         assert body["month"] == "2026-11"
         assert body["working_day_minutes"] == 480
         rows = {row["staff"]["id"]: row for row in body["rows"]}
-        assert set(rows) == {admin.pk, sita.pk, left_worked.pk}
-        assert rows[sita.pk] == {
-            "staff": {"id": sita.pk, "name": sita.name, "job_title": "", "has_left": False},
+        assert set(rows) == {str(s.public_id) for s in (admin, sita, left_worked)}
+        assert rows[str(sita.public_id)] == {
+            "staff": {
+                "id": str(sita.public_id),
+                "name": sita.name,
+                "job_title": "",
+                "has_left": False,
+            },
             "days_worked": 2,
             "minutes": 240,
             "short_days": 1,
             "missing_clock_outs": 1,
             "corrected": 0,
         }
-        assert rows[left_worked.pk]["staff"]["has_left"] is True
+        assert rows[str(left_worked.public_id)]["staff"]["has_left"] is True
 
     def test_a_bad_month_is_refused(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -739,13 +756,13 @@ class TestWeeklyDaysOff:
         team = abc.client.get(TEAM_URL, {"month": "2026-10"})
         assert team.status_code == status.HTTP_200_OK
         added = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-10-31", "from": "09:00", "to": "12:00", "reason": "Office open."},
             format="json",
         )
         assert added.status_code == status.HTTP_201_CREATED, added.json()
         refused = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-11-01", "from": "09:00", "to": "12:00", "reason": "x"},
             format="json",
         )
@@ -911,10 +928,12 @@ class TestHolidays:
         forgotten = worked(abc, sita, at(TUESDAY, 9), not_clocked_out=True)
 
         set_out = abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "12:00", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "12:00", "reason": "x"},
+            format="json",
         )
         added = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-11-03", "from": "13:00", "to": "14:00", "reason": "x"},
             format="json",
         )
@@ -933,7 +952,7 @@ class TestHolidays:
         abc.log_in_as(Role.ADMIN)
         dashain = add_holiday(abc, date(2026, 10, 21), "Dashain")
 
-        response = abc.client.delete(holiday_url(dashain.pk))
+        response = abc.client.delete(holiday_url(dashain.public_id))
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert holidays(abc) == []
@@ -1027,11 +1046,13 @@ class TestHolidays:
         added = abc.client.post(
             HOLIDAYS_URL, {"date": "2026-10-21", "name": "Dashain"}, format="json"
         ).json()
+        with tenant_context(abc.consultancy):
+            number = Holiday.objects.get(public_id=added["id"]).pk  # logs keep the number
         abc.client.delete(holiday_url(added["id"]))
 
         messages = [entry["message"] for entry in json_logs.entries()]
-        assert f"Holiday added: holiday_id={added['id']}" in messages
-        assert f"Holiday removed: holiday_id={added['id']}" in messages
+        assert f"Holiday added: holiday_id={number}" in messages
+        assert f"Holiday removed: holiday_id={number}" in messages
         assert not any("Dashain" in message for message in messages)
 
 
@@ -1044,7 +1065,7 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9, 2), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk),
+            clock_out_url(forgotten.public_id),
             {"clocked_out_at": "17:00", "reason": "Forgot to clock out. Left at 5 PM."},
             format="json",
         )
@@ -1057,7 +1078,7 @@ class TestSettingAMissingClockOut:
         assert change.reason == "Forgot to clock out. Left at 5 PM."
         assert (change.by_staff_id, change.by_name, change.at) == (admin.pk, "Test Admin", NOW)
         assert response.json() == {
-            "id": change.pk,
+            "id": str(change.public_id),
             "day": "2026-11-04",
             "before": "In 9:02 AM, no clock-out",
             "after": "Out 5:00 PM",
@@ -1073,7 +1094,7 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
         abc.log_in_as(Role.ADMIN)
         abc.client.post(
-            clock_out_url(forgotten.pk),
+            clock_out_url(forgotten.public_id),
             {"clocked_out_at": "16:00", "reason": "Left at four."},
             format="json",
         )
@@ -1100,7 +1121,7 @@ class TestSettingAMissingClockOut:
         visitor = open_as_platform_admin(platform_site, abc).client
 
         response = visitor.post(
-            clock_out_url(forgotten.pk),
+            clock_out_url(forgotten.public_id),
             {"clocked_out_at": "17:00", "reason": "Asked by the office."},
             format="json",
         )
@@ -1119,7 +1140,7 @@ class TestSettingAMissingClockOut:
         done = worked(abc, sita, at(WEDNESDAY, 9), at(WEDNESDAY, 12))
 
         response = abc.client.post(
-            clock_out_url(done.pk), {"clocked_out_at": "13:00", "reason": "x"}, format="json"
+            clock_out_url(done.public_id), {"clocked_out_at": "13:00", "reason": "x"}, format="json"
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -1132,10 +1153,10 @@ class TestSettingAMissingClockOut:
         sita = abc.add_staff(Role.COUNSELLOR, email="sita@abc.test")
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
         body = {"clocked_out_at": "12:00", "reason": "Left at noon."}
-        abc.client.post(clock_out_url(forgotten.pk), body, format="json")
+        abc.client.post(clock_out_url(forgotten.public_id), body, format="json")
 
         again = abc.client.post(
-            clock_out_url(forgotten.pk), {**body, "clocked_out_at": "13:00"}, format="json"
+            clock_out_url(forgotten.public_id), {**body, "clocked_out_at": "13:00"}, format="json"
         )
 
         assert again.status_code == status.HTTP_400_BAD_REQUEST
@@ -1147,7 +1168,9 @@ class TestSettingAMissingClockOut:
         open_now = worked(abc, sita, at(TODAY, 9))
 
         response = abc.client.post(
-            clock_out_url(open_now.pk), {"clocked_out_at": "10:00", "reason": "x"}, format="json"
+            clock_out_url(open_now.public_id),
+            {"clocked_out_at": "10:00", "reason": "x"},
+            format="json",
         )
 
         assert response.json() == {"detail": "Only a past day can be corrected."}
@@ -1158,7 +1181,9 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(SATURDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "12:00", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "12:00", "reason": "x"},
+            format="json",
         )
 
         assert response.json() == {"detail": "Saturday is off, so it can't be corrected."}
@@ -1169,7 +1194,9 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "08:00", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "08:00", "reason": "x"},
+            format="json",
         )
 
         assert response.json() == {"detail": "The end must be after the start."}
@@ -1181,7 +1208,9 @@ class TestSettingAMissingClockOut:
         worked(abc, sita, at(WEDNESDAY, 13), at(WEDNESDAY, 15))
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "14:00", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "14:00", "reason": "x"},
+            format="json",
         )
 
         assert response.json() == {"detail": "That overlaps time already recorded on this day."}
@@ -1194,7 +1223,9 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "17:40", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "17:40", "reason": "x"},
+            format="json",
         )
 
         assert response.json() == {
@@ -1240,7 +1271,7 @@ class TestSettingAMissingClockOut:
         sita = abc.add_staff(Role.COUNSELLOR, email="sita@abc.test")
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
-        response = abc.client.post(clock_out_url(forgotten.pk), body, format="json")
+        response = abc.client.post(clock_out_url(forgotten.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json()[field] == [message]
@@ -1252,7 +1283,7 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk),
+            clock_out_url(forgotten.public_id),
             {"clocked_out_at": "17:00", "reason": "x", "clocked_in_at": "07:00"},
             format="json",
         )
@@ -1269,7 +1300,7 @@ class TestSettingAMissingClockOut:
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            clock_out_url(forgotten.pk),
+            clock_out_url(forgotten.public_id),
             {"clocked_out_at": "17:00", "reason": reason},
             format="json",
         )
@@ -1282,7 +1313,9 @@ class TestSettingAMissingClockOut:
         sita = abc.add_staff(Role.COUNSELLOR, email="sita@abc.test")
         forgotten = worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
         abc.client.post(
-            clock_out_url(forgotten.pk), {"clocked_out_at": "17:00", "reason": "x"}, format="json"
+            clock_out_url(forgotten.public_id),
+            {"clocked_out_at": "17:00", "reason": "x"},
+            format="json",
         )
 
         with tenant_context(abc.consultancy):
@@ -1301,7 +1334,7 @@ class TestAddingMissedTime:
         sita = abc.add_staff(Role.COUNSELLOR, email="sita@abc.test")
 
         response = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-11-04", "from": "09:00", "to": "17:00", "reason": "Phone was flat."},
             format="json",
         )
@@ -1323,7 +1356,7 @@ class TestAddingMissedTime:
         worked(abc, sita, at(WEDNESDAY, 9), at(WEDNESDAY, 13))
 
         response = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-11-04", "from": "14:00", "to": "18:00", "reason": "Client visit."},
             format="json",
         )
@@ -1364,7 +1397,7 @@ class TestAddingMissedTime:
         before = sessions(abc)
 
         response = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": day, "from": start, "to": end, "reason": "x"},
             format="json",
         )
@@ -1380,7 +1413,7 @@ class TestAddingMissedTime:
         worked(abc, sita, at(WEDNESDAY, 9), not_clocked_out=True)
 
         response = abc.client.post(
-            missed_time_url(sita.pk),
+            missed_time_url(sita.public_id),
             {"day": "2026-11-04", "from": "07:00", "to": "08:00", "reason": "x"},
             format="json",
         )
@@ -1405,7 +1438,7 @@ class TestAddingMissedTime:
         abc.log_in_as(Role.ADMIN)
         sita = abc.add_staff(Role.COUNSELLOR, email="sita@abc.test")
 
-        response = abc.client.post(missed_time_url(sita.pk), body, format="json")
+        response = abc.client.post(missed_time_url(sita.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert field in response.json()
@@ -1515,9 +1548,9 @@ ADMIN_ENDPOINTS = [
     ("put", WORKING_DAY_URL),
     ("get", HOLIDAYS_URL),
     ("post", HOLIDAYS_URL),
-    ("delete", holiday_url(1)),
-    ("post", clock_out_url(1)),
-    ("post", missed_time_url(1)),
+    ("delete", holiday_url(SOME_UUID)),
+    ("post", clock_out_url(SOME_UUID)),
+    ("post", missed_time_url(SOME_UUID)),
 ]
 
 
@@ -1526,8 +1559,13 @@ def call(client: APIClient, method: str, url: str) -> _MonkeyPatchedResponse:
     bodies: dict[str, dict[str, object]] = {
         WORKING_DAY_URL: {"minutes": 450},
         HOLIDAYS_URL: {"date": "2026-10-21", "name": "Dashain"},
-        clock_out_url(1): {"clocked_out_at": "17:00", "reason": "x"},
-        missed_time_url(1): {"day": "2026-11-04", "from": "09:00", "to": "10:00", "reason": "x"},
+        clock_out_url(SOME_UUID): {"clocked_out_at": "17:00", "reason": "x"},
+        missed_time_url(SOME_UUID): {
+            "day": "2026-11-04",
+            "from": "09:00",
+            "to": "10:00",
+            "reason": "x",
+        },
     }
     if method in {"post", "put"}:
         response: _MonkeyPatchedResponse = getattr(client, method)(
@@ -1604,12 +1642,12 @@ class TestWhoMay:
             ("post", MONTH_URL),
             ("delete", WORKING_DAY_URL),
             ("post", TEAM_URL),
-            ("get", clock_out_url(1)),
-            ("delete", missed_time_url(1)),
+            ("get", clock_out_url(SOME_UUID)),
+            ("delete", missed_time_url(SOME_UUID)),
             ("put", HOLIDAYS_URL),
             ("delete", HOLIDAYS_URL),
-            ("get", holiday_url(1)),
-            ("put", holiday_url(1)),
+            ("get", holiday_url(SOME_UUID)),
+            ("put", holiday_url(SOME_UUID)),
         ],
     )
     def test_only_the_methods_needed_are_allowed(

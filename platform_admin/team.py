@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
@@ -62,7 +63,7 @@ class TeamChangeRefusedError(Exception):
 class PlatformAdminRow:
     """One Platform Admin on the tab; never a password or secret."""
 
-    id: int
+    id: UUID
     name: str
     email: str
     status: PlatformAdminStatus
@@ -83,7 +84,7 @@ def status_of(admin: PlatformAdmin) -> PlatformAdminStatus:
 def row_of(admin: PlatformAdmin, me: PlatformAdmin) -> PlatformAdminRow:
     """`admin` as the tab shows it to `me`."""
     return PlatformAdminRow(
-        id=admin.pk,
+        id=admin.public_id,
         name=str(admin.name),
         email=str(admin.email),
         status=status_of(admin),

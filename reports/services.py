@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from uuid import UUID
 
 from django.db.models import Count, Q, QuerySet, Sum
 from django.utils import timezone
@@ -84,6 +85,8 @@ class MoneyReport:
 
     months: list[MoneyMonth]
     money_out_by_category: list[tuple[ExpenseCategory, int]]
+    # Money in from Students over all the months, per Fee Type: (id, name, amount), most first.
+    money_in_by_fee_type: list[tuple[UUID, str, int]]
 
 
 @dataclass(frozen=True)
@@ -305,16 +308,23 @@ def money_report(month_count: int) -> MoneyReport:
     """Money in and out in each of the last `month_count` months, this one last.
 
     Money in is Payments (on the day paid) and Commission Received (on the day received); money
-    out is Expenses (on the day spent), also added up by category over all the months.
+    out is Expenses (on the day spent), also added up by category over all the months. Payments
+    are also added up by Fee Type over all the months.
     """
     months = months_back(timezone.localdate(), month_count)
+    payments = Payment.objects.filter(_days_of(months, "paid_on")).order_by()
+    per_fee_type = (
+        payments.values_list("fee_type__public_id", "fee_type__name", "fee_type__position")
+        .annotate(amount=Sum("amount"))
+        .order_by("-amount", "fee_type__position", "fee_type_id")
+    )
     received = Commission.objects.filter(status=CommissionStatus.RECEIVED)
     expenses = Expense.objects.filter(_days_of(months, "spent_on")).order_by()
     per_category = expenses.values_list("category").annotate(amount=Sum("amount"))
     return MoneyReport(
         months=money_months(
             months,
-            payments=_per_day(Payment.objects.filter(_days_of(months, "paid_on")), "paid_on"),
+            payments=_per_day(payments, "paid_on"),
             commission=_per_day(received.filter(_days_of(months, "received_on")), "received_on"),
             expenses=_per_day(expenses, "spent_on"),
         ),
@@ -322,4 +332,7 @@ def money_report(month_count: int) -> MoneyReport:
             (category, int(amount))
             for category, amount in per_category.values_list("category", "amount")
         ),
+        money_in_by_fee_type=[
+            (type_id, name, int(amount)) for type_id, name, _, amount in per_fee_type
+        ],
     )

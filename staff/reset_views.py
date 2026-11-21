@@ -55,8 +55,7 @@ class ResetRequestView(_OpenView):
         """Answer the same whether or not anyone has that email."""
         serializer = ResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        office = str(get_request_consultancy(request).name)
-        send_reset_code(serializer.validated_data["email"], office)
+        send_reset_code(serializer.validated_data["email"], get_request_consultancy(request))
         return Response({"detail": CODE_SENT_MESSAGE}, status=status.HTTP_202_ACCEPTED)
 
 

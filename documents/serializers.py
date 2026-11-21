@@ -6,6 +6,7 @@ An upload is checked from its bytes: the browser's file name and type are never 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.core.files.uploadedfile import UploadedFile
 from django.db.models import Model
@@ -14,7 +15,7 @@ from rest_framework import serializers
 
 from applications.models import Application, Visa
 from applications.statuses import OfferKind, VisaStatus
-from config.serializers import StrictSerializer
+from config.serializers import RecordIdField, StrictSerializer, parse_record_id
 from documents.files import (
     MAX_DOCUMENT_BYTES,
     MAX_FILES_AT_ONCE,
@@ -70,7 +71,6 @@ SCOPE_MINE = "mine"
 SCOPE_EVERYONE = "everyone"
 OPEN = "open"
 DOWNLOAD = "download"
-_ID_DIGITS = 18
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "max_length")
 
 
@@ -144,35 +144,29 @@ class DocumentTypeChangeSerializer(StrictSerializer[None]):
         return bool(self.validated_data["needed_by_everyone"])
 
 
-def _form_id(data: object) -> int | None:
-    """A whole number sent as text in a form, or None when it isn't one."""
-    text = data if isinstance(data, str) else ""
-    if not (text.isascii() and text.isdecimal() and len(text) <= _ID_DIGITS):
-        return None
-    return int(text)
-
-
-class DocumentTypeField(serializers.Field[DocumentType, int, int, Any]):
-    """A Document Type by its id: a whole number, sent as text in a form upload."""
+class DocumentTypeField(serializers.Field[DocumentType, str, str, Any]):
+    """A Document Type by its UUID (ADR 0027), sent as text in a form upload."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(CHOOSE_TYPE_MESSAGE))
 
     def to_internal_value(self, data: object) -> DocumentType:
         """Return the type; anything that isn't one of this Consultancy's is refused."""
-        pk = _form_id(data)
-        found = None if pk is None else DocumentType.objects.filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        found = (
+            None if public_id is None else DocumentType.objects.filter(public_id=public_id).first()
+        )
         if found is None:
             self.fail("invalid")
         return found
 
-    def to_representation(self, value: DocumentType) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return int(value.pk)
+    def to_representation(self, value: DocumentType) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.public_id)
 
 
-class StudentRecordField[M: Model](serializers.Field[M, int, int, Any]):
-    """One of the uploading Student's own Applications or Visas, by id (spec 66). Optional.
+class StudentRecordField[M: Model](serializers.Field[M, str, str, Any]):
+    """One of the uploading Student's own Applications or Visas, by UUID (spec 66). Optional.
 
     The Student comes from the serializer's context; anyone else's record is refused.
     """
@@ -184,19 +178,19 @@ class StudentRecordField[M: Model](serializers.Field[M, int, int, Any]):
     def to_internal_value(self, data: object) -> M:
         """Return the record, if it is this Student's."""
         student: Student = self.context["student"]
-        pk = _form_id(data)
+        public_id = parse_record_id(data)
         found = (
             None
-            if pk is None
-            else self.model._default_manager.filter(pk=pk, student=student).first()
+            if public_id is None
+            else self.model._default_manager.filter(public_id=public_id, student=student).first()
         )
         if found is None:
             self.fail("invalid")
         return found
 
-    def to_representation(self, value: M) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return int(value.pk)
+    def to_representation(self, value: M) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.serializable_value("public_id"))
 
 
 class DocumentFileField(serializers.Field[Upload, Upload, None, Any]):
@@ -461,7 +455,6 @@ class PaperworkQuerySerializer(StrictSerializer[None]):
 PICKED_NAME_MAX_LENGTH = 80
 CHOOSE_TYPES_MESSAGE = "Choose documents from the list."
 CHOOSE_EACH_ONCE_MESSAGE = "Choose each document only once."
-_LARGEST_ID = 2**63 - 1
 # Only this many items are looked at before a list too long is refused.
 _LIST_LIMIT = MAX_DOCUMENT_TYPES + 1
 
@@ -470,8 +463,8 @@ def _everyone_needs_message(name: str) -> str:
     return f"{name} is already needed by every Student."
 
 
-class DocumentTypeListField(serializers.Field[list[DocumentType], list[int], list[int], Any]):
-    """Document Types by id, each once, none that every Student needs (issue 40).
+class DocumentTypeListField(serializers.Field[list[DocumentType], list[str], list[str], Any]):
+    """Document Types by UUID, each once, none that every Student needs (issue 40).
 
     The order kept is the Consultancy's own (oldest type first), whatever order was sent.
     """
@@ -482,7 +475,7 @@ class DocumentTypeListField(serializers.Field[list[DocumentType], list[int], lis
     def to_internal_value(self, data: object) -> list[DocumentType]:
         """Return the types, or refuse the whole list."""
         ids = self._ids(data)
-        found = list(DocumentType.objects.filter(pk__in=ids).order_by("pk"))
+        found = list(DocumentType.objects.filter(public_id__in=ids).order_by("pk"))
         if len(found) != len(ids):
             self.fail("invalid")
         needed = next((t for t in found if t.needed_by_everyone), None)
@@ -490,23 +483,24 @@ class DocumentTypeListField(serializers.Field[list[DocumentType], list[int], lis
             raise serializers.ValidationError(_everyone_needs_message(needed.name))
         return found
 
-    def _ids(self, data: object) -> list[int]:
-        """A list of whole numbers, each once, no longer than an office's types can be."""
+    def _ids(self, data: object) -> list[UUID]:
+        """A list of UUIDs, each once, no longer than an office's types can be."""
         if not isinstance(data, list) or not all(_is_id(item) for item in data[:_LIST_LIMIT]):
             self.fail("invalid")
         if len(data) > MAX_DOCUMENT_TYPES:
             raise serializers.ValidationError(f"Choose at most {MAX_DOCUMENT_TYPES} documents.")
-        if len(set(data)) != len(data):
+        ids = [UUID(item) for item in data]
+        if len(set(ids)) != len(ids):
             raise serializers.ValidationError(CHOOSE_EACH_ONCE_MESSAGE)
-        return data
+        return ids
 
-    def to_representation(self, value: list[DocumentType]) -> list[int]:
-        """Return the ids (unused: answers are built by hand)."""
-        return [int(document_type.pk) for document_type in value]
+    def to_representation(self, value: list[DocumentType]) -> list[str]:
+        """Return the UUIDs (unused: answers are built by hand)."""
+        return [str(document_type.public_id) for document_type in value]
 
 
 def _is_id(item: object) -> bool:
-    return type(item) is int and 0 < item <= _LARGEST_ID
+    return parse_record_id(item) is not None
 
 
 class DocumentTypeListSerializer(StrictSerializer[None]):
@@ -521,23 +515,10 @@ class DocumentTypeListSerializer(StrictSerializer[None]):
 
 
 class ListedTypeSerializer(StrictSerializer[None]):
-    """One row of a Country's list: a Document Type by id and the group it goes in."""
+    """One row of a Country's list: a Document Type by UUID and the group it goes in."""
 
-    document_type = serializers.IntegerField(
-        min_value=1,
-        max_value=_LARGEST_ID,
-        error_messages=dict.fromkeys(
-            ("required", "null", "invalid", "min_value", "max_value", "max_string_length"),
-            CHOOSE_TYPES_MESSAGE,
-        ),
-    )
+    document_type = RecordIdField(CHOOSE_TYPES_MESSAGE)
     group = _group_field(required=True)
-
-    def to_internal_value(self, data: object) -> dict[str, object]:
-        """Refuse an id sent as anything but a whole number (DRF would take "1" or 1.0)."""
-        if isinstance(data, dict) and "document_type" in data and not _is_id(data["document_type"]):
-            raise serializers.ValidationError({"document_type": [CHOOSE_TYPES_MESSAGE]})
-        return super().to_internal_value(data)
 
 
 class CountryListSerializer(StrictSerializer[None]):
@@ -569,14 +550,14 @@ class CountryListSerializer(StrictSerializer[None]):
                 needs it.
         """
         rows: list[dict[str, Any]] = self.validated_data["documents"]
-        groups = {int(row["document_type"]): DocumentGroup(row["group"]) for row in rows}
-        found = list(DocumentType.objects.filter(pk__in=groups).order_by("pk"))
+        groups = {row["document_type"]: DocumentGroup(row["group"]) for row in rows}
+        found = list(DocumentType.objects.filter(public_id__in=groups).order_by("pk"))
         if len(found) != len(groups):
             raise serializers.ValidationError({"documents": [CHOOSE_TYPES_MESSAGE]})
         needed = next((t for t in found if t.needed_by_everyone), None)
         if needed is not None:
             raise serializers.ValidationError({"documents": [_everyone_needs_message(needed.name)]})
-        return [ListedType(t, groups[t.pk]) for t in found]
+        return [ListedType(t, groups[t.public_id]) for t in found]
 
 
 class PickedTypeSerializer(StrictSerializer[None]):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from uuid import UUID
 
 from django.db.models import Q, QuerySet
 from django.utils import timezone
@@ -50,7 +51,7 @@ class Waiting:
     appointments: list[UpcomingAppointment]
     # Work From Home requests waiting for an Admin, and whose is oldest (issue 87).
     work_from_home_requests: int = 0
-    work_from_home_first_staff_id: int | None = None
+    work_from_home_first_staff_id: UUID | None = None
 
 
 def waiting_on(staff: Staff, *, clock_in_on: bool = False) -> Waiting:
@@ -69,9 +70,9 @@ def waiting_on(staff: Staff, *, clock_in_on: bool = False) -> Waiting:
         if staff.role == Role.COUNSELLOR and not is_platform_visitor(staff)
         else []
     )
-    requests: list[int] = []
+    requests: list[UUID] = []
     if clock_in_on and why_cannot_manage_work_from_home(staff) is None:
-        requests = list(work_from_home_waiting().values_list("staff_id", flat=True))
+        requests = list(work_from_home_waiting().values_list("staff__public_id", flat=True))
     return Waiting(
         work_from_home_requests=len(requests),
         work_from_home_first_staff_id=requests[0] if requests else None,

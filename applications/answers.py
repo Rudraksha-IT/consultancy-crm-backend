@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from applications.appointments import next_appointment
 from applications.models import Application, Visa
+from course_files.answers import live_files_answer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -31,7 +32,7 @@ def _files_answer(document: Document) -> list[dict[str, object]]:
     Files in the Bin are left out: nobody opens or uses them here (issue 79).
     """
     return [
-        {"id": file.pk, "file_name": file.file_name}
+        {"id": file.public_id, "file_name": file.file_name}
         for file in document.files.all()
         if not file.is_in_bin
     ]
@@ -46,8 +47,11 @@ def _documents_answer(documents: Iterable[Document]) -> list[dict[str, object]]:
     """The Documents linked to an Application or Visa (spec 66), oldest first; none in the Bin."""
     return [
         {
-            "id": document.pk,
-            "document_type": {"id": document.document_type_id, "name": document.document_type.name},
+            "id": document.public_id,
+            "document_type": {
+                "id": document.document_type.public_id,
+                "name": document.document_type.name,
+            },
             "files": _files_answer(document),
             "verification": document.verification,
         }
@@ -61,7 +65,7 @@ def _offer_letter(documents: Iterable[Document]) -> dict[str, object] | None:
     if not letters:
         return None
     newest = letters[-1]
-    return {"id": newest.pk, "files": _files_answer(newest)}
+    return {"id": newest.public_id, "files": _files_answer(newest)}
 
 
 def application_answer(application: Application) -> dict[str, object]:
@@ -75,15 +79,17 @@ def application_answer(application: Application) -> dict[str, object]:
     documents = list(application.documents.all())
     offered_on = application.offered_on
     return {
-        "id": application.pk,
-        "university": {"id": university.pk, "name": university.name},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "id": application.public_id,
+        "university": {"id": university.public_id, "name": university.name},
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": application.status,
         "offer_kind": application.offer_kind,
         "offered_on": None if offered_on is None else offered_on.isoformat(),
         "offer_letter": _offer_letter(documents),
         "documents": _documents_answer(documents),
+        # The Course's PDF brochures in use, shown under the Application (spec 57).
+        "course_files": live_files_answer(course.files.all()),
     }
 
 
@@ -92,10 +98,10 @@ def visa_answer(visa: Visa) -> dict[str, object]:
     course = visa.application.course
     university = course.university
     return {
-        "id": visa.pk,
-        "application_id": visa.application_id,
-        "university": {"id": university.pk, "name": university.name},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "id": visa.public_id,
+        "application_id": visa.application.public_id,
+        "university": {"id": university.public_id, "name": university.name},
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "status": visa.status,
         "started_on": visa.started_on.isoformat(),
         "biometrics_at": moment_text(visa.biometrics_at),
@@ -120,7 +126,7 @@ def appointment_answer(booked: Booked | None) -> dict[str, object] | None:
 
 
 def _counsellor(counsellor: Staff | None) -> dict[str, object] | None:
-    return None if counsellor is None else {"id": counsellor.pk, "name": counsellor.name}
+    return None if counsellor is None else {"id": counsellor.public_id, "name": counsellor.name}
 
 
 def office_application_row(application: Application) -> dict[str, object]:
@@ -135,15 +141,19 @@ def office_application_row(application: Application) -> dict[str, object]:
     university = course.university
     applied_on = application.applied_on
     return {
-        "id": application.pk,
+        "id": application.public_id,
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "phone": student.phone,
             "email": student.email,
         },
-        "university": {"id": university.pk, "name": university.name, "country": university.country},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {
+            "id": university.public_id,
+            "name": university.name,
+            "country": university.country,
+        },
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": application.status,
         "offer_kind": application.offer_kind,
@@ -169,15 +179,19 @@ def office_visa_row(visa: Visa, checklist: Checklist) -> dict[str, object]:
     university = course.university
     counts = checklist.counts
     return {
-        "id": visa.pk,
+        "id": visa.public_id,
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "phone": student.phone,
             "email": student.email,
         },
-        "university": {"id": university.pk, "name": university.name, "country": university.country},
-        "course": {"id": course.pk, "name": course.name, "level": course.level},
+        "university": {
+            "id": university.public_id,
+            "name": university.name,
+            "country": university.country,
+        },
+        "course": {"id": course.public_id, "name": course.name, "level": course.level},
         "intake": application.intake,
         "status": visa.status,
         "next_appointment": appointment_answer(next_appointment(visa.dates, timezone.localdate())),

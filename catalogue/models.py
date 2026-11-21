@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import models
 from django.db.models.functions import Lower
 
+from config.public_ids import public_id_field
 from students.models import CHOICE_MAX_LENGTH, INTAKE_LENGTH, Country
 
 UNIVERSITY_NAME_MAX_LENGTH = 200
@@ -24,6 +25,9 @@ class CourseLevel(models.TextChoices):
 class University(models.Model):
     """An institution the Consultancy sends Students to (spec 46). Archived, never deleted."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     name = models.CharField(max_length=UNIVERSITY_NAME_MAX_LENGTH)
     country = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=Country.choices)
     # Archived entries can't be picked for new Applications but stay on old ones (spec 50).
@@ -42,6 +46,9 @@ class University(models.Model):
 
 class Course(models.Model):
     """A study programme at a University (spec 47). Archived, never deleted."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     university = models.ForeignKey(University, on_delete=models.PROTECT, related_name="courses")
     name = models.CharField(max_length=COURSE_NAME_MAX_LENGTH)
@@ -63,6 +70,9 @@ class Course(models.Model):
 
 class Intake(models.Model):
     """A start month of a Course, as "YYYY-MM" and always AD (spec 102)."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="intakes")
     month = models.CharField(max_length=INTAKE_LENGTH)

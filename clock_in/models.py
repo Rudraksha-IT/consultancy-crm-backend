@@ -14,6 +14,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from clock_in.exceptions import ClockInRecordIsAppendOnlyError
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 
 DEFAULT_WORKING_DAY_MINUTES = 8 * 60
@@ -25,6 +26,9 @@ WORKING_DAY_ROW = 1
 
 class WorkSession(models.Model):
     """One stretch of work by a Staff member, from clocking in to clocking out."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     staff = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")
     clocked_in_at = models.DateTimeField()
@@ -109,6 +113,9 @@ class CorrectionKind(models.TextChoices):
 class WorkSessionChange(AppendOnlyRecord):
     """One Admin correction of one day: before, after and why (spec 108)."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     work_session = models.ForeignKey(WorkSession, on_delete=models.PROTECT, related_name="+")
     # Whose day it was, and which day.
     staff = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")
@@ -155,6 +162,9 @@ class WorkingDay(models.Model):
 class WorkingDayChange(AppendOnlyRecord):
     """One change of the Working Day: from, to, who and when (spec 105a)."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     old_minutes = models.PositiveSmallIntegerField()
     new_minutes = models.PositiveSmallIntegerField()
 
@@ -176,6 +186,9 @@ class Holiday(models.Model):
     Like Saturday it is off: never "not in", never a short day, never corrected. Anyone who works
     can still clock in.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     day = models.DateField(unique=True)
     name = models.CharField(max_length=HOLIDAY_NAME_MAX_LENGTH)
@@ -206,6 +219,9 @@ class WorkFromHome(models.Model):
     Asked for by the Staff member (Waiting until an Admin answers) or set directly by an Admin
     (Approved at once). An empty end lasts until an Admin ends it.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     staff = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="+")
     starts_on = models.DateField()

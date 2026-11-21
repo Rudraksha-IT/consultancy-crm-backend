@@ -55,17 +55,19 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def documents_url(student: Student | int) -> str:
+def documents_url(student: Student | int | str) -> str:
     """A Student's checklist, where Documents are uploaded too."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/documents/"
 
 
-def link_url(office: ConsultancyContext, student: Student | int, document: Document | int) -> str:
+def link_url(
+    office: ConsultancyContext, student: Student | int | str, document: Document | int | str
+) -> str:
     """Where a link to the first file of one of a Student's Documents is asked for."""
-    pk = student if isinstance(student, int) else student.pk
-    document_pk = document if isinstance(document, int) else document.pk
-    first = files_of(office, document)[0].pk if isinstance(document, Document) else 1
+    pk = student if isinstance(student, int | str) else student.public_id
+    document_pk = document if isinstance(document, int | str) else document.public_id
+    first = files_of(office, document)[0].public_id if isinstance(document, Document) else 1
     return f"/api/students/{pk}/documents/{document_pk}/files/{first}/link/"
 
 
@@ -81,18 +83,18 @@ def a_file(content: bytes = PDF_BYTES, name: str = "passport.pdf") -> SimpleUplo
 
 
 def upload(
-    office: ConsultancyContext, student: Student | int, **fields: object
+    office: ConsultancyContext, student: Student | int | str, **fields: object
 ) -> _MonkeyPatchedResponse:
     """POST a Document as a form, with a Passport PDF unless `fields` say otherwise."""
     body: dict[str, object] = {
-        "document_type": str(type_named(office, "Passport").pk),
+        "document_type": str(type_named(office, "Passport").public_id),
         "file": a_file(),
         **fields,
     }
     return office.client.post(documents_url(student), body, format="multipart")
 
 
-def checklist(office: ConsultancyContext, student: Student | int) -> _MonkeyPatchedResponse:
+def checklist(office: ConsultancyContext, student: Student | int | str) -> _MonkeyPatchedResponse:
     """GET a Student's checklist."""
     return office.client.get(documents_url(student))
 
@@ -128,7 +130,7 @@ def add_stored_files(
     office: ConsultancyContext, document: Document, count: int = 1, first_name: str = "page.pdf"
 ) -> list[DocumentFile]:
     """Store `count` PDF files of a Document directly (not in storage); call in its schema."""
-    prefix = f"{office.consultancy.schema_name}/documents/{document.student_id}/"
+    prefix = f"{office.consultancy.schema_name}/documents/{document.student.public_id}/"
     start = DocumentFile.objects.count()
     return [
         DocumentFile.objects.create(
@@ -172,7 +174,7 @@ class TestChecklist:
         assert item_states(body) == [(name, "not_received") for name in DEFAULT_TYPES]
         assert (body["done"], body["total"], body["can_change"]) == (0, 8, True)
         assert body["items"][0] == {
-            "document_type": {"id": type_named(abc, "Passport").pk, "name": "Passport"},
+            "document_type": {"id": str(type_named(abc, "Passport").public_id), "name": "Passport"},
             "reason": "",
             "is_required": True,
             "added_for_student": False,
@@ -180,6 +182,8 @@ class TestChecklist:
             "state": "not_received",
             "document": None,
             "in_bin": [],
+            "instruction": "",
+            "examples": [],
         }
         assert body["asked"] == []
 
@@ -209,10 +213,10 @@ class TestChecklist:
         assert passport["state"] == "waiting"
         [file] = files_of(abc, newest)
         assert passport["document"] == {
-            "id": newest.pk,
+            "id": str(newest.public_id),
             "files": [
                 {
-                    "id": file.pk,
+                    "id": str(file.public_id),
                     "file_name": "passport.pdf",
                     "content_type": "application/pdf",
                     "size": len(PDF_BYTES),
@@ -280,7 +284,7 @@ class TestChecklist:
         student = own_student(abc)
         make_document(abc, student, "Passport")
 
-        body = abc.client.get(f"/api/students/{student.pk}/").json()
+        body = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert body["documents"] == {"done": 1, "total": 8}
         assert body["can_change_documents"] is True
@@ -307,7 +311,7 @@ class TestUploading:
         assert (stored.content, stored.content_type) == (PDF_BYTES, "application/pdf")
         body = response.json()
         assert item_states(body)[0] == ("Passport", "waiting")
-        assert body["items"][0]["document"]["id"] == document.pk
+        assert body["items"][0]["document"]["id"] == str(document.public_id)
         assert body["done"] == 1
 
     def test_the_file_is_kept_under_the_consultancys_own_prefix(
@@ -319,7 +323,7 @@ class TestUploading:
 
         [document] = stored_documents(abc, student)
         [file] = files_of(abc, document)
-        assert file.storage_key.startswith(f"abcedu/documents/{student.pk}/")
+        assert file.storage_key.startswith(f"abcedu/documents/{student.public_id}/")
         assert file.storage_key.endswith(".pdf")
         assert "passport" not in file.storage_key
 
@@ -330,7 +334,10 @@ class TestUploading:
 
         body = upload(abc, student).json()
 
-        assert body["items"][0]["document"]["uploaded_by"] == {"id": me.pk, "name": "Bikash Thapa"}
+        assert body["items"][0]["document"]["uploaded_by"] == {
+            "id": str(me.public_id),
+            "name": "Bikash Thapa",
+        }
 
     @pytest.mark.parametrize(
         ("content", "content_type"), [(JPEG_BYTES, "image/jpeg"), (PNG_BYTES, "image/png")]
@@ -368,7 +375,7 @@ class TestUploading:
         with tenant_context(abc.consultancy):
             police = DocumentType.objects.create(name="Police report")
 
-        body = upload(abc, student, document_type=str(police.pk)).json()
+        body = upload(abc, student, document_type=str(police.public_id)).json()
 
         assert item_states(body)[-1] == ("Police report", "waiting")
 
@@ -452,7 +459,7 @@ class TestUploading:
 class TestRefusedUploads:
     def test_no_file_is_refused(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
-        body = {"document_type": str(type_named(abc, "Passport").pk)}
+        body = {"document_type": str(type_named(abc, "Passport").public_id)}
 
         response = abc.client.post(documents_url(student), body, format="multipart")
 
@@ -558,7 +565,7 @@ class TestRefusedUploads:
 
     def test_a_json_body_is_refused(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
-        body = {"document_type": type_named(abc, "Passport").pk, "file": "JVBERi0="}
+        body = {"document_type": str(type_named(abc, "Passport").public_id), "file": "JVBERi0="}
 
         response = abc.client.post(documents_url(student), body, format="json")
 
@@ -705,11 +712,11 @@ class TestUploadSerializer:
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
             serializer = DocumentUploadSerializer(
-                data={"document_type": str(passport.pk), "file": a_file()}
+                data={"document_type": str(passport.public_id), "file": a_file()}
             )
 
             assert serializer.is_valid(), serializer.errors
-            assert DocumentTypeField().to_representation(passport) == passport.pk
+            assert DocumentTypeField().to_representation(passport) == str(passport.public_id)
 
     def test_models_name_themselves(self, abc: ConsultancyContext) -> None:
         student = make_student(abc)

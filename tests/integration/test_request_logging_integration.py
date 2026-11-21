@@ -11,6 +11,7 @@ from rest_framework import status
 
 from config.correlation import get_correlation_id
 from staff.models import Role
+from tenancy.models import Consultancy
 from tests.conftest import (
     PLATFORM_TEST_PASSWORD,
     TEST_PASSWORD,
@@ -20,6 +21,7 @@ from tests.conftest import (
     api_client,
     run_queued_jobs,
 )
+from tests.record_ids import number_of
 
 CONSULTANCY_URL = "/api/consultancy/"
 LOGIN_URL = "/api/auth/login/"
@@ -215,7 +217,7 @@ class TestStaffEvents:
         ops = platform_site.log_in()
 
         platform_site.client.put(
-            f"{CONSULTANCIES_URL}{acme.consultancy.pk}/theme/", THEME, format="json"
+            f"{CONSULTANCIES_URL}{acme.consultancy.public_id}/theme/", THEME, format="json"
         )
 
         consultancy_id = acme.consultancy.pk
@@ -254,6 +256,7 @@ class TestPlatformEvents:
         body = {
             "name": "Everest Education",
             "subdomain": "everest",
+            "contact_email": "info@everest.test",
         }
 
         created = platform_site.client.post(CONSULTANCIES_URL, body, format="json").json()
@@ -264,10 +267,13 @@ class TestPlatformEvents:
             format="json",
         )
 
-        json_logs.only(f"Consultancy set up: consultancy_id={created['id']}")
+        json_logs.only(
+            f"Consultancy set up: consultancy_id={number_of(Consultancy, created['id'])}"
+        )
         changed = json_logs.with_message("Consultancy Status changed: ")
         assert len(changed) == 1
-        assert f"consultancy_id={created['id']}, from=evaluation, to=terminated" in str(
+        number = number_of(Consultancy, created["id"])
+        assert f"consultancy_id={number}, from=evaluation, to=terminated" in str(
             changed[0]["message"]
         )
         assert "Left us" not in json_logs.text()
@@ -279,5 +285,9 @@ class TestStartup:
     def test_settings_logging_is_json_at_info_by_default(self) -> None:
         assert settings.LOGGING["root"] == {"handlers": ["json_handler"], "level": "INFO"}
 
-    def test_the_request_log_runs_first(self) -> None:
-        assert settings.MIDDLEWARE[0] == "config.middleware.RequestLogMiddleware"
+    def test_the_request_log_runs_first_after_the_unlogged_health_check(self) -> None:
+        # The health check (ticket 14) is answered before it, so it is never logged per request.
+        assert settings.MIDDLEWARE[:2] == [
+            "config.health.HealthMiddleware",
+            "config.middleware.RequestLogMiddleware",
+        ]

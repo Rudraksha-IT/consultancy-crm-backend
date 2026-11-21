@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import uuid
 import zipfile
 from datetime import timedelta
 from typing import Any
@@ -21,7 +22,7 @@ from auth_tokens.services import sign_out_everywhere
 from history.models import HistoryEntry
 from platform_admin.models import PlatformAdmin, SupportVisit
 from platform_admin.support_access import ENTRY_CODE_LIFETIME, VISIT_LENGTH
-from staff.models import PLATFORM_VISITOR_ID, Role, Staff
+from staff.models import PLATFORM_VISITOR_PUBLIC_ID, Role, Staff
 from students.models import Source, Stage, Student
 from tenancy.status import ConsultancyStatus
 from tests.conftest import (
@@ -31,6 +32,7 @@ from tests.conftest import (
     PlatformContext,
     use_access_token,
 )
+from tests.record_ids import is_uuid
 from tests.support_access import (
     ENTER_URL,
     LOGOUT_URL,
@@ -58,17 +60,17 @@ REFUSED = "Not allowed."
 
 def reset_code_url(staff: Staff) -> str:
     """Send `staff` a reset Code (Platform Admins only)."""
-    return f"/api/support-access/staff/{staff.pk}/reset-code/"
+    return f"/api/support-access/staff/{staff.public_id}/reset-code/"
 
 
 def sign_out_url(staff: Staff) -> str:
     """Sign `staff` out of every device (Platform Admins only)."""
-    return f"/api/support-access/staff/{staff.pk}/sign-out/"
+    return f"/api/support-access/staff/{staff.public_id}/sign-out/"
 
 
 def note_url(student: Student) -> str:
     """Replace a Student's Note."""
-    return f"/api/students/{student.pk}/note/"
+    return f"/api/students/{student.public_id}/note/"
 
 
 @pytest.fixture
@@ -138,9 +140,9 @@ class TestStartingAVisit:
         assert isinstance(answer["entry_code"], str)
         assert len(str(answer["entry_code"])) >= 40
         assert answer["visit"] == {
-            "id": visit.pk,
+            "id": str(visit.public_id),
             "platform_admin": {"name": "Platform Ops"},
-            "consultancy": {"id": abc.consultancy.pk, "name": "ABC Education"},
+            "consultancy": {"id": str(abc.consultancy.public_id), "name": "ABC Education"},
             "reason": REASON,
             "consultancy_status": "evaluation",
             "started_at": visit.started_at.isoformat(),
@@ -174,7 +176,7 @@ class TestStartingAVisit:
         abc: ConsultancyContext,
         body: dict[str, object],
     ) -> None:
-        response = post(platform_site.client, start_url(abc.consultancy.pk), body)
+        response = post(platform_site.client, start_url(abc.consultancy.public_id), body)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert visits() == []
 
@@ -188,13 +190,15 @@ class TestStartingAVisit:
     def test_a_form_body_is_refused(
         self, platform_site: PlatformContext, ops: PlatformAdmin, abc: ConsultancyContext
     ) -> None:
-        response = platform_site.client.post(start_url(abc.consultancy.pk), {"reason": REASON})
+        response = platform_site.client.post(
+            start_url(abc.consultancy.public_id), {"reason": REASON}
+        )
         assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
     def test_only_post_is_allowed(
         self, platform_site: PlatformContext, ops: PlatformAdmin, abc: ConsultancyContext
     ) -> None:
-        url = start_url(abc.consultancy.pk)
+        url = start_url(abc.consultancy.public_id)
         for method in ("get", "put", "patch", "delete"):
             response = getattr(platform_site.client, method)(url)
             assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
@@ -202,14 +206,16 @@ class TestStartingAVisit:
     def test_an_unknown_office_is_not_found(
         self, platform_site: PlatformContext, ops: PlatformAdmin
     ) -> None:
-        response = post(platform_site.client, start_url(999_999), {"reason": REASON})
+        response = post(platform_site.client, start_url(uuid.uuid4()), {"reason": REASON})
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_a_terminated_office_cant_be_opened(
         self, platform_site: PlatformContext, ops: PlatformAdmin, abc: ConsultancyContext
     ) -> None:
         set_status(abc, ConsultancyStatus.TERMINATED)
-        response = post(platform_site.client, start_url(abc.consultancy.pk), {"reason": REASON})
+        response = post(
+            platform_site.client, start_url(abc.consultancy.public_id), {"reason": REASON}
+        )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
             "detail": "This office's account has been closed, so it can't be opened."
@@ -233,7 +239,9 @@ class TestStartingAVisit:
     def test_logged_out_is_refused(
         self, platform_site: PlatformContext, abc: ConsultancyContext
     ) -> None:
-        response = post(platform_site.new_client(), start_url(abc.consultancy.pk), {"reason": "x"})
+        response = post(
+            platform_site.new_client(), start_url(abc.consultancy.public_id), {"reason": "x"}
+        )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     @pytest.mark.parametrize("role", STAFF_ROLES)
@@ -244,10 +252,10 @@ class TestStartingAVisit:
         access = abc.tokens_for(staff).access
         on_platform = platform_site.new_client()
         use_access_token(on_platform, access)
-        response = post(on_platform, start_url(abc.consultancy.pk), {"reason": REASON})
+        response = post(on_platform, start_url(abc.consultancy.public_id), {"reason": REASON})
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         use_access_token(abc.client, access)
-        response = post(abc.client, start_url(abc.consultancy.pk), {"reason": REASON})
+        response = post(abc.client, start_url(abc.consultancy.public_id), {"reason": REASON})
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert visits() == []
 
@@ -278,7 +286,7 @@ class TestEnteringTheOffice:
             "platform_admin_name": "Platform Ops",
             "platform_host": platform_site.host,
         }
-        assert context["staff"]["id"] == PLATFORM_VISITOR_ID
+        assert context["staff"]["id"] == str(PLATFORM_VISITOR_PUBLIC_ID)
 
     def test_staff_context_has_no_support_access(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -509,7 +517,7 @@ class TestInsideTheOffice:
         assert entry.by_staff_id is None
         assert entry.by_name == "Platform Ops"
         assert entry.by_platform_admin is True
-        history = visit.client.get(f"/api/students/{student.pk}/history/").json()
+        history = visit.client.get(f"/api/students/{student.public_id}/history/").json()
         assert history["results"][0]["by"] == {"name": "Platform Ops", "is_platform_admin": True}
 
     def test_can_change_a_past_due_or_suspended_office_that_staff_cant(
@@ -640,8 +648,28 @@ class TestPlatformOnlyActions:
         assert len(staff_rows) == 2
         students = list(csv.DictReader(io.StringIO(archive.read("students_student.csv").decode())))
         assert students[0]["note"] == "'=HYPERLINK(1)"
-        settings_csv = archive.read("communication_providersettings.csv").decode()
-        assert "sealed" not in settings_csv
+        assert "communication_providersettings.csv" not in names
+
+    def test_the_download_names_records_only_by_uuid(
+        self, platform_site: PlatformContext, abc: ConsultancyContext
+    ) -> None:
+        """Each id and link column holds the record's UUID, never its number (ADR 0027)."""
+        counsellor = abc.add_staff(Role.COUNSELLOR, email="counsellor@abc.test")
+        student = make_student(abc, counsellor)
+        visit = open_as_platform_admin(platform_site, abc)
+
+        archive = zipfile.ZipFile(io.BytesIO(post(visit.client, EXPORT_URL).content))
+
+        for name in archive.namelist():
+            rows = list(csv.DictReader(io.StringIO(archive.read(name).decode())))
+            assert rows == [] or "public_id" not in rows[0], name
+            for row in rows:
+                for column, value in row.items():
+                    if column == "id" or (column.endswith("_id") and value):
+                        assert is_uuid(value), (name, column, value)
+        students = list(csv.DictReader(io.StringIO(archive.read("students_student.csv").decode())))
+        assert students[0]["id"] == str(student.public_id)
+        assert students[0]["assigned_counsellor_id"] == str(counsellor.public_id)
 
     @pytest.mark.parametrize("role", STAFF_ROLES)
     def test_refused_for_every_staff_role(self, abc: ConsultancyContext, role: Role) -> None:

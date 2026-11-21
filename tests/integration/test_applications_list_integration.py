@@ -105,7 +105,7 @@ class TestAppliedOn:
         self, office: ConsultancyContext, student: Student, application: Application, to: str
     ) -> None:
         response = office.client.patch(
-            f"/api/students/{student.pk}/applications/{application.pk}/",
+            f"/api/students/{student.public_id}/applications/{application.public_id}/",
             {"status": to},
             format="json",
         )
@@ -121,8 +121,8 @@ class TestAppliedOn:
         course = course_at(abc, "Deakin University")
 
         response = abc.client.post(
-            f"/api/students/{student.pk}/applications/",
-            {"course": course.pk, "intake": "2027-02"},
+            f"/api/students/{student.public_id}/applications/",
+            {"course": str(course.public_id), "intake": "2027-02"},
             format="json",
         )
 
@@ -177,23 +177,23 @@ class TestRows:
         [row] = listed(abc).json()["results"]
 
         assert row == {
-            "id": application.pk,
+            "id": str(application.public_id),
             "student": {
-                "id": student.pk,
+                "id": str(student.public_id),
                 "name": "Sita Karki",
                 "phone": "9841234567",
                 "email": "sita@gmail.test",
             },
             "university": {
-                "id": course.university_id,
+                "id": str(course.university.public_id),
                 "name": "Deakin University",
                 "country": "australia",
             },
-            "course": {"id": course.pk, "name": course.name, "level": "master"},
+            "course": {"id": str(course.public_id), "name": course.name, "level": "master"},
             "intake": "2027-07",
             "status": "offer",
             "offer_kind": "conditional",
-            "assigned_counsellor": {"id": bikash.pk, "name": "Bikash Thapa"},
+            "assigned_counsellor": {"id": str(bikash.public_id), "name": "Bikash Thapa"},
             "applied_on": "2026-10-02",
             "added_on": "2026-09-30",
         }
@@ -404,7 +404,7 @@ class TestFilters:
         with tenant_context(office.consultancy):
             bikash = Staff.objects.get(name="Bikash Thapa")
 
-        rows = rows_of(listed(office, {"counsellor": str(bikash.pk)}))
+        rows = rows_of(listed(office, {"counsellor": str(bikash.public_id)}))
 
         assert rows == [
             ("Sita Karki", "Deakin University"),

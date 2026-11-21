@@ -5,6 +5,8 @@ Teachers are refused everything here (they don't see Students). Every change is 
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.core.paginator import EmptyPage
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -94,11 +96,13 @@ class TransferRequestCountView(_TransferRequestView):
 class StudentTransferRequestView(_TransferRequestView):
     """Ask to take a Student who isn't mine (POST)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Send the request with its reason and return it."""
         staff = get_request_staff(request)
         try:
-            student = Student.objects.select_related("assigned_counsellor").get(pk=student_id)
+            student = Student.objects.select_related("assigned_counsellor").get(
+                public_id=student_id
+            )
         except Student.DoesNotExist as error:
             raise NotFound from error
         reason = why_cannot_ask_transfer(staff, student)

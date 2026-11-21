@@ -6,6 +6,7 @@ from django.db import models
 from django.utils import timezone
 from django_tenants.models import DomainMixin, TenantMixin
 
+from config.public_ids import public_id_field
 from tenancy.exceptions import StatusRecordIsAppendOnlyError
 from tenancy.status import ConsultancyStatus
 from tenancy.theme import DEFAULT_THEME, theme_to_stored
@@ -16,6 +17,11 @@ LOGO_KEY_MAX_LENGTH = 200
 LOGO_CONTENT_TYPE_MAX_LENGTH = 40
 STATUS_MAX_LENGTH = 20
 STATUS_REASON_MAX_LENGTH = 500
+# Office details (Configuration → General, spec stories 11-16).
+CONTACT_EMAIL_MAX_LENGTH = 254
+OFFICE_PHONE_MAX_LENGTH = 30
+OFFICE_ADDRESS_LINE_MAX_LENGTH = 100
+OFFICE_WEBSITE_MAX_LENGTH = 200
 _STATUS_CHOICES = [(value.value, value.value) for value in ConsultancyStatus]
 
 
@@ -38,6 +44,8 @@ def default_theme() -> dict[str, object]:
 
 class Consultancy(TenantMixin):  # type: ignore[misc]  # django-tenants is untyped
     """A Consultancy using the product; its data lives in its own schema."""
+
+    public_id = public_id_field()
 
     name = models.CharField(max_length=CONSULTANCY_NAME_MAX_LENGTH)
     # The Consultancy Status (spec 13-13d), changed only through tenancy.services; the access
@@ -75,6 +83,18 @@ class Consultancy(TenantMixin):  # type: ignore[misc]  # django-tenants is untyp
     )
     logo_version = models.PositiveIntegerField(default=0)
     show_name_beside_logo = models.BooleanField(default=True)
+    # Office details, printed at the bottom of every email from the office; all optional, but
+    # emails to Students need the contact email, where their replies go (ADR 0023). Checked by
+    # tenancy.serializers; read them through tenancy.services.get_office_details.
+    contact_email = models.CharField(max_length=CONTACT_EMAIL_MAX_LENGTH, blank=True, default="")
+    phone = models.CharField(max_length=OFFICE_PHONE_MAX_LENGTH, blank=True, default="")
+    address_line1 = models.CharField(
+        max_length=OFFICE_ADDRESS_LINE_MAX_LENGTH, blank=True, default=""
+    )
+    address_line2 = models.CharField(
+        max_length=OFFICE_ADDRESS_LINE_MAX_LENGTH, blank=True, default=""
+    )
+    website = models.CharField(max_length=OFFICE_WEBSITE_MAX_LENGTH, blank=True, default="")
     # Setting up until the background job has built its schema and invited its first Admin
     # (issue 60). Offices made before the job existed are ready.
     setup_state = models.CharField(
@@ -115,6 +135,8 @@ class AppendOnlyQuerySet(models.QuerySet["ConsultancyStatusChange"]):
 
 class ConsultancyStatusChange(models.Model):
     """One change of a Consultancy's Status, kept on the Platform side for good (spec 13)."""
+
+    public_id = public_id_field()
 
     consultancy = models.ForeignKey(
         Consultancy, on_delete=models.PROTECT, related_name="status_changes"

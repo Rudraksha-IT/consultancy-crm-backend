@@ -8,7 +8,12 @@ from typing import Any
 
 from rest_framework import serializers
 
-from config.serializers import StrictCharField, StrictSerializer
+from config.serializers import (
+    RECORD_ID_PATTERN,
+    StrictCharField,
+    StrictSerializer,
+    parse_record_id,
+)
 from staff.employees import list_counsellors
 from staff.models import Staff
 from staff.serializers import MobileField, PlainTextField
@@ -37,7 +42,7 @@ ENTER_PHONE_MESSAGE = "Enter their mobile number."
 # Line breaks and tabs are fine in a Note; no other control character is.
 NOTE_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 COUNSELLOR_FILTER_PATTERN = re.compile(
-    rf"^(?:{COUNSELLOR_ME}|{COUNSELLOR_NONE}|[1-9][0-9]{{0,9}})\Z"
+    rf"^(?:{COUNSELLOR_ME}|{COUNSELLOR_NONE}|{RECORD_ID_PATTERN})\Z"
 )
 
 
@@ -65,8 +70,8 @@ class NoteField(StrictCharField):
         return value
 
 
-class CounsellorChoiceField(serializers.Field[Staff | None, int | None, int | None, Any]):
-    """An Assigned Counsellor picked by id from the active Counsellors and Admins.
+class CounsellorChoiceField(serializers.Field[Staff | None, str | None, str | None, Any]):
+    """An Assigned Counsellor picked by UUID from the active Counsellors and Admins (ADR 0027).
 
     Optional and nullable unless `required`.
     """
@@ -75,17 +80,18 @@ class CounsellorChoiceField(serializers.Field[Staff | None, int | None, int | No
         super().__init__(required=required, allow_null=not required)
 
     def to_internal_value(self, data: object) -> Staff | None:
-        """Return the Counsellor; a non-integer or anyone not in the list is refused."""
-        if isinstance(data, bool) or not isinstance(data, int):
+        """Return the Counsellor; anything but the UUID of someone in the list is refused."""
+        public_id = parse_record_id(data)
+        if public_id is None:
             raise serializers.ValidationError(CHOOSE_COUNSELLOR_MESSAGE)
-        counsellor = list_counsellors().filter(pk=data).first()
+        counsellor = list_counsellors().filter(public_id=public_id).first()
         if counsellor is None:
             raise serializers.ValidationError(CHOOSE_COUNSELLOR_MESSAGE)
         return counsellor
 
-    def to_representation(self, value: Staff | None) -> int | None:
-        """Return the id (unused: answers are built by the views)."""
-        return None if value is None else value.pk
+    def to_representation(self, value: Staff | None) -> str | None:
+        """Return the UUID (unused: answers are built by the views)."""
+        return None if value is None else str(value.public_id)
 
 
 def _optional_text() -> PlainTextField:

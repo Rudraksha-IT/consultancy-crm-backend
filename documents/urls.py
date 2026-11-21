@@ -25,9 +25,9 @@ from documents.views import (
     TakeOutOfBinView,
 )
 
-ONE_STUDENT = "students/<int:student_id>/"
-ONE_DOCUMENT = f"{ONE_STUDENT}documents/<int:document_id>/"
-ONE_FILE = f"{ONE_DOCUMENT}files/<int:file_id>/"
+ONE_STUDENT = "students/<uuid:student_id>/"
+ONE_DOCUMENT = f"{ONE_STUDENT}documents/<uuid:document_id>/"
+ONE_FILE = f"{ONE_DOCUMENT}files/<uuid:file_id>/"
 
 urlpatterns: list[URLPattern] = [
     path(
@@ -36,7 +36,7 @@ urlpatterns: list[URLPattern] = [
         name="configuration-document-types",
     ),
     path(
-        "configuration/document-types/<int:type_id>/",
+        "configuration/document-types/<document_type:type_id>/",
         DocumentTypeView.as_view(),
         name="configuration-document-type",
     ),
@@ -58,17 +58,17 @@ urlpatterns: list[URLPattern] = [
     ),
     path(f"{ONE_STUDENT}documents/", StudentDocumentsView.as_view(), name="student-documents"),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/files/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/files/",
         DocumentFilesView.as_view(),
         name="student-document-files",
     ),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/files/<int:file_id>/link/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/files/<uuid:file_id>/link/",
         DocumentLinkView.as_view(),
         name="student-document-file-link",
     ),
     path(
-        f"{ONE_STUDENT}documents/<int:document_id>/verification/",
+        f"{ONE_STUDENT}documents/<uuid:document_id>/verification/",
         DocumentVerificationView.as_view(),
         name="student-document-verification",
     ),
@@ -78,7 +78,7 @@ urlpatterns: list[URLPattern] = [
         name="student-documents-asked",
     ),
     path(
-        f"{ONE_STUDENT}documents/asked/<int:type_id>/",
+        f"{ONE_STUDENT}documents/asked/<document_type:type_id>/",
         StudentAskedTypeView.as_view(),
         name="student-document-asked",
     ),
@@ -94,11 +94,11 @@ urlpatterns: list[URLPattern] = [
     path(f"{ONE_FILE}restore/", RestoreFromBinView.as_view(), name="student-document-file-restore"),
     path("documents/bin/", BinView.as_view(), name="documents-bin"),
     path(
-        "documents/bin/files/<int:file_id>/link/", BinFileLinkView.as_view(), name="bin-file-link"
+        "documents/bin/files/<uuid:file_id>/link/", BinFileLinkView.as_view(), name="bin-file-link"
     ),
     path("documents/types/", PickableTypesView.as_view(), name="documents-types"),
     path(
-        "catalogue/courses/<int:course_id>/documents/",
+        "catalogue/courses/<course:course_id>/documents/",
         CourseDocumentsView.as_view(),
         name="catalogue-course-documents",
     ),

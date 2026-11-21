@@ -61,7 +61,7 @@ def staff_progress_answer(report: StaffProgressReport) -> dict[str, object]:
 
 def _person(row: ProgressRow, more: dict[str, object] | None = None) -> dict[str, object]:
     return {
-        "id": row.staff.pk,
+        "id": row.staff.public_id,
         "name": row.staff.name,
         "is_active": row.staff.is_active,
         **(more or {}),
@@ -77,7 +77,7 @@ def classes_answer(rows: list[ClassRow]) -> dict[str, object]:
     return {
         "batches": [
             {
-                "id": row.batch.pk,
+                "id": row.batch.public_id,
                 "name": row.batch.name,
                 "test_type": row.batch.test_type,
                 "teacher": row.batch.teacher.name,
@@ -90,7 +90,7 @@ def classes_answer(rows: list[ClassRow]) -> dict[str, object]:
 
 
 def money_answer(report: MoneyReport) -> dict[str, object]:
-    """Money in (from Students, from Commission) and out each month, and out by category."""
+    """Money in (from Students, from Commission) and out each month; out by category; in by type."""
     return {
         "months": [
             {
@@ -104,5 +104,9 @@ def money_answer(report: MoneyReport) -> dict[str, object]:
         "money_out_by_category": [
             {"category": category.value, "amount": amount}
             for category, amount in report.money_out_by_category
+        ],
+        "money_in_by_fee_type": [
+            {"fee_type": {"id": type_id, "name": name}, "amount": amount}
+            for type_id, name, amount in report.money_in_by_fee_type
         ],
     }

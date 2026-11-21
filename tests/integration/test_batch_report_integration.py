@@ -114,7 +114,9 @@ class TestAccess:
         rows = report_rows(abc, this_week())
 
         assert hidden.status_code == status.HTTP_404_NOT_FOUND
-        assert [(row["id"], row["attended_percent"]) for row in rows] == [(batch.pk, 100)]
+        assert [(row["id"], row["attended_percent"]) for row in rows] == [
+            (str(batch.public_id), 100)
+        ]
 
     def test_logged_out_is_refused(self, abc: ConsultancyContext) -> None:
         response = abc.new_client().get(BATCHES_REPORT_URL, this_week())
@@ -155,7 +157,7 @@ class TestClassesReport:
 
         assert rows == [
             {
-                "id": ielts.pk,
+                "id": str(ielts.public_id),
                 "name": "IELTS Morning",
                 "test_type": "ielts",
                 "teacher": "Gita Lama",

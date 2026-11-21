@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
+from config.public_ids import public_id_field
 from staff.models import Staff
 
 STUDENT_NAME_MAX_LENGTH = 200
@@ -135,6 +136,9 @@ def _ward() -> models.PositiveSmallIntegerField[int | None, int | None]:
 class Student(models.Model):
     """A person who has engaged with the Consultancy, from first enquiry onward (spec 23)."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     name = models.CharField(max_length=STUDENT_NAME_MAX_LENGTH)
     phone = models.CharField(max_length=PHONE_MAX_LENGTH)
     email = models.EmailField(max_length=EMAIL_MAX_LENGTH, blank=True, default="")
@@ -252,6 +256,9 @@ class EnglishTest(models.TextChoices):
 class AcademicRecord(models.Model):
     """One qualification in a Student's academic history (spec 35)."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="academic_records")
     level = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=Qualification.choices)
     institution = models.CharField(max_length=DETAIL_MAX_LENGTH)
@@ -269,6 +276,9 @@ class AcademicRecord(models.Model):
 class TestScore(models.Model):
     """One English test result of a Student (spec 35)."""
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="test_scores")
     test = models.CharField(max_length=CHOICE_MAX_LENGTH, choices=EnglishTest.choices)
     overall = models.DecimalField(max_digits=4, decimal_places=1)
@@ -285,6 +295,9 @@ class TestScore(models.Model):
 
 class WorkExperience(models.Model):
     """One job a Student has had (spec 35e). No end month means they still work there."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="work_experience")
     employer = models.CharField(max_length=JOB_MAX_LENGTH)

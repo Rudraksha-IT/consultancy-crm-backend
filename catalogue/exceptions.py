@@ -16,3 +16,11 @@ class InUseError(Exception):
         super().__init__(count, what)
         self.count = count
         self.what = what
+
+
+class KeepsFilesError(Exception):
+    """A Course here still has Course Files (even in the Bin), so it stays archived (spec 60)."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count)
+        self.count = count

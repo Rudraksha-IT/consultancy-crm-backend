@@ -127,10 +127,14 @@ class TestInternalTokenSetting:
         assert [f".{settings.PRODUCT_DOMAIN}", "testserver"] == settings.ALLOWED_HOSTS
 
     def test_the_internal_token_check_runs_before_anything_but_the_request_log(self) -> None:
+        """Only the health check comes first, and it checks the internal token itself."""
         from django.conf import settings  # noqa: PLC0415  # read the live settings object
 
-        assert settings.MIDDLEWARE[0] == "config.middleware.RequestLogMiddleware"
-        assert settings.MIDDLEWARE[1] == "tenancy.middleware.InternalTokenMiddleware"
+        assert settings.MIDDLEWARE[:3] == [
+            "config.health.HealthMiddleware",
+            "config.middleware.RequestLogMiddleware",
+            "tenancy.middleware.InternalTokenMiddleware",
+        ]
 
 
 class TestForwardedHost:

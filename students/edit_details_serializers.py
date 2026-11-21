@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 from rest_framework import serializers
 
+from config.serializers import RecordIdField
 from students.edit_details import EditedDetails
 from students.models import Student
 from students.profile import MAX_ENTRIES_PER_STUDENT
@@ -26,9 +28,9 @@ ROW_NOT_HERE_MESSAGE = "A row here isn't one of this Student's. Refresh the page
 LISTS = ("academic_records", "test_scores", "work_experience")
 
 
-def _row_id() -> StrictIntegerField:
-    """A stored row's id; left out for a new row."""
-    return StrictIntegerField(required=False, min_value=1)
+def _row_id() -> RecordIdField:
+    """A stored row's id (its UUID); left out for a new row."""
+    return RecordIdField(required=False)
 
 
 def _rows(row: serializers.Serializer[None]) -> serializers.ListSerializer[None]:
@@ -87,7 +89,8 @@ class EditDetailsSerializer(StudentDetailsSerializer):
             "work_experience": self.student.work_experience.all(),
         }
         for name in LISTS:
-            if not _ids_are_own(attrs[name], (row.pk for row in stored[name])):
+            own = stored[name].values_list("public_id", flat=True)
+            if not _ids_are_own(attrs[name], own):
                 raise serializers.ValidationError({name: [ROW_NOT_HERE_MESSAGE]})
         return attrs
 
@@ -104,6 +107,6 @@ class EditDetailsSerializer(StudentDetailsSerializer):
         )
 
 
-def _ids_are_own(rows: Sequence[Mapping[str, object]], own: Iterable[int]) -> bool:
+def _ids_are_own(rows: Sequence[Mapping[str, object]], own: Iterable[UUID]) -> bool:
     sent = [row["id"] for row in rows if "id" in row]
     return len(set(sent)) == len(sent) and set(sent) <= set(own)

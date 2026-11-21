@@ -188,14 +188,14 @@ class TestVisaAppointments:
             "count": 2,
             "results": [
                 {
-                    "visa_id": visa.pk,
-                    "student": {"id": soon.pk, "name": "Sita Gurung"},
+                    "visa_id": str(visa.public_id),
+                    "student": {"id": str(soon.public_id), "name": "Sita Gurung"},
                     "kind": "interview",
                     "at": f"{day.isoformat()}T14:00",
                 },
                 {
-                    "visa_id": edge.pk,
-                    "student": {"id": last_day.pk, "name": "Maya Tamang"},
+                    "visa_id": str(edge.public_id),
+                    "student": {"id": str(last_day.public_id), "name": "Maya Tamang"},
                     "kind": "interview",
                     "at": f"{(today() + timedelta(days=6)).isoformat()}T09:00",
                 },
@@ -220,8 +220,12 @@ class TestVisaAppointments:
 
         assert appointments["count"] == 2
         assert [(row["visa_id"], row["kind"], row["at"]) for row in appointments["results"]] == [
-            (visa.pk, "medical", f"{(today() + timedelta(days=1)).isoformat()}T09:00"),
-            (visa.pk, "biometrics", f"{(today() + timedelta(days=3)).isoformat()}T11:00"),
+            (str(visa.public_id), "medical", f"{(today() + timedelta(days=1)).isoformat()}T09:00"),
+            (
+                str(visa.public_id),
+                "biometrics",
+                f"{(today() + timedelta(days=3)).isoformat()}T11:00",
+            ),
         ]
 
     @pytest.mark.parametrize("decided", [VisaStatus.GRANTED, VisaStatus.REFUSED])

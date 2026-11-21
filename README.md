@@ -502,8 +502,9 @@ and merge**, so the pull request title becomes the commit (`.github/workflows/pr
 it by the same rules). Release with a pull request from `dev` into `main`, merged with **Create a
 merge commit**.
 
-**Checks on your machine.** Every commit runs ruff format, ruff check and mypy; every push runs
-`scripts/check-all.sh` (format, lint, types and missing migrations). Tests run on CI for every
+**Checks on your machine.** Every commit runs ruff format, ruff check and mypy, and checks for a
+missing migration when a models file changed. Pushing runs nothing more, so it is fast;
+`sh scripts/check-all.sh` runs them all over the whole repo when you want. Tests run on CI for every
 pull request; run them here with `uv run pytest -n auto`. Install the hooks once:
 `uv run pre-commit install`. Never skip them with `--no-verify`.
 

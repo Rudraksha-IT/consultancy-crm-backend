@@ -14,6 +14,7 @@ from django_tenants.utils import tenant_context
 from rest_framework import status
 
 from catalogue.models import University
+from fee_types.models import FeeType
 from modules.services import switch_modules
 from modules.types import Module
 from reports.calculations import months_back
@@ -160,6 +161,7 @@ class TestMoneyReport:
                 for month in months_back(today(), SIX)
             ],
             "money_out_by_category": [],
+            "money_in_by_fee_type": [],
         }
 
     def test_twelve_months_can_be_asked_for(self, abc: ConsultancyContext) -> None:
@@ -232,6 +234,40 @@ class TestMoneyReport:
             "money_out": 9,
         }
         assert twelve["money_out_by_category"] == [{"category": "office_rent", "amount": 20}]
+
+    def test_money_in_by_fee_type_over_the_months_largest_first(
+        self, abc: ConsultancyContext, admin: Staff, student: Student
+    ) -> None:
+        make_payment(abc, student, admin, amount=40000, paid_on=today(), fee_type="Visa fee")
+        make_payment(abc, student, admin, amount=5000, paid_on=months_ago(2), fee_type="Visa fee")
+        make_payment(abc, student, admin, amount=15000, paid_on=today(), fee_type="IELTS class")
+        make_payment(abc, student, admin, amount=15000, paid_on=today(), fee_type="PTE class")
+        make_payment(abc, student, admin, amount=99, paid_on=months_ago(SIX), fee_type="Other")
+        with tenant_context(abc.consultancy):
+            ids = {
+                name: str(uuid) for name, uuid in FeeType.objects.values_list("name", "public_id")
+            }
+
+        body = money(abc)
+
+        assert body["money_in_by_fee_type"] == [
+            {"fee_type": {"id": ids["Visa fee"], "name": "Visa fee"}, "amount": 45000},
+            {"fee_type": {"id": ids["IELTS class"], "name": "IELTS class"}, "amount": 15000},
+            {"fee_type": {"id": ids["PTE class"], "name": "PTE class"}, "amount": 15000},
+        ]
+
+    def test_a_hidden_fee_type_still_counts(
+        self, abc: ConsultancyContext, admin: Staff, student: Student
+    ) -> None:
+        make_payment(abc, student, admin, amount=700, paid_on=today(), fee_type="PTE class")
+        with tenant_context(abc.consultancy):
+            FeeType.objects.filter(name="PTE class").update(hidden=True)
+
+            pte = str(FeeType.objects.get(name="PTE class").public_id)
+
+        rows = money(abc)["money_in_by_fee_type"]
+
+        assert rows == [{"fee_type": {"id": pte, "name": "PTE class"}, "amount": 700}]
 
     def test_money_out_by_category_over_the_months_largest_first(
         self, abc: ConsultancyContext, admin: Staff

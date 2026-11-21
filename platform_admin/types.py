@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from uuid import UUID
 
 from modules.types import Module
 from tenancy.models import SetupState
@@ -24,6 +25,8 @@ class ConsultancyOnboarding:
     name: str
     subdomain: str
     theme: ThemeConfig
+    # Where replies to the office's emails go (ticket 20); checked, never empty.
+    contact_email: str
     # The starting Status: Evaluation (14 days), or Active paid up to `paid_until` (spec 13a).
     status: ConsultancyStatus = ConsultancyStatus.EVALUATION
     paid_until: date | None = None
@@ -33,7 +36,7 @@ class ConsultancyOnboarding:
 class ConsultancyOverview:
     """One row of the Platform's Consultancy list."""
 
-    id: int
+    id: UUID
     name: str
     subdomain: str
     host: str

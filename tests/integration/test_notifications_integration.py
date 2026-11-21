@@ -45,7 +45,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def one_url(notification: Notification | int) -> str:
     """One notification."""
-    pk = notification if isinstance(notification, int) else notification.pk
+    pk = notification if isinstance(notification, int | str) else notification.public_id
     return f"/api/notifications/{pk}/"
 
 
@@ -72,7 +72,7 @@ def kinds(office: ConsultancyContext) -> list[tuple[str, str]]:
 def stored(office: ConsultancyContext) -> list[Notification]:
     """Every stored notification, oldest first."""
     with tenant_context(office.consultancy):
-        return list(Notification.objects.order_by("pk"))
+        return list(Notification.objects.select_related("task").order_by("pk"))
 
 
 def notify(office: ConsultancyContext, task: Task, kind: NotificationKind) -> Notification:
@@ -99,7 +99,9 @@ class TestGivenATask:
         counsellor = named_staff(abc, "Bikash Thapa")
         student = make_student(abc, counsellor, name="Manisha Rai")
         log_in(abc, desk)
-        abc.client.post(TASKS_URL, good_body(counsellor, student=student.pk), format="json")
+        abc.client.post(
+            TASKS_URL, good_body(counsellor, student=str(student.public_id)), format="json"
+        )
         log_in(abc, counsellor)
 
         body = bell(abc)
@@ -112,17 +114,17 @@ class TestGivenATask:
             "unread_count": 1,
             "results": [
                 {
-                    "id": notification.pk,
+                    "id": str(notification.public_id),
                     "kind": "assigned",
                     "created_at": notification.created_at.isoformat(),
                     "is_read": False,
                     "task": {
-                        "id": notification.task_id,
+                        "id": str(notification.task.public_id) if notification.task else None,
                         "title": "Call Sita about her IELTS score",
                         "due_on": day(1).isoformat(),
                     },
-                    "by": {"id": desk.pk, "name": "Ramesh KC"},
-                    "student": {"id": student.pk, "name": "Manisha Rai"},
+                    "by": {"id": str(desk.public_id), "name": "Ramesh KC"},
+                    "student": {"id": str(student.public_id), "name": "Manisha Rai"},
                     "transfer_request": None,
                     "bin": None,
                     "work_from_home": None,
@@ -159,13 +161,15 @@ class TestGivenATask:
         admin = abc.log_in_as(Role.ADMIN)
         teacher = named_staff(abc, "Sunita Shrestha", Role.TEACHER)
         student = make_student(abc)
-        abc.client.post(TASKS_URL, good_body(teacher, student=student.pk), format="json")
+        abc.client.post(
+            TASKS_URL, good_body(teacher, student=str(student.public_id)), format="json"
+        )
         log_in(abc, teacher)
 
         [item] = results(abc)
 
         assert item["student"] is None
-        assert item["by"] == {"id": admin.pk, "name": admin.name}
+        assert item["by"] == {"id": str(admin.public_id), "name": admin.name}
 
     @pytest.mark.parametrize("title", INJECTION_STRINGS)
     def test_typed_titles_come_back_as_plain_text(

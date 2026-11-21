@@ -9,7 +9,7 @@ from expenses.services import CategoryTotal
 def expense_answer(expense: Expense) -> dict[str, object]:
     """One Expense: the day (AD), what kind, who to, how much, how, and who recorded it."""
     return {
-        "id": expense.pk,
+        "id": expense.public_id,
         "spent_on": expense.spent_on.isoformat(),
         "category": expense.category,
         "paid_to": expense.paid_to,

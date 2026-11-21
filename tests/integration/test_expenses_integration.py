@@ -51,7 +51,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def expense_url(expense: Expense | int) -> str:
     """One Expense."""
-    pk = expense if isinstance(expense, int) else expense.pk
+    pk = expense if isinstance(expense, int | str) else expense.public_id
     return f"{LIST_URL}{pk}/"
 
 
@@ -83,7 +83,7 @@ def stored(office: ConsultancyContext) -> list[tuple[str, str, int]]:
 def answer(expense: Expense) -> dict[str, object]:
     """One Expense as the API answers it."""
     return {
-        "id": expense.pk,
+        "id": str(expense.public_id),
         "spent_on": expense.spent_on.isoformat(),
         "category": expense.category,
         "paid_to": expense.paid_to,
@@ -247,7 +247,7 @@ class TestAddExpense:
             expense = Expense.objects.get()
         assert response.json() == {
             **GOOD_BODY,
-            "id": expense.pk,
+            "id": str(expense.public_id),
             "recorded_by": {"name": "Anita Admin"},
         }
         assert expense.recorded_by_id == admin.pk
@@ -447,7 +447,7 @@ class TestChangeExpense:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {
             **GOOD_BODY,
-            "id": expense.pk,
+            "id": str(expense.public_id),
             "recorded_by": {"name": "Anita Admin"},
         }
         assert stored(abc) == [("electricity", "Nepal Electricity Authority", 6500)]

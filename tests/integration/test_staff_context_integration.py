@@ -52,11 +52,11 @@ class TestStaffContext:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {
             "staff": {
-                "id": staff.pk,
+                "id": str(staff.public_id),
                 "name": staff.name,
                 "email": staff.email,
                 "role": expected_role,
-                "colour_mode": "device",
+                "colour_mode": "light",
             },
             "consultancy": {
                 "name": "ABC Education",
@@ -64,6 +64,14 @@ class TestStaffContext:
                 "status": "evaluation",
                 "status_message": None,
                 "evaluation_ends_at": evaluation_ends_at,
+                "office_details": {
+                    "contact_email": "",
+                    "phone": "",
+                    "address_line1": "",
+                    "address_line2": "",
+                    "website": "",
+                },
+                "has_contact_email": False,
             },
             "modules": ALWAYS_ON_MODULES,
             "date_display": "AD",
