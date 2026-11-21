@@ -1,0 +1,89 @@
+# Every production setting, and the server file(s) it is written to (ticket 15).
+#
+# The values live in GitHub: the backend repository -> Settings -> Environments ->
+# production-settings. A `secret` is an environment secret (hidden once saved; keep the readable
+# copy in the password manager); a `var` is an environment variable (readable there). The Settings
+# workflow (.github/workflows/settings.yml) builds the four files from them and sends them to the
+# server, where settings.sh checks every line against this same list before writing anything.
+# The same file is .github/settings-map.txt in the backend repository: change both together.
+#
+# Columns: NAME  FILES (comma-separated)  KIND (secret|var)  NEED (required|optional)  RULE
+#   RULE  -        may change any time with the Settings workflow
+#         fixed    may be set once; the workflow refuses to change it afterwards (it would break
+#                  stored data: the database, two-step login secrets, the Central login's index)
+#         dbpass   the database password: changed only when the workflow's "change the database
+#                  password" box is ticked (the server changes it in PostgreSQL first)
+# Files, all in /opt/crm/deploy on the server, mode 600, owned by deploy:
+#   .env           deploy.sh, backup.sh and the tunnel      .env.postgres  the database container
+#   .env.backend   Django (backend, worker, migrations)     .env.frontend  Next.js
+
+# --- deploy/.env: images, the tunnel, backups --------------------------------------------------
+REGISTRY                     .env                         var     required  -
+REGISTRY_USER                .env                         var     required  -
+REGISTRY_TOKEN               .env                         secret  required  -
+BACKUP_DIR                   .env                         var     optional  -
+DUMP_IMAGE                   .env                         var     optional  -
+TUNNEL_TOKEN                 .env                         secret  required  -
+BACKUP_AGE_RECIPIENT         .env                         var     required  -
+BACKUP_BUCKET                .env                         var     optional  -
+BACKUP_S3_ENDPOINT           .env                         var     required  -
+BACKUP_S3_ACCESS_KEY_ID      .env                         secret  required  -
+BACKUP_S3_SECRET_ACCESS_KEY  .env                         secret  required  -
+BACKUP_S3_PROVIDER           .env                         var     optional  -
+BACKUP_LOCAL_DIR             .env                         var     optional  -
+BACKUP_LOCAL_KEEP            .env                         var     optional  -
+BACKUP_KEEP_DAYS             .env                         var     optional  -
+BACKUP_KEEP_WEEKS            .env                         var     optional  -
+BACKUP_MAX_AGE_HOURS         .env                         var     optional  -
+
+# --- The database (the same three values reach Django) ----------------------------------------
+POSTGRES_DB                  .env.postgres,.env.backend   var     required  fixed
+POSTGRES_USER                .env.postgres,.env.backend   var     required  fixed
+POSTGRES_PASSWORD            .env.postgres,.env.backend   secret  required  dbpass
+
+# --- Shared by Django and Next.js ---------------------------------------------------------------
+PRODUCT_DOMAIN               .env.backend,.env.frontend   var     required  -
+INTERNAL_API_TOKEN           .env.backend,.env.frontend   secret  required  -
+PLATFORM_SUBDOMAIN           .env.backend,.env.frontend   var     optional  -
+CENTRAL_LOGIN_SUBDOMAIN      .env.backend,.env.frontend   var     optional  -
+LOG_LEVEL                    .env.backend,.env.frontend   var     optional  -
+
+# --- Django -------------------------------------------------------------------------------------
+DJANGO_SECRET_KEY            .env.backend                 secret  required  -
+DJANGO_DEBUG                 .env.backend                 var     optional  -
+JWT_SIGNING_KEY              .env.backend                 secret  required  -
+JWT_ACCESS_TOKEN_MINUTES     .env.backend                 var     optional  -
+STAFF_DIRECTORY_KEY          .env.backend                 secret  required  fixed
+TWO_FACTOR_SECRETS_KEY       .env.backend                 secret  optional  fixed
+STAFF_TWO_FACTOR_DEFAULT     .env.backend                 var     optional  -
+PLATFORM_ADMIN_NAME          .env.backend                 var     optional  -
+PLATFORM_ADMIN_EMAIL         .env.backend                 var     optional  -
+PLATFORM_ADMIN_PASSWORD      .env.backend                 secret  optional  -
+PLATFORM_ADMIN_TWO_FACTOR_DEFAULT .env.backend            var     optional  -
+POSTGRES_HOST                .env.backend                 var     required  -
+POSTGRES_PORT                .env.backend                 var     optional  -
+DOCUMENT_STORAGE             .env.backend                 var     optional  -
+DOCUMENTS_BUCKET             .env.backend                 var     required  -
+DOCUMENTS_S3_REGION          .env.backend                 var     required  -
+DOCUMENTS_S3_ENDPOINT_URL    .env.backend                 var     required  -
+DOCUMENTS_S3_PUBLIC_ENDPOINT_URL .env.backend             var     required  -
+AWS_ACCESS_KEY_ID            .env.backend                 secret  required  -
+AWS_SECRET_ACCESS_KEY        .env.backend                 secret  required  -
+EMAIL_BACKEND                .env.backend                 var     required  -
+EMAIL_HOST                   .env.backend                 var     required  -
+EMAIL_PORT                   .env.backend                 var     required  -
+EMAIL_USE_TLS                .env.backend                 var     required  -
+EMAIL_HOST_USER              .env.backend                 secret  required  -
+EMAIL_HOST_PASSWORD          .env.backend                 secret  required  -
+DEFAULT_FROM_EMAIL           .env.backend                 var     required  -
+JOB_POLL_SECONDS             .env.backend                 var     optional  -
+JOB_TIMEOUT_SECONDS          .env.backend                 var     optional  -
+LOG_FORMAT                   .env.backend                 var     optional  -
+LOG_SLOW_REQUEST_MS          .env.backend                 var     optional  -
+
+# --- Next.js ------------------------------------------------------------------------------------
+BACKEND_BASE_URL             .env.frontend                var     required  -
+AUTH_COOKIE_KEY              .env.frontend                secret  required  -
+AUTH_COOKIE_SECURE           .env.frontend                var     optional  -
+CLIENT_IP_SOURCE             .env.frontend                var     optional  -
+ENABLE_LOGGER                .env.frontend                var     optional  -

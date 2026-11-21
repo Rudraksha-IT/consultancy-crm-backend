@@ -1,0 +1,74 @@
+name: Settings
+
+# Send the production settings to the server (ticket 15). Actions > Settings > Run workflow.
+# The values are this repository's `production-settings` environment: secrets (hidden once saved;
+# the password manager keeps the readable copy) and variables (readable). The job waits for the
+# environment's reviewer (the product owner) to approve it, so nothing reaches the server without
+# that approval. settings-map.txt says which value goes to which server file.
+#   apply  build the four env files from the values and send them; the server checks every line,
+#          writes them (keeping the set before for one undo) and restarts only what reads a
+#          changed file. Tick "change the database password" only when POSTGRES_PASSWORD changed.
+#   undo   put back the settings from before the last apply.
+# The reason goes into the server's settings history with who ran it. No value is ever printed.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [apply, undo]
+        default: apply
+      change_database_password:
+        description: Change the database password (only when POSTGRES_PASSWORD changed)
+        type: boolean
+        default: false
+      reason:
+        description: Why (kept in the server's settings history)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  settings:
+    runs-on: ubuntu-latest
+    environment: production-settings
+    # Never at the same time as a deploy or a backup (they share this group), never cancelled.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    timeout-minutes: 20
+    env:
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      DEPLOY_REASON: ${{ inputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cloudflared (only when the server is reached through Cloudflare Access)
+        run: .github/scripts/install-cloudflared.sh
+      - name: Build the settings
+        if: inputs.action == 'apply'
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          umask 077
+          python3 .github/scripts/build-settings.py .github/settings-map.txt >"$RUNNER_TEMP/settings.bundle"
+      - name: Send them to the server
+        if: inputs.action == 'apply'
+        env:
+          CHANGE_DATABASE_PASSWORD: ${{ inputs.change_database_password }}
+        run: |
+          mode=keep-db-password
+          if [[ "$CHANGE_DATABASE_PASSWORD" == true ]]; then mode=change-db-password; fi
+          .github/scripts/deploy-over-ssh.sh settings "$mode" <"$RUNNER_TEMP/settings.bundle"
+      - name: Undo the last change
+        if: inputs.action == 'undo'
+        run: .github/scripts/deploy-over-ssh.sh settings-undo </dev/null
+      - name: Remove the built settings
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/settings.bundle"
