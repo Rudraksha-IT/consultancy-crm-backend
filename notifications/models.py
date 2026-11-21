@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import Q
 
 from clock_in.models import WorkFromHome
+from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
 from students.models import Student
 from tasks.models import Task
@@ -67,6 +68,9 @@ class Notification(models.Model):
     good, so a Bin notification keeps its Student, what the item was called, who acted (as named
     then) and why it was put in the Bin (issue 79).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     recipient = models.ForeignKey(Staff, on_delete=models.PROTECT, related_name="notifications")
     kind = models.CharField(max_length=30, choices=NotificationKind.choices)

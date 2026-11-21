@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
+from uuid import UUID
 
 from django.core.paginator import EmptyPage, Paginator
 from rest_framework import status
@@ -18,6 +20,13 @@ from catalogue.answers import course_answer
 from catalogue.models import Course
 from catalogue.permissions import CanChangeCatalogue, CanReadCatalogue
 from catalogue.services import course_by_id
+from config.public_ids import pk_for
+from course_files.answers import binned_course_file_answer
+from course_files.models import CourseFile
+from course_files.services import binned_course_files
+from document_examples.answers import binned_example_answer
+from document_examples.models import DocumentExample
+from document_examples.services import binned_examples
 from documents.answers import (
     bin_item_answer,
     checklist_answer,
@@ -28,6 +37,7 @@ from documents.answers import (
     paperwork_totals,
 )
 from documents.bin import (
+    BinItem,
     BinTarget,
     bin_items,
     delete_for_good,
@@ -45,6 +55,7 @@ from documents.exceptions import (
     DocumentTypeInUseError,
     DuplicateDocumentTypeError,
     EveryoneNeedsTypeError,
+    KeepsExamplesError,
     NotAskedError,
     NotInBinError,
     NotNewestCopyError,
@@ -118,6 +129,9 @@ NOT_STORED_MESSAGE = "We couldn't store the file. Try again."
 ALREADY_CHECKED_MESSAGE = "This document has already been checked."
 NOT_NEWEST_MESSAGE = "A newer copy of this document has been uploaded."
 TYPE_IN_USE_MESSAGE = "This document is asked for or has files, so it can't be removed."
+KEEPS_EXAMPLES_MESSAGE = (
+    "This document has example files (counting the Bin), so it can't be removed."
+)
 EVERYONE_NEEDS_TYPE_MESSAGE = "Every Student needs this document, so it can't be removed."
 TOO_MANY_FILES_MESSAGE = f"A document can have at most {MAX_FILES_PER_DOCUMENT} files."
 REJECTED_NEEDS_NEW_COPY_MESSAGE = (
@@ -142,14 +156,14 @@ def _already_uploaded_message(name: str) -> str:
     return f"A file is already uploaded for {name}, so it stays on the checklist."
 
 
-def _student(student_id: int) -> Student:
+def _student(student_id: UUID) -> Student:
     try:
-        return Student.objects.select_related("assigned_counsellor").get(pk=student_id)
+        return Student.objects.select_related("assigned_counsellor").get(public_id=student_id)
     except Student.DoesNotExist as error:
         raise NotFound from error
 
 
-def _changeable_student(request: Request, student_id: int) -> Student:
+def _changeable_student(request: Request, student_id: UUID) -> Student:
     """The Student, if the Staff member may change their Documents; else 404/403."""
     student = _student(student_id)
     reason = why_cannot(get_request_staff(request), StudentAction.CHANGE_DOCUMENTS, student)
@@ -168,7 +182,7 @@ def _checklist(student: Student, viewer: Staff, code: int = status.HTTP_200_OK) 
         checklist_of(student),
         can_change=can_change,
         deletes_for_good=viewer.role == Role.ADMIN and not is_platform_visitor(viewer),
-        viewer_id=None if is_platform_visitor(viewer) else viewer.pk,
+        viewer_id=None if is_platform_visitor(viewer) else viewer.public_id,
     )
     return Response(answer, status=code)
 
@@ -239,6 +253,9 @@ class DocumentTypeView(APIView):
         except DocumentTypeInUseError:
             # expected refusal, answered with its status; the request line logs it
             return _refused(TYPE_IN_USE_MESSAGE)
+        except KeepsExamplesError:
+            # expected refusal, answered with its status; the request line logs it
+            return _refused(KEEPS_EXAMPLES_MESSAGE)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -249,11 +266,11 @@ class StudentDocumentsView(APIView):
     # Uploads are a form with one file; nothing else is read.
     parser_classes = (MultiPartParser,)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the Student's checklist."""
         return _checklist(_student(student_id), get_request_staff(request))
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Store the file as Pending Verification and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
         staff = get_request_staff(request)
@@ -290,14 +307,16 @@ class DocumentFilesView(APIView):
     # A form with the files only; nothing else is read.
     parser_classes = (MultiPartParser,)
 
-    def post(self, request: Request, student_id: int, document_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID, document_id: UUID) -> Response:
         """Store the files and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
         staff = get_request_staff(request)
         serializer = NewFilesSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            add_files(student, document_id, serializer.to_new_files(), by=staff)
+            add_files(
+                student, _document_pk(student, document_id), serializer.to_new_files(), by=staff
+            )
         except Document.DoesNotExist as error:
             raise NotFound from error
         except (
@@ -320,7 +339,7 @@ class DocumentVerificationView(APIView):
     permission_classes = (IsAuthenticated, CanSeeStudents)
     parser_classes = (JSONParser,)
 
-    def post(self, request: Request, student_id: int, document_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID, document_id: UUID) -> Response:
         """Record the judgment and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
         staff = get_request_staff(request)
@@ -329,7 +348,7 @@ class DocumentVerificationView(APIView):
         try:
             check_document(
                 student,
-                document_id,
+                _document_pk(student, document_id),
                 serializer.verification_value(),
                 by=staff,
                 reason=serializer.reason_value(),
@@ -353,16 +372,17 @@ class DocumentLinkView(APIView):
 
     permission_classes = (IsAuthenticated, CanSeeStudents)
 
-    def get(self, request: Request, student_id: int, document_id: int, file_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID, document_id: UUID, file_id: UUID) -> Response:
         """Return the link and how many seconds it works for."""
         student = _student(student_id)
         query = DocumentLinkQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
+        target = _target(student, document_id, file_id)
         try:
             link = document_link(
                 student,
-                document_id,
-                file_id,
+                target.document_id,
+                target.file_id or 0,
                 as_attachment=query.as_attachment(),
                 by=get_request_staff(request),
             )
@@ -543,7 +563,7 @@ class StudentAskedView(APIView):
     permission_classes = (IsAuthenticated, CanSeeStudents)
     parser_classes = (JSONParser,)
 
-    def put(self, request: Request, student_id: int) -> Response:
+    def put(self, request: Request, student_id: UUID) -> Response:
         """Replace the list and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
         staff = get_request_staff(request)
@@ -564,7 +584,7 @@ class StudentAskedTypeView(APIView):
 
     permission_classes = (IsAuthenticated, CanSeeStudents)
 
-    def delete(self, request: Request, student_id: int, type_id: int) -> Response:
+    def delete(self, request: Request, student_id: UUID, type_id: int) -> Response:
         """Take it off and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
         staff = get_request_staff(request)
@@ -601,8 +621,18 @@ class IsBinAdmin(BasePermission):
         )
 
 
-def _target(document_id: int, file_id: int | None) -> BinTarget:
-    return BinTarget(document_id=document_id, file_id=file_id)
+def _document_pk(student: Student, document_id: UUID) -> int:
+    """The number of the Student's own Document with this UUID; 0 (none) if it isn't theirs."""
+    return pk_for(Document.objects.filter(student=student), document_id)
+
+
+def _target(student: Student, document_id: UUID, file_id: UUID | None) -> BinTarget:
+    """The Student's own Document, or one of its files, named by UUIDs (0 where unknown)."""
+    document_pk = _document_pk(student, document_id)
+    if file_id is None:
+        return BinTarget(document_id=document_pk, file_id=None)
+    files = DocumentFile.objects.filter(document__student=student, document_id=document_pk)
+    return BinTarget(document_id=document_pk, file_id=pk_for(files, file_id))
 
 
 def _nothing_sent(request: Request) -> None:
@@ -637,7 +667,7 @@ class PutInBinView(_BinAction):
     """Put a Document, or one of its files, in the Bin with a reason (POST; not Admins)."""
 
     def post(
-        self, request: Request, student_id: int, document_id: int, file_id: int | None = None
+        self, request: Request, student_id: UUID, document_id: UUID, file_id: UUID | None = None
     ) -> Response:
         """Put it in the Bin and return the checklist as it is now."""
         student = _changeable_student(request, student_id)
@@ -646,7 +676,7 @@ class PutInBinView(_BinAction):
             raise PermissionDenied(ADMINS_DELETE_MESSAGE)
         serializer = BinReasonSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        target = _target(document_id, file_id)
+        target = _target(student, document_id, file_id)
         reason = serializer.reason_value()
         return self._act(request, student, lambda: put_in_bin(student, target, reason, staff))
 
@@ -655,13 +685,13 @@ class TakeOutOfBinView(_BinAction):
     """Take something back out of the Bin (POST; only whoever put it there)."""
 
     def post(
-        self, request: Request, student_id: int, document_id: int, file_id: int | None = None
+        self, request: Request, student_id: UUID, document_id: UUID, file_id: UUID | None = None
     ) -> Response:
         """Take it out and return the checklist as it is now."""
         student = _student(student_id)
         _nothing_sent(request)
         staff = get_request_staff(request)
-        target = _target(document_id, file_id)
+        target = _target(student, document_id, file_id)
         return self._act(request, student, lambda: take_out(student, target, staff))
 
 
@@ -671,13 +701,13 @@ class RestoreFromBinView(_BinAction):
     permission_classes = (IsAuthenticated, IsBinAdmin)
 
     def post(
-        self, request: Request, student_id: int, document_id: int, file_id: int | None = None
+        self, request: Request, student_id: UUID, document_id: UUID, file_id: UUID | None = None
     ) -> Response:
         """Restore it and return the checklist as it is now."""
         student = _student(student_id)
         _nothing_sent(request)
         staff = get_request_staff(request)
-        target = _target(document_id, file_id)
+        target = _target(student, document_id, file_id)
         return self._act(request, student, lambda: restore(student, target, staff))
 
 
@@ -691,12 +721,12 @@ class DeleteDocumentView(_BinAction):
     permission_classes = (IsAuthenticated, IsBinAdmin)
 
     def delete(
-        self, request: Request, student_id: int, document_id: int, file_id: int | None = None
+        self, request: Request, student_id: UUID, document_id: UUID, file_id: UUID | None = None
     ) -> Response:
         """Delete it with its stored files and return the checklist as it is now."""
         student = _student(student_id)
         staff = get_request_staff(request)
-        target = _target(document_id, file_id)
+        target = _target(student, document_id, file_id)
         if is_platform_visitor(staff) and not _is_in_bin(student, target):
             raise PermissionDenied(PUT_IT_IN_THE_BIN_MESSAGE)
         return self._act(request, student, lambda: delete_for_good(student, target, staff))
@@ -726,7 +756,7 @@ class BinView(APIView):
         query = BinQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         try:
-            page = Paginator(bin_items(), BIN_PER_PAGE).page(query.page_number())
+            page = Paginator(_everything_in_bin(), BIN_PER_PAGE).page(query.page_number())
         except EmptyPage as error:
             raise NotFound from error
         return Response(
@@ -734,9 +764,37 @@ class BinView(APIView):
                 "count": page.paginator.count,
                 "page": page.number,
                 "page_size": BIN_PER_PAGE,
-                "results": [bin_item_answer(item) for item in page],
+                "results": [_bin_row(item) for item in page],
             }
         )
+
+
+type _InTheBin = BinItem | CourseFile | DocumentExample
+
+
+def _everything_in_bin() -> list[_InTheBin]:
+    """Everything in the Bin, newest first, each with its kind.
+
+    Documents and their files, Course Files (spec 56) and Document Examples (spec 63).
+    """
+    items: list[_InTheBin] = [*bin_items(), *binned_course_files(), *binned_examples()]
+    return sorted(items, key=_binned_at, reverse=True)
+
+
+def _binned_at(item: _InTheBin) -> tuple[datetime, int, int]:
+    if isinstance(item, BinItem):
+        return item.binned_at, 0, item.document.pk
+    at = item.binned_at
+    assert at is not None  # noqa: S101  # only files in the Bin are listed
+    return at, 1 if isinstance(item, CourseFile) else 2, item.pk
+
+
+def _bin_row(item: _InTheBin) -> dict[str, object]:
+    if isinstance(item, BinItem):
+        return bin_item_answer(item)
+    if isinstance(item, CourseFile):
+        return binned_course_file_answer(item)
+    return binned_example_answer(item)
 
 
 class BinFileLinkView(APIView):
@@ -744,12 +802,12 @@ class BinFileLinkView(APIView):
 
     permission_classes = (IsAuthenticated, IsBinAdmin)
 
-    def get(self, request: Request, file_id: int) -> Response:
+    def get(self, request: Request, file_id: UUID) -> Response:
         """Return the link and how many seconds it works for."""
         query = DocumentLinkQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         try:
-            file = file_in_bin(file_id)
+            file = file_in_bin(pk_for(DocumentFile.objects.all(), file_id))
         except DocumentFile.DoesNotExist as error:
             raise NotFound from error
         link = signed_file_link(

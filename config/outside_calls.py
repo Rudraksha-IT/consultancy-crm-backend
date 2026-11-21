@@ -1,4 +1,4 @@
-"""One way to log a call to an outside service: S3, an email server or an SMS company (issue 58).
+"""One way to log a call to an outside service: S3 or the product's email server (issue 58).
 
 Success is one INFO line, failure one ERROR line with the traceback; both name the provider and
 the operation and say how long it took. Credentials, message text and recipients are never
@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from time import monotonic
 
-# The product's own email server (SES in production); an office's own server is "smtp".
+# The product's own email server (ADR 0023), the only one email ever goes through.
 EMAIL_PROVIDER = "email"
 
 logger = logging.getLogger(__name__)

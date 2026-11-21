@@ -21,11 +21,15 @@ from applications.statuses import ApplicationStatus, VisaStatus
 from applications.visa_list import checklists_for, find_visas
 from clock_in.serializers import ClockInExportQuerySerializer
 from clock_in.services import team_month_rows, team_staff
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from exports.models import ExportList
+from fee_types.models import FeeType
+from payments.models import PaymentMethod
+from payments.serializers import PaymentListQuerySerializer
+from payments.services import find_payments
 from staff.actors import actor_name
 from staff.models import Staff
-from students.models import Country, Source, Stage, TargetLevel
+from students.models import Country, Source, Stage, Student, TargetLevel
 from students.serializers import StudentListQuerySerializer
 from students.services import find_students
 from students.types import COUNSELLOR_ME, COUNSELLOR_NONE
@@ -40,6 +44,8 @@ CHUNK_SIZE = 500
 NO_FILTERS_TEXT = "No filters, everyone"
 UNKNOWN_COUNSELLOR_TEXT = "Unknown counsellor"
 NO_COUNSELLOR_TEXT = "No counsellor yet"
+UNKNOWN_FEE_TYPE_TEXT = "A Fee Type since deleted"
+UNKNOWN_STUDENT_TEXT = "Unknown Student"
 HAS_APPOINTMENT_TEXT = {"true": "Has a date", "false": "No date yet"}
 _MONTH_NAMES = (
     "January",
@@ -130,13 +136,18 @@ def _appointment_text(booked: Booked | None) -> str:
     return f"{booked.kind.label} {timezone.localtime(booked.at):%Y-%m-%d %H:%M}"
 
 
-def _counsellor_filter(value: Any, viewer: Staff) -> str:  # noqa: ANN401  # "me", "none" or an id
+def _counsellor_filter(value: Any, viewer: Staff) -> str:  # noqa: ANN401  # "me", "none", a UUID
     """Whose Students, as the person exporting saw it."""
     if value == COUNSELLOR_ME:
         return f"{actor_name(viewer)}'s Students"
     if value == COUNSELLOR_NONE:
         return NO_COUNSELLOR_TEXT
-    name = Staff.objects.filter(pk=int(value)).values_list("name", flat=True).first()
+    public_id = parse_record_id(value)
+    name = (
+        None
+        if public_id is None
+        else Staff.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
     return UNKNOWN_COUNSELLOR_TEXT if name is None else str(name)
 
 
@@ -157,6 +168,41 @@ def _counsellor(counsellor: Staff | None) -> str:
 def _day(moment: datetime) -> str:
     """The Consultancy's calendar day of a stored moment."""
     return timezone.localdate(moment).isoformat()
+
+
+def _fee_type_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
+    """The Fee Type's name, from its UUID; one deleted since reads as unknown."""
+    public_id = parse_record_id(str(value))
+    found = (
+        None
+        if public_id is None
+        else FeeType.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
+    return found or UNKNOWN_FEE_TYPE_TEXT
+
+
+def _student_filter(value: Any, _viewer: Staff) -> str:  # noqa: ANN401  # a validated id
+    """The Student's name, from their UUID (ADR 0027)."""
+    public_id = parse_record_id(value)
+    found = (
+        None
+        if public_id is None
+        else Student.objects.filter(public_id=public_id).values_list("name", flat=True).first()
+    )
+    return found or UNKNOWN_STUDENT_TEXT
+
+
+def _payment_rows(payments: QuerySet[Any]) -> Iterator[Row]:
+    for payment in payments.iterator(chunk_size=CHUNK_SIZE):
+        yield [
+            payment.paid_on.isoformat(),
+            payment.student.name,
+            payment.fee_type.name,
+            payment.note,
+            str(payment.amount),
+            PaymentMethod(payment.method).label,
+            payment.recorded_by_name,
+        ]
 
 
 def _student_rows(students: QuerySet[Any]) -> Iterator[Row]:
@@ -329,5 +375,26 @@ LIST_EXPORTS: dict[ExportList, ListExport] = {
         find=lambda query, _viewer: team_staff(*query.year_month()),
         rows=_clock_in_rows,
         described=(("Month", "month", _month),),
+    ),
+    ExportList.PAYMENTS: ListExport(
+        query=PaymentListQuerySerializer,
+        columns=(
+            "Date",
+            "Student",
+            "Fee Type",
+            "Note",
+            "Amount (NPR)",
+            "Method",
+            "Taken by",
+        ),
+        find=lambda query, _viewer: find_payments(query.to_filters()).payments,
+        rows=lambda found, _query: _payment_rows(found),
+        described=(
+            ("From", "from", _as_is),
+            ("To", "to", _as_is),
+            ("Student", "student", _student_filter),
+            ("Fee Type", "fee_type", _fee_type_filter),
+            ("Search", "q", _as_is),
+        ),
     ),
 }

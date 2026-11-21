@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date
+from uuid import UUID
 
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import Model, QuerySet
@@ -34,7 +35,7 @@ from batches.exceptions import (
     LostStudentError,
     NotInBatchError,
 )
-from batches.models import Batch, BatchMembership
+from batches.models import Batch, BatchMembership, Mark
 from batches.permissions import BatchesModuleIsOn, batch_permission
 from batches.serializers import (
     MARKED_TWICE_MESSAGE,
@@ -53,6 +54,7 @@ from batches.services import (
     remove_student,
     with_counts,
 )
+from config.public_ids import pk_for
 from staff.context import get_request_staff
 from staff.models import Staff
 from students.models import Student
@@ -181,11 +183,13 @@ class BatchMemberView(APIView):
 
     permission_classes = _permissions(BatchAction.CHANGE)
 
-    def delete(self, request: Request, batch_id: int, student_id: int) -> Response:
+    def delete(self, request: Request, batch_id: int, student_id: UUID) -> Response:
         """Remove the Student; answer with nothing."""
         batch = _batch(batch_id)
         try:
-            remove_student(batch, student_id, by=get_request_staff(request))
+            remove_student(
+                batch, pk_for(Student.objects.all(), student_id), by=get_request_staff(request)
+            )
         except BatchMembership.DoesNotExist as error:
             raise NotFound from error
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -208,7 +212,7 @@ class BatchTeachersView(APIView):
 
     def get(self, request: Request) -> Response:
         """Return each one's id and name, by name."""
-        return Response([{"id": t.pk, "name": t.name} for t in active_teachers()])
+        return Response([{"id": str(t.public_id), "name": t.name} for t in active_teachers()])
 
 
 def _enrolled_answers(students: list[Student]) -> list[dict[str, object]]:
@@ -265,7 +269,7 @@ class AttendanceDayView(APIView):
         serializer = AttendanceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            take_attendance(batch, on, serializer.to_marks(), by=staff)
+            take_attendance(batch, on, _by_number(serializer.to_marks()), by=staff)
         except NotInBatchError as error:
             raise ValidationError({"marks": [MARKED_TWICE_MESSAGE]}) from error
         return Response(attendance_day_answer(batch, on, members_of(batch), staff))
@@ -276,10 +280,18 @@ class StudentClassesView(APIView):
 
     permission_classes = (IsAuthenticated, BatchesModuleIsOn, CanSeeStudents)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return each class by name with the share attended and the latest class days."""
         try:
-            student = Student.objects.get(pk=student_id)
+            student = Student.objects.get(public_id=student_id)
         except Student.DoesNotExist as error:
             raise NotFound from error
         return Response([student_class_answer(entry) for entry in classes_of(student)])
+
+
+def _by_number(marks: dict[UUID, Mark]) -> dict[int, Mark]:
+    """The marks by Student number; a UUID of no Student here becomes 0, which no class holds."""
+    numbers = dict(
+        Student.objects.filter(public_id__in=marks).values_list("public_id", "pk").iterator()
+    )
+    return {numbers.get(public_id, 0): mark for public_id, mark in marks.items()}

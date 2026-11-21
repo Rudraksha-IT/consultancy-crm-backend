@@ -60,20 +60,20 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
 
 def batch_url(batch: Batch | int) -> str:
     """One Batch."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     return f"/api/batches/{pk}/"
 
 
 def members_url(batch: Batch | int) -> str:
     """A Batch's Students."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     return f"/api/batches/{pk}/students/"
 
 
-def member_url(batch: Batch | int, student: Student | int) -> str:
+def member_url(batch: Batch | int, student: Student | int | str) -> str:
     """One Student in a Batch."""
-    batch_pk = batch if isinstance(batch, int) else batch.pk
-    student_pk = student if isinstance(student, int) else student.pk
+    batch_pk = batch if isinstance(batch, int | str) else batch.public_id
+    student_pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/batches/{batch_pk}/students/{student_pk}/"
 
 
@@ -87,7 +87,7 @@ def good_body(teacher: Staff, /, **changes: object) -> dict[str, object]:
     return {
         "name": "IELTS Morning",
         "test_type": "ielts",
-        "teacher": teacher.pk,
+        "teacher": str(teacher.public_id),
         "time_slot": "7:00-8:30 AM",
         "starts_on": day(5).isoformat(),
         "ends_on": day(65).isoformat(),
@@ -161,10 +161,10 @@ class TestCreating:
         assert response.status_code == status.HTTP_201_CREATED
         batch = stored_batches(abc)[0]
         assert response.json() == {
-            "id": batch.pk,
+            "id": str(batch.public_id),
             "name": "IELTS Morning",
             "test_type": "ielts",
-            "teacher": {"id": teacher.pk, "name": "Gita Lama"},
+            "teacher": {"id": str(teacher.public_id), "name": "Gita Lama"},
             "time_slot": "7:00-8:30 AM",
             "starts_on": day(5).isoformat(),
             "ends_on": day(65).isoformat(),
@@ -220,6 +220,8 @@ class TestCreating:
         me = abc.log_in_as(Role.COUNSELLOR)
 
         batch_id = create(abc, teacher).json()["id"]
+        with tenant_context(abc.consultancy):  # logs keep the number
+            batch_id = Batch.objects.get(public_id=batch_id).pk
 
         json_logs.only(
             f"Batch created: batch_id={batch_id}, teacher_id={teacher.pk}, by_staff_id={me.pk}"
@@ -282,7 +284,7 @@ class TestRefusedInput:
     ) -> None:
         other = abc.add_staff(role, email=f"not-teacher-{role.value}@abc.test")
 
-        response = create(abc, teacher, teacher=other.pk)
+        response = create(abc, teacher, teacher=str(other.public_id))
 
         assert response.json() == TEACHER_MESSAGE
 
@@ -400,7 +402,10 @@ class TestEditing:
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["teacher"] == {"id": other_teacher.pk, "name": "Hari Rai"}
+        assert response.json()["teacher"] == {
+            "id": str(other_teacher.public_id),
+            "name": "Hari Rai",
+        }
         stored = stored_batches(abc)[0]
         assert (stored.name, stored.test_type, stored.teacher_id) == (
             "PTE Evening",
@@ -555,7 +560,7 @@ class TestListing:
 
         [listed] = abc.client.get(BATCHES_URL).json()["results"]
 
-        assert listed["teacher"] == {"id": teacher.pk, "name": "Gita Lama"}
+        assert listed["teacher"] == {"id": str(teacher.public_id), "name": "Gita Lama"}
 
 
 class TestOneClass:
@@ -568,8 +573,8 @@ class TestOneClass:
         body = abc.client.get(batch_url(batch)).json()
 
         assert body["students"] == [
-            {"id": anil.pk, "name": "Anil Rai", "attended_percent": None},
-            {"id": sita.pk, "name": "Sita Gurung", "attended_percent": None},
+            {"id": str(anil.public_id), "name": "Anil Rai", "attended_percent": None},
+            {"id": str(sita.public_id), "name": "Sita Gurung", "attended_percent": None},
         ]
         assert body["student_count"] == 2
         assert body["can_change"] is True
@@ -624,11 +629,13 @@ class TestAddingStudents:
         # Not their own Student: any counsellor fills any class (spec 84).
         student = make_student(abc, named_staff(abc, "Anjali Gurung"), stage=Stage.COUNSELLING)
 
-        response = abc.client.post(members_url(batch), {"student": student.pk}, format="json")
+        response = abc.client.post(
+            members_url(batch), {"student": str(student.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["students"] == [
-            {"id": student.pk, "name": "Sita Gurung", "attended_percent": None}
+            {"id": str(student.public_id), "name": "Sita Gurung", "attended_percent": None}
         ]
         assert member_names(abc, batch) == ["Sita Gurung"]
 
@@ -640,7 +647,7 @@ class TestAddingStudents:
         first = make_batch(abc, teacher, (student,))
         second = make_batch(abc, teacher, name="IELTS Evening")
 
-        abc.client.post(members_url(second), {"student": student.pk}, format="json")
+        abc.client.post(members_url(second), {"student": str(student.public_id)}, format="json")
 
         assert member_names(abc, first) == member_names(abc, second) == ["Sita Gurung"]
 
@@ -649,7 +656,9 @@ class TestAddingStudents:
         student = make_student(abc)
         batch = make_batch(abc, teacher, (student,))
 
-        response = abc.client.post(members_url(batch), {"student": student.pk}, format="json")
+        response = abc.client.post(
+            members_url(batch), {"student": str(student.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ALREADY_IN
@@ -660,7 +669,9 @@ class TestAddingStudents:
         student = make_student(abc, stage=Stage.LOST, lost_reason="Moved away.")
         batch = make_batch(abc, teacher)
 
-        response = abc.client.post(members_url(batch), {"student": student.pk}, format="json")
+        response = abc.client.post(
+            members_url(batch), {"student": str(student.public_id)}, format="json"
+        )
 
         assert response.json() == LOST_CANT_JOIN
         assert member_names(abc, batch) == []
@@ -682,7 +693,7 @@ class TestAddingStudents:
         batch = make_batch(abc, teacher)
 
         response = abc.client.post(
-            members_url(batch), {"student": student.pk, "batch": 9}, format="json"
+            members_url(batch), {"student": str(student.public_id), "batch": 9}, format="json"
         )
 
         assert response.json() == {"detail": ["Unknown field."]}
@@ -694,7 +705,9 @@ class TestAddingStudents:
         student = make_student(abc)
         log_in(abc, teacher if role == Role.TEACHER else abc.add_staff(role))
 
-        response = abc.client.post(members_url(batch), {"student": student.pk}, format="json")
+        response = abc.client.post(
+            members_url(batch), {"student": str(student.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert member_names(abc, batch) == []
@@ -703,7 +716,9 @@ class TestAddingStudents:
         abc.log_in_as(Role.ADMIN)
         student = make_student(abc)
 
-        response = abc.client.post(members_url(999_999), {"student": student.pk}, format="json")
+        response = abc.client.post(
+            members_url(999_999), {"student": str(student.public_id)}, format="json"
+        )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -714,7 +729,7 @@ class TestAddingStudents:
         batch = make_batch(abc, teacher)
         student = make_student(abc)
 
-        abc.client.post(members_url(batch), {"student": student.pk}, format="json")
+        abc.client.post(members_url(batch), {"student": str(student.public_id)}, format="json")
 
         json_logs.only(
             f"Student added to Batch: batch_id={batch.pk}, student_id={student.pk}, "
@@ -796,17 +811,17 @@ class TestStudentsAndTheirClasses:
             "page_size": 25,
             "results": [
                 {
-                    "id": anil.pk,
+                    "id": str(anil.public_id),
                     "name": "Anil Rai",
-                    "batches": [{"id": morning.pk, "name": "IELTS Morning"}],
+                    "batches": [{"id": str(morning.public_id), "name": "IELTS Morning"}],
                     "attended_percent": None,
                 },
                 {
-                    "id": sita.pk,
+                    "id": str(sita.public_id),
                     "name": "Sita Gurung",
                     "batches": [
-                        {"id": morning.pk, "name": "IELTS Morning"},
-                        {"id": pte.pk, "name": "PTE Day"},
+                        {"id": str(morning.public_id), "name": "IELTS Morning"},
+                        {"id": str(pte.public_id), "name": "PTE Day"},
                     ],
                     "attended_percent": None,
                 },
@@ -851,8 +866,8 @@ class TestTeachers:
             Staff.objects.filter(pk=gone.pk).update(status=StaffStatus.DEACTIVATED)
 
         assert abc.client.get(TEACHERS_URL).json() == [
-            {"id": teacher.pk, "name": "Gita Lama"},
-            {"id": hari.pk, "name": "Hari Rai"},
+            {"id": str(teacher.public_id), "name": "Gita Lama"},
+            {"id": str(hari.public_id), "name": "Hari Rai"},
         ]
 
     @pytest.mark.parametrize("role", [Role.FRONT_DESK, Role.TEACHER])
@@ -876,7 +891,7 @@ class TestModuleSwitch:
             create(abc, teacher),
             abc.client.get(batch_url(batch)),
             abc.client.put(batch_url(batch), good_body(teacher), format="json"),
-            abc.client.post(members_url(batch), {"student": student.pk}, format="json"),
+            abc.client.post(members_url(batch), {"student": str(student.public_id)}, format="json"),
             abc.client.delete(member_url(batch, student)),
             abc.client.get(ENROLLED_URL),
             abc.client.get(TEACHERS_URL),
@@ -1018,5 +1033,5 @@ class TestModel:
         student = make_student(abc)
 
         assert BatchDateField("x").to_representation(date(2026, 11, 2)) == "2026-11-02"
-        assert TeacherField().to_representation(teacher) == teacher.pk
-        assert StudentChoiceField().to_representation(student) == student.pk
+        assert TeacherField().to_representation(teacher) == str(teacher.public_id)
+        assert StudentChoiceField().to_representation(student) == str(student.public_id)

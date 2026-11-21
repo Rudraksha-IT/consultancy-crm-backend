@@ -55,6 +55,9 @@ TEACHER_CARDS = ["classes_taken", "attendance_marked"]
 FIRST = "First visit"
 
 
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
+
 @pytest.fixture
 def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     """The Consultancy every test here works in, with test-prep classes switched on."""
@@ -63,14 +66,14 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def progress_url(staff: Staff | int) -> str:
+def progress_url(staff: Staff | str) -> str:
     """The Staff member's Progress endpoint."""
-    staff_id = staff if isinstance(staff, int) else staff.pk
+    staff_id = staff if isinstance(staff, str) else staff.public_id
     return f"/api/staff/{staff_id}/progress/"
 
 
 def progress(
-    office: ConsultancyContext, staff: Staff | int, period: dict[str, str] | None = None
+    office: ConsultancyContext, staff: Staff | str, period: dict[str, str] | None = None
 ) -> dict[str, Any]:
     """GET the Staff member's Progress and expect it."""
     response = office.client.get(progress_url(staff), period or NOVEMBER)
@@ -371,7 +374,7 @@ class TestDayByDayList:
             ("2026-11-02", "visit_logged", "Counselling session"),
         ]
         first = answer["days"][0]["entries"][0]
-        assert first["student"] == {"id": sita.pk, "name": "Sita Gurung"}
+        assert first["student"] == {"id": str(sita.public_id), "name": "Sita Gurung"}
         assert set(first) == {"kind", "at", "before", "after", "detail", "student"}
         assert answer["more"] is False
 
@@ -438,7 +441,7 @@ class TestDayByDayList:
         answer = progress(abc, me)
 
         assert answer["staff"] == {
-            "id": me.pk,
+            "id": str(me.public_id),
             "name": "Bikash Thapa",
             "job_title": me.job_title,
             "mobile": me.mobile,
@@ -453,7 +456,7 @@ class TestWhoMaySee:
         abc.log_in_as(Role.ADMIN)
         for role in (Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER, Role.ADMIN):
             person = named_staff(abc, f"Person{role.value.replace('_', '')} Lama", role)
-            assert progress(abc, person)["staff"]["id"] == person.pk
+            assert progress(abc, person)["staff"]["id"] == str(person.public_id)
 
     def test_an_admin_sees_someone_who_has_left(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -468,7 +471,7 @@ class TestWhoMaySee:
         other = named_staff(abc, "Rina Rai")
         me = abc.log_in_as(role)
 
-        assert progress(abc, me)["staff"]["id"] == me.pk
+        assert progress(abc, me)["staff"]["id"] == str(me.public_id)
         response = abc.client.get(progress_url(other), NOVEMBER)
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == {"detail": "You can only see your own progress."}
@@ -478,14 +481,14 @@ class TestWhoMaySee:
     ) -> None:
         abc.log_in_as(Role.COUNSELLOR)
 
-        response = abc.client.get(progress_url(99999), NOVEMBER)
+        response = abc.client.get(progress_url(SOME_UUID), NOVEMBER)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_an_unknown_person_is_not_found_for_an_admin(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.get(progress_url(99999), NOVEMBER)
+        response = abc.client.get(progress_url(SOME_UUID), NOVEMBER)
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -505,7 +508,7 @@ class TestWhoMaySee:
         response = visit.client.get(progress_url(me), NOVEMBER)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["staff"]["id"] == me.pk
+        assert response.json()["staff"]["id"] == str(me.public_id)
 
     @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
     def test_only_reading_is_allowed(self, abc: ConsultancyContext, method: str) -> None:

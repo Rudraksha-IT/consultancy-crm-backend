@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -25,7 +25,9 @@ from auth_tokens.exceptions import InvalidTokenError, TokenRefusal
 from auth_tokens.models import UNKNOWN_DEVICE_NAME, IssuedRefreshToken, TokenKind
 from auth_tokens.tokens import AccessToken, RefreshToken
 from auth_tokens.types import Browser, Device, Person, SignedInDevice, TokenClaims, TokenPair
-from platform_admin.models import PlatformAdmin
+from config.public_ids import pk_for
+from config.serializers import parse_record_id
+from platform_admin.models import PlatformAdmin, SupportVisit
 from platform_admin.support_access import find_visitor
 from staff.models import PlatformVisitor, Staff
 from tenancy.context import get_active_schema_name, is_public_schema_active
@@ -60,11 +62,11 @@ def issue_tokens(
         "tenant_schema": get_active_schema_name(),
         "kind": kind.value,
         "auth_version": person.auth_version,
-        "user_id": _person_id(person),
+        "user_id": str(_public_id(person)),
         "device": device.id,
     }
     if isinstance(person, PlatformVisitor):
-        claims["visit"] = person.support_visit_id
+        claims["visit"] = str(person.support_visit_public_id)
     refresh = _new_token(RefreshToken(), claims, settings.JWT_REFRESH_TOKEN_LIFETIME)
     access = _new_token(AccessToken(), claims, settings.JWT_ACCESS_TOKEN_LIFETIME)
     IssuedRefreshToken.objects.create(
@@ -119,7 +121,8 @@ def authenticate_access_token(raw: str) -> tuple[Person, TokenClaims]:
         InvalidTokenError: The token is invalid, expired, for another schema, or out of date.
     """
     claims = read_access_token(raw)
-    return _find_person(claims), claims
+    person = _find_person(claims)
+    return person, _with_numbers(claims, person)
 
 
 def read_access_token(raw: str) -> TokenClaims:
@@ -139,10 +142,10 @@ def rotate_refresh_token(raw: str) -> TokenPair:
         InvalidTokenError: The refresh token is invalid, expired, revoked or out of date.
     """
     claims = _read(RefreshToken, raw)
-    record = _outstanding(claims).select_for_update().first()
+    person = _find_person(claims)
+    record = _outstanding(_with_numbers(claims, person)).select_for_update().first()
     if record is None:
         raise InvalidTokenError(TokenRefusal.REVOKED)
-    person = _find_person(claims)
     record.revoked_at = timezone.now()
     record.save(update_fields=["revoked_at"])
     return issue_tokens(person, Device(id=record.device_id, signed_in_at=record.signed_in_at))
@@ -155,6 +158,11 @@ def revoke_refresh_token(raw: str) -> TokenClaims:
         InvalidTokenError: The refresh token is invalid, expired or not for this schema.
     """
     claims = _read(RefreshToken, raw)
+    claims = replace(
+        claims,
+        user_id=_person_number(claims.kind, claims.user),
+        visit_id=None if claims.visit is None else _visit_number(claims.visit),
+    )
     _outstanding(claims).update(revoked_at=timezone.now())
     _tidy_devices(claims.kind, claims.user_id)
     return claims
@@ -293,6 +301,13 @@ def _person_id(person: Person) -> int:
     return person.platform_admin_id if isinstance(person, PlatformVisitor) else int(person.pk)
 
 
+def _public_id(person: Person) -> uuid.UUID:
+    """Whose tokens, as the token names them: the person's UUID, never a number (ADR 0027)."""
+    if isinstance(person, PlatformVisitor):
+        return person.platform_admin_public_id
+    return person.public_id
+
+
 def _kinds_served_here() -> frozenset[TokenKind]:
     """Platform Admins on the public schema; Staff and Support Access visits on a Consultancy's."""
     if is_public_schema_active():
@@ -323,7 +338,10 @@ def _read(token_class: type[Token], raw: str) -> TokenClaims:
 
 
 def _claims_from(payload: dict[str, Any]) -> TokenClaims:
-    """Return the claims we rely on, refusing a token where any is missing or the wrong type."""
+    """Return the claims we rely on, refusing a token where any is missing or the wrong type.
+
+    A person or visit named by a number (tokens from before ADR 0027) is refused the same way.
+    """
     kind = payload.get("kind")
     if kind not in TokenKind.values:
         raise InvalidTokenError(TokenRefusal.MISSING_CLAIM)
@@ -331,12 +349,37 @@ def _claims_from(payload: dict[str, Any]) -> TokenClaims:
     return TokenClaims(
         tenant_schema=_text(payload, "tenant_schema"),
         kind=TokenKind(kind),
-        user_id=_whole_number(payload, "user_id"),
+        user=_record_id(payload, "user_id"),
         auth_version=_whole_number(payload, "auth_version"),
         jti=_text(payload, "jti"),
         device=_text(payload, "device"),
-        visit_id=_whole_number(payload, "visit") if is_visit else None,
+        visit=_record_id(payload, "visit") if is_visit else None,
     )
+
+
+def _with_numbers(claims: TokenClaims, person: Person) -> TokenClaims:
+    """`claims` with the found person's (and visit's) database numbers."""
+    visit_id = person.support_visit_id if isinstance(person, PlatformVisitor) else None
+    return replace(claims, user_id=_person_id(person), visit_id=visit_id)
+
+
+def _record_id(payload: dict[str, Any], name: str) -> uuid.UUID:
+    """A claim naming a record: its UUID as text; a number or anything else is refused."""
+    found = parse_record_id(payload.get(name))
+    if found is None:
+        raise InvalidTokenError(TokenRefusal.MISSING_CLAIM)
+    return found
+
+
+def _person_number(kind: TokenKind, public_id: uuid.UUID) -> int:
+    """The database number of the person a token names; 0 (nobody) when there is none."""
+    model: type[Staff] | type[PlatformAdmin] = Staff if kind == TokenKind.STAFF else PlatformAdmin
+    return pk_for(model.objects.all(), public_id)
+
+
+def _visit_number(public_id: uuid.UUID) -> int:
+    """The database number of the Support Access visit a token names; 0 when there is none."""
+    return pk_for(SupportVisit.objects.all(), public_id)
 
 
 def _text(payload: dict[str, Any], name: str) -> str:
@@ -364,15 +407,13 @@ def _find_person(claims: TokenClaims) -> Person:
     if claims.kind == TokenKind.SUPPORT_ACCESS:
         person = (
             None
-            if claims.visit_id is None
-            else find_visitor(
-                claims.visit_id, claims.user_id, claims.auth_version, claims.tenant_schema
-            )
+            if claims.visit is None
+            else find_visitor(claims.visit, claims.user, claims.auth_version, claims.tenant_schema)
         )
     else:
         model = Staff if claims.kind == TokenKind.STAFF else PlatformAdmin
         person = model.objects.filter(
-            pk=claims.user_id, is_active=True, auth_version=claims.auth_version
+            public_id=claims.user, is_active=True, auth_version=claims.auth_version
         ).first()
     if person is None:
         raise InvalidTokenError(TokenRefusal.OUT_OF_DATE)

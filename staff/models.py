@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, ClassVar
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db import models
 from django.db.models import BooleanField, ExpressionWrapper, Q
 from django.utils import timezone
+
+from config.public_ids import public_id_field
 
 STAFF_NAME_MAX_LENGTH = 200
 ROLE_MAX_LENGTH = 20
@@ -34,9 +37,8 @@ class StaffStatus(models.TextChoices):
 
 
 class ColourMode(models.TextChoices):
-    """A Staff member's own light or dark choice; until they choose, the device's."""
+    """A Staff member's own light or dark choice: light until they pick dark (2026-11-20)."""
 
-    DEVICE = "device", "Same as this device"
     LIGHT = "light", "Light"
     DARK = "dark", "Dark"
 
@@ -47,6 +49,9 @@ class StaffManager(BaseUserManager["Staff"]):
 
 class Staff(AbstractBaseUser):
     """A person who works for the Consultancy and logs in with email and password."""
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     name = models.CharField(max_length=STAFF_NAME_MAX_LENGTH)
     email = models.EmailField(unique=True)
@@ -65,7 +70,7 @@ class Staff(AbstractBaseUser):
     )
     # Personal Settings (issue 38): light/dark and which emails the app sends this person.
     colour_mode = models.CharField(
-        max_length=COLOUR_MODE_MAX_LENGTH, choices=ColourMode.choices, default=ColourMode.DEVICE
+        max_length=COLOUR_MODE_MAX_LENGTH, choices=ColourMode.choices, default=ColourMode.LIGHT
     )
     email_on_task_given = models.BooleanField(default=True)
     email_on_task_due_tomorrow = models.BooleanField(default=True)
@@ -98,6 +103,8 @@ class Staff(AbstractBaseUser):
 # A Platform Admin inside a Consultancy has this id: no Staff row ever does (ids start at 1), so
 # "is this mine?" checks never match and lists filtered by them are empty.
 PLATFORM_VISITOR_ID = 0
+# ...and this id outside the server (ADR 0027): the same on every request, and no Staff's.
+PLATFORM_VISITOR_PUBLIC_ID = uuid.UUID(int=0)
 
 
 class PlatformVisitorIsNotStaffError(Exception):
@@ -115,6 +122,9 @@ class PlatformVisitor(Staff):
 
     platform_admin_id: int
     support_visit_id: int
+    # Their ids outside the server, which login tokens carry (ADR 0027).
+    platform_admin_public_id: uuid.UUID
+    support_visit_public_id: uuid.UUID
 
     class Meta:
         proxy = True

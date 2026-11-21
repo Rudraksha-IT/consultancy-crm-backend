@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from staff.refs import person_ref
 from visits.models import Visit
 
 # The first line of a Note on today's timeline, shortened past this many characters.
@@ -12,11 +13,11 @@ ELLIPSIS = "…"
 def visit_answer(visit: Visit) -> dict[str, object]:
     """One Visit: when, New or Follow-up, why, and who logged it."""
     return {
-        "id": visit.pk,
+        "id": visit.public_id,
         "kind": visit.kind,
         "purpose": visit.purpose,
         "at": visit.at.isoformat(),
-        "recorded_by": {"id": visit.recorded_by_id, "name": visit.recorded_by_name},
+        "recorded_by": person_ref(visit.recorded_by, visit.recorded_by_name),
     }
 
 
@@ -26,7 +27,7 @@ def timeline_answer(visit: Visit) -> dict[str, object]:
     return {
         **visit_answer(visit),
         "student": {
-            "id": student.pk,
+            "id": student.public_id,
             "name": student.name,
             "note_first_line": note_first_line(student.note),
         },

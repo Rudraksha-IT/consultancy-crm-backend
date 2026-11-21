@@ -64,8 +64,8 @@ def start_consultancy_setup(onboarding: ConsultancyOnboarding, *, by: PlatformAd
     """Reserve a new Consultancy and queue the Job that sets it up. Call on the Platform.
 
     Args:
-        onboarding: The Consultancy's name, subdomain (the front part of its address), Theme
-            and starting Status.
+        onboarding: The Consultancy's name, subdomain (the front part of its address), contact
+            email, Theme and starting Status.
         by: The Platform Admin creating it, recorded with its starting Status.
 
     Returns:
@@ -90,6 +90,8 @@ def start_consultancy_setup(onboarding: ConsultancyOnboarding, *, by: PlatformAd
                 host=build_host(subdomain),
             )
             set_theme(consultancy, onboarding.theme)
+            consultancy.contact_email = onboarding.contact_email
+            consultancy.save(update_fields=["contact_email"])
             job = queue_job(
                 CREATE_CONSULTANCY,
                 {

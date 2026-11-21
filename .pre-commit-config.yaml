@@ -1,5 +1,5 @@
 # Hooks run the tool versions pinned in uv.lock, so local and CI results match.
-# Install both kinds once after cloning: uv run pre-commit install
+# Install all three kinds once after cloning: uv run pre-commit install
 default_install_hook_types: [pre-commit, commit-msg]
 default_stages: [pre-commit]
 repos:
@@ -27,3 +27,11 @@ repos:
         entry: python3 scripts/check_commit_message.py
         language: system
         stages: [commit-msg]
+      # A model changed but its migration wasn't made. Runs only when a models file is committed.
+      # Pushing runs no checks (product owner, 2026-11-18): everything is checked at commit, and on CI.
+      - id: migrations
+        name: missing migrations
+        entry: uv run python manage.py makemigrations --check --dry-run
+        language: system
+        files: (^|/)models(\.py|/)
+        pass_filenames: false

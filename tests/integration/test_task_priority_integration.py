@@ -62,7 +62,7 @@ def create(
     body = {
         "title": "Call Sita about her IELTS score",
         "due_on": day(1).isoformat(),
-        "assignee": assignee.pk,
+        "assignee": str(assignee.public_id),
         **changes,
     }
     return office.client.post(TASKS_URL, body, format="json")
@@ -167,7 +167,9 @@ class TestPriority:
         me = abc.log_in_as(Role.COUNSELLOR)
         task = make_task(abc, me)
 
-        response = abc.client.patch(f"{TASKS_URL}{task.pk}/", {"priority": "high"}, format="json")
+        response = abc.client.patch(
+            f"{TASKS_URL}{task.public_id}/", {"priority": "high"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -217,7 +219,7 @@ class TestOnlyMe:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me)
 
-        response = create(abc, me, only_me=True, student=student.pk)
+        response = create(abc, me, only_me=True, student=str(student.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ONLY_ME_STUDENT_MESSAGE
@@ -253,7 +255,7 @@ class TestOnlyMe:
         me = abc.log_in_as(Role.COUNSELLOR)
         task = private_task(abc, me)
 
-        response = abc.client.patch(f"{TASKS_URL}{task.pk}/", body, format="json")
+        response = abc.client.patch(f"{TASKS_URL}{task.public_id}/", body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -265,7 +267,7 @@ class TestOnlyMe:
         me = abc.log_in_as(Role.COUNSELLOR)
         task = private_task(abc, me)
 
-        response = abc.client.patch(f"{TASKS_URL}{task.pk}/", {"done": True}, format="json")
+        response = abc.client.patch(f"{TASKS_URL}{task.public_id}/", {"done": True}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["only_me"] is True
@@ -304,7 +306,9 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
         make_task(abc, other, by=other, title="Mine")
 
         listed = [titles(abc, view=view) for view in VIEWS]
-        ticked = abc.client.patch(f"{TASKS_URL}{open_one.pk}/", {"done": True}, format="json")
+        ticked = abc.client.patch(
+            f"{TASKS_URL}{open_one.public_id}/", {"done": True}, format="json"
+        )
 
         assert listed == [["Mine"], [], []]
         assert due_count(abc) == 0
@@ -321,8 +325,8 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
         abc.log_in_as(Role.ADMIN)
 
         responses = [
-            abc.client.patch(f"{TASKS_URL}{task.pk}/", {"done": True}, format="json"),
-            abc.client.patch(f"{TASKS_URL}{task.pk}/", {"done": False}, format="json"),
+            abc.client.patch(f"{TASKS_URL}{task.public_id}/", {"done": True}, format="json"),
+            abc.client.patch(f"{TASKS_URL}{task.public_id}/", {"done": False}, format="json"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
@@ -343,7 +347,7 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
         visit: Visit = open_as_platform_admin(platform_site, abc)
 
         listed = [visit.client.get(TASKS_URL, {"view": view}) for view in VIEWS]
-        ticked = visit.client.patch(f"{TASKS_URL}{task.pk}/", {"done": True}, format="json")
+        ticked = visit.client.patch(f"{TASKS_URL}{task.public_id}/", {"done": True}, format="json")
         count = visit.client.get(COUNT_URL)
 
         assert [r.json()["count"] for r in listed] == [0, 0, 0]
@@ -363,7 +367,7 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
             {
                 "title": "Check the fees",
                 "due_on": day(1).isoformat(),
-                "assignee": counsellor.pk,
+                "assignee": str(counsellor.public_id),
                 "only_me": True,
             },
             format="json",
@@ -377,8 +381,8 @@ class TestOnlyMeIsInvisibleToEveryoneElse:
         student = make_student(abc, owner)
         private_task(abc, owner)
 
-        tasks = abc.client.get(f"/api/students/{student.pk}/tasks/").json()
-        profile = abc.client.get(f"/api/students/{student.pk}/").json()
+        tasks = abc.client.get(f"/api/students/{student.public_id}/tasks/").json()
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()
 
         assert (tasks["count"], profile["open_tasks"]) == (0, 0)
 

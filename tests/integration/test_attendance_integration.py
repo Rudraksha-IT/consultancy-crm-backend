@@ -46,14 +46,14 @@ MARKS = ("present", "absent", "late", "leave")
 
 def attendance_url(batch: Batch | int, on: date | str) -> str:
     """One class day's Attendance."""
-    pk = batch if isinstance(batch, int) else batch.pk
+    pk = batch if isinstance(batch, int | str) else batch.public_id
     text = on if isinstance(on, str) else on.isoformat()
     return f"/api/batches/{pk}/attendance/{text}/"
 
 
-def student_classes_url(student: Student | int) -> str:
+def student_classes_url(student: Student | int | str) -> str:
     """The classes one Student is in, with their Attendance."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/batches/"
 
 
@@ -73,7 +73,7 @@ def put_marks(
 
 def marks_for(*pairs: tuple[Student, str]) -> list[dict[str, object]]:
     """The body's marks for these Students."""
-    return [{"student": student.pk, "mark": mark} for student, mark in pairs]
+    return [{"student": str(student.public_id), "mark": mark} for student, mark in pairs]
 
 
 def stored_marks(office: ConsultancyContext, batch: Batch, on: date) -> dict[str, str]:
@@ -140,8 +140,8 @@ class TestTakingAttendance:
             "can_mark": True,
             # By name, as the class lists them.
             "marks": [
-                {"student": hari.pk, "mark": "late"},
-                {"student": sita.pk, "mark": "present"},
+                {"student": str(hari.public_id), "mark": "late"},
+                {"student": str(sita.public_id), "mark": "present"},
             ],
         }
         assert stored_marks(abc, batch, day(0)) == {"Sita Gurung": "present", "Hari Thapa": "late"}
@@ -185,8 +185,8 @@ class TestTakingAttendance:
 
         assert stored_marks(abc, batch, day(0)) == {"Sita Gurung": "late"}
         assert answer["marks"] == [
-            {"student": hari.pk, "mark": None},
-            {"student": sita.pk, "mark": "late"},
+            {"student": str(hari.public_id), "mark": None},
+            {"student": str(sita.public_id), "mark": "late"},
         ]
 
     def test_other_days_are_left_alone(
@@ -309,13 +309,15 @@ class TestRefusedInput:
     def test_a_bad_mark_is_refused(
         self, abc: ConsultancyContext, batch: Batch, sita: Student, mark: object
     ) -> None:
-        response = put_marks(abc, batch, day(0), [{"student": sita.pk, "mark": mark}])
+        response = put_marks(abc, batch, day(0), [{"student": str(sita.public_id), "mark": mark}])
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == MARKS_MESSAGE
         assert self.nothing_stored(abc)
 
-    @pytest.mark.parametrize("student", ["1", 1.5, True, None, 0, -1, 2**63, [1], {"id": 1}])
+    @pytest.mark.parametrize(
+        "student", ["1", 1, "not-a-uuid", 1.5, True, None, 0, -1, 2**63, [1], {"id": 1}]
+    )
     def test_a_bad_student_is_refused(
         self, abc: ConsultancyContext, batch: Batch, student: object
     ) -> None:
@@ -367,7 +369,7 @@ class TestRefusedInput:
     def test_too_many_marks_are_refused(
         self, abc: ConsultancyContext, batch: Batch, sita: Student
     ) -> None:
-        marks = [{"student": sita.pk, "mark": "present"}] * 501
+        marks = [{"student": str(sita.public_id), "mark": "present"}] * 501
 
         response = put_marks(abc, batch, day(0), marks)
 
@@ -396,7 +398,7 @@ class TestRefusedInput:
     def test_an_unknown_field_in_a_mark_is_refused(
         self, abc: ConsultancyContext, batch: Batch, sita: Student
     ) -> None:
-        mark = {"student": sita.pk, "mark": "present", "marked_by": 1}
+        mark = {"student": str(sita.public_id), "mark": "present", "marked_by": 1}
 
         response = put_marks(abc, batch, day(0), [mark])
 
@@ -448,8 +450,8 @@ class TestReadingADay:
             "day": day(0).isoformat(),
             "can_mark": True,
             "marks": [
-                {"student": hari.pk, "mark": None},
-                {"student": sita.pk, "mark": "absent"},
+                {"student": str(hari.public_id), "mark": None},
+                {"student": str(sita.public_id), "mark": "absent"},
             ],
         }
 
@@ -497,7 +499,7 @@ class TestReadingADay:
 
         marks = abc.client.get(attendance_url(batch, day(0))).json()["marks"]
 
-        assert marks == [{"student": hari.pk, "mark": None}]
+        assert marks == [{"student": str(hari.public_id), "mark": None}]
         # Their mark is kept, should they come back.
         assert stored_marks(abc, batch, day(0)) == {"Sita Gurung": "present"}
 
@@ -596,14 +598,14 @@ class TestStudentClasses:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == [
             {
-                "id": other.pk,
+                "id": str(other.public_id),
                 "name": "IELTS Evening",
                 "time_slot": "5 PM",
                 "attended_percent": None,
                 "recent_days": [],
             },
             {
-                "id": batch.pk,
+                "id": str(batch.public_id),
                 "name": "PTE Day",
                 "time_slot": "11:00 AM-12:30 PM",
                 "attended_percent": 50,

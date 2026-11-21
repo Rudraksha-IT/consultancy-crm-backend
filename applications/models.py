@@ -6,6 +6,7 @@ from django.utils import timezone
 from applications.appointments import VisaDates
 from applications.statuses import ApplicationStatus, OfferKind, VisaStatus
 from catalogue.models import Course
+from config.public_ids import public_id_field
 from staff.models import Staff
 from students.models import CHOICE_MAX_LENGTH, INTAKE_LENGTH, Student
 
@@ -16,6 +17,9 @@ class Application(models.Model):
     The Intake is kept as its month ("YYYY-MM", AD), so an Intake later removed from the Course
     stays on the Applications that used it. Courses are archived, never deleted (PROTECT).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="applications")
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="applications")
@@ -56,6 +60,9 @@ class Visa(models.Model):
     Only for the Student's Chosen Offer (issue 76). A Student keeps every attempt, so a
     refused-then-granted Student shows both. Newest first.
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="visas")
     application = models.ForeignKey(Application, on_delete=models.PROTECT, related_name="visas")

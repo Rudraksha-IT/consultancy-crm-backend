@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.core.paginator import EmptyPage, Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -50,14 +52,14 @@ HISTORY_PER_PAGE = 50
 TOO_MANY_MESSAGE = f"A Student can have at most {MAX_ENTRIES_PER_STUDENT} of these."
 
 
-def _student(student_id: int) -> Student:
+def _student(student_id: UUID) -> Student:
     try:
         return profile_of(student_id)
     except Student.DoesNotExist as error:
         raise NotFound from error
 
 
-def _changeable_student(request: Request, student_id: int) -> Student:
+def _changeable_student(request: Request, student_id: UUID) -> Student:
     """The Student, if the Staff member may change them; otherwise 403 with the reason."""
     student = _student(student_id)
     reason = why_cannot_change(get_request_staff(request), student)
@@ -66,7 +68,7 @@ def _changeable_student(request: Request, student_id: int) -> Student:
     return student
 
 
-def _profile_answer(request: Request, student_id: int) -> Response:
+def _profile_answer(request: Request, student_id: UUID) -> Response:
     student = _student(student_id)
     return Response(student_profile(student, viewer=get_request_staff(request)))
 
@@ -82,11 +84,11 @@ class _StudentView(APIView):
 class StudentProfileView(_StudentView):
     """Open one Student (GET) or change some of their details (PATCH)."""
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the Student's profile, and whether the viewer may change it."""
         return _profile_answer(request, student_id)
 
-    def patch(self, request: Request, student_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID) -> Response:
         """Change the details sent and return the profile as stored."""
         student = _changeable_student(request, student_id)
         serializer = StudentDetailsSerializer(student, data=request.data)
@@ -98,7 +100,7 @@ class StudentProfileView(_StudentView):
 class StudentNoteView(_StudentView):
     """Replace the Student's Note (PUT); History keeps the previous text."""
 
-    def put(self, request: Request, student_id: int) -> Response:
+    def put(self, request: Request, student_id: UUID) -> Response:
         """Save the Note sent and return the profile as stored."""
         student = _changeable_student(request, student_id)
         serializer = NoteSerializer(data=request.data)
@@ -110,7 +112,7 @@ class StudentNoteView(_StudentView):
 class StudentHistoryView(_StudentView):
     """The Student's History, newest first, a page at a time."""
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return one page of the Student's History."""
         student = _student(student_id)
         query = HistoryQuerySerializer(data=request.query_params)
@@ -132,7 +134,7 @@ class StudentHistoryView(_StudentView):
 class AcademicRecordListView(_StudentView):
     """Add a qualification to the Student's academic history."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add it and return it as stored."""
         student = _changeable_student(request, student_id)
         serializer = AcademicRecordSerializer(data=request.data)
@@ -148,26 +150,26 @@ class AcademicRecordListView(_StudentView):
 class AcademicRecordView(_StudentView):
     """Change (PATCH) or remove (DELETE) one qualification."""
 
-    def patch(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Change the details sent and return it as stored."""
         student = _changeable_student(request, student_id)
-        entry = get_object_or_404(AcademicRecord, pk=entry_id, student=student)
+        entry = get_object_or_404(AcademicRecord, public_id=entry_id, student=student)
         serializer = AcademicRecordSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         change_academic_record(entry, serializer.validated_data)
         return Response(academic_record_answer(entry))
 
-    def delete(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def delete(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Remove it."""
         student = _changeable_student(request, student_id)
-        remove_entry(get_object_or_404(AcademicRecord, pk=entry_id, student=student))
+        remove_entry(get_object_or_404(AcademicRecord, public_id=entry_id, student=student))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TestScoreListView(_StudentView):
     """Add an English test result to the Student."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add it and return it as stored."""
         student = _changeable_student(request, student_id)
         serializer = TestScoreSerializer(data=request.data)
@@ -183,26 +185,26 @@ class TestScoreListView(_StudentView):
 class TestScoreView(_StudentView):
     """Change (PATCH) or remove (DELETE) one test result."""
 
-    def patch(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Change the details sent and return it as stored."""
         student = _changeable_student(request, student_id)
-        score = get_object_or_404(TestScore, pk=entry_id, student=student)
+        score = get_object_or_404(TestScore, public_id=entry_id, student=student)
         serializer = TestScoreSerializer(data=request.data, stored=score, partial=True)
         serializer.is_valid(raise_exception=True)
         change_test_score(score, serializer.validated_data)
         return Response(test_score_answer(score))
 
-    def delete(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def delete(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Remove it."""
         student = _changeable_student(request, student_id)
-        remove_entry(get_object_or_404(TestScore, pk=entry_id, student=student))
+        remove_entry(get_object_or_404(TestScore, public_id=entry_id, student=student))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class WorkExperienceListView(_StudentView):
     """Add a job to the Student's work experience (spec 35e)."""
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Add it and return it as stored."""
         student = _changeable_student(request, student_id)
         serializer = WorkExperienceSerializer(data=request.data)
@@ -218,17 +220,17 @@ class WorkExperienceListView(_StudentView):
 class WorkExperienceView(_StudentView):
     """Change (PATCH) or remove (DELETE) one job."""
 
-    def patch(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def patch(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Change the details sent and return it as stored."""
         student = _changeable_student(request, student_id)
-        job = get_object_or_404(WorkExperience, pk=entry_id, student=student)
+        job = get_object_or_404(WorkExperience, public_id=entry_id, student=student)
         serializer = WorkExperienceSerializer(data=request.data, stored=job, partial=True)
         serializer.is_valid(raise_exception=True)
         change_work_experience(job, serializer.validated_data)
         return Response(work_experience_answer(job))
 
-    def delete(self, request: Request, student_id: int, entry_id: int) -> Response:
+    def delete(self, request: Request, student_id: UUID, entry_id: UUID) -> Response:
         """Remove it."""
         student = _changeable_student(request, student_id)
-        remove_entry(get_object_or_404(WorkExperience, pk=entry_id, student=student))
+        remove_entry(get_object_or_404(WorkExperience, public_id=entry_id, student=student))
         return Response(status=status.HTTP_204_NO_CONTENT)

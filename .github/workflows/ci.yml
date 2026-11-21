@@ -1,14 +1,29 @@
 name: CI
 
+# Pull requests run every check on every push (the gate before merging into dev or main). After a
+# merge, dev has exactly the code its pull request tested (branches must be up to date), so only
+# main runs again: the release check, the image for the server, and the deploy (ticket 14).
+# deploy.yml also calls these checks on one chosen commit (`ref`) before building its image.
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check (deploy.yml's chosen commit)
+        type: string
+        required: true
+      build_image:
+        description: Also build and push that commit's image (when the registry lacks it)
+        type: boolean
+        default: false
 
 jobs:
   # Every commit pushed or proposed must follow Conventional Commits and credit no AI as
   # co-author. The same check runs locally as the commit-msg hook; this one cannot be skipped.
   commit-messages:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +51,34 @@ jobs:
           done
           exit $status
 
-  checks:
+  # Format, lint and types: no database needed, so it runs beside the tests.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Format
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      # mypy reuses what it learned on the last run; a new lock file starts it fresh.
+      - uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: mypy-${{ hashFiles('uv.lock') }}-
+      - name: Type check
+        run: uv run mypy .
+
+  # Every model change ships with its migration file, and every migration applies to a real
+  # database as a deploy does: public schema first, then each Consultancy's. Throwaway keys:
+  # migrations never sign or seal anything.
+  migrations:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -51,62 +93,185 @@ jobs:
     env:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
+      INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
+      JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
       - run: uv sync --locked
-      - name: Format
-        run: uv run ruff format --check .
-      - name: Lint
-        run: uv run ruff check .
-      - name: Type check
-        run: uv run mypy .
-      # Every model change ships with its migration file.
       - name: Check for missing migrations
         run: uv run python manage.py makemigrations --check --dry-run
-      # Apply every migration to a real database, as a deploy does: public schema first, then
-      # each Consultancy's. Throwaway keys: migrations never sign or seal anything.
       - name: Run shared migrations
         run: uv run python manage.py migrate_schemas --shared
-        env:
-          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
-          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
-          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
       - name: Run tenant migrations
         run: uv run python manage.py migrate_schemas --tenant
-        env:
-          INTERNAL_API_TOKEN: ci-internal-token-not-a-real-secret-000
-          JWT_SIGNING_KEY: ci-jwt-signing-key-not-a-real-secret-0000
-          PROVIDER_SECRETS_KEY: ci-provider-secrets-key-not-a-real-secret
-      - name: Tests
-        run: uv run pytest
 
-  # After the checks pass on main: build the slim image and push it to ECR, tagged with the
-  # commit. Deploy it on the server with deploy/deploy.sh <commit>. Needs the repository
-  # variables AWS_REGION and AWS_ROLE_ARN (an IAM role GitHub may assume through OIDC, allowed to
-  # push to the consultancy-crm-backend ECR repository). No AWS keys are stored in GitHub.
+  # Every test, split over 3 machines at once (each takes every 3rd test file, by name) and, on
+  # each, over all its CPUs (pytest-xdist; every worker has its own test database). Coverage is
+  # saved per machine and checked over all of them in the coverage job. The slowest 25 tests are
+  # listed at the end of each machine's log. CI's PostgreSQL skips forcing writes to disk: test
+  # data never needs to survive a crash.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      SHARD: ${{ matrix.shard }}
+      SHARDS: "3"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Faster test database
+        env:
+          PGPASSWORD: crm
+        run: |
+          psql -h localhost -U crm -d crm -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" -c "SELECT pg_reload_conf()"
+      - name: Tests (this machine's share)
+        env:
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
+        run: |
+          find tests -name 'test_*.py' | LC_ALL=C sort | awk -v n="$SHARDS" -v i="$SHARD" 'NR % n == i % n' > "$RUNNER_TEMP/files"
+          echo "$(wc -l < "$RUNNER_TEMP/files") test files on this machine"
+          mapfile -t files < "$RUNNER_TEMP/files"
+          uv run pytest -n auto --dist loadfile --durations=25 --cov-report= --cov-fail-under=0 "${files[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # The same 90% rule as a local run, over the coverage of all 3 machines together.
+  coverage:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - name: Coverage of every test together (at least 90%)
+        run: |
+          uv run coverage combine .coverage.shard-*
+          uv run coverage report --show-missing --skip-covered --fail-under=90
+
+  # The one check the branch ruleset requires: passes only when every job above passed, so a
+  # failed, cancelled or skipped job can never count as green.
+  checks:
+    if: always()
+    needs: [lint, migrations, tests, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All checks passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "lint, migrations, tests, coverage: $RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
+
+  # After the checks pass on main, or for deploy.yml's chosen commit: build the slim image and push
+  # it to GitHub's registry (ghcr.io/<owner>/consultancy-crm-backend:<commit>) with this run's own
+  # token; the image stays private. No AWS (ticket 14, ADR 0024). Commit messages aren't checked
+  # again when deploy.yml calls this, so that job may be skipped then.
   image:
     needs: [commit-messages, checks]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      !cancelled() && needs.checks.result == 'success'
+      && (needs.commit-messages.result == 'success' || (inputs.build_image && needs.commit-messages.result == 'skipped'))
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.build_image)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          ref: ${{ inputs.ref }}
+      - id: name
+        name: Image name (the registry wants the owner in lower case)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          COMMIT: ${{ inputs.ref || github.sha }}
+        run: echo "image=ghcr.io/${OWNER,,}/consultancy-crm-backend:${COMMIT}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.ecr.outputs.registry }}/consultancy-crm-backend:${{ github.sha }}
+          tags: ${{ steps.name.outputs.image }}
+          # Links the package to this repository, so this repository's token may clean it up.
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           # Unchanged layers (the dependencies) are reused, so most builds take a minute or two.
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
+
+  # Then deploy it (ticket 14): the server's deploy.sh switches to it only once it is healthy and
+  # goes back by itself if it isn't; this job fails if the deploy failed or was rolled back. It
+  # reaches the server with the `production` environment's locked SSH key, which can run nothing
+  # but ci-entry.sh. One deploy at a time per repository, never cancelled halfway; the server's
+  # lock also covers both repositories deploying at once.
+  deploy:
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cloudflared (only when the server is reached through Cloudflare Access)
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+        run: .github/scripts/install-cloudflared.sh
+      - name: Deploy backend ${{ github.sha }}
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_REASON: Merged into main
+        run: .github/scripts/deploy-over-ssh.sh deploy backend "$GITHUB_SHA"

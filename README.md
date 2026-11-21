@@ -1,5 +1,7 @@
 # Consultancy CRM — backend
 
+The rules and decisions this repository follows (ADRs, logging, design system, glossary) are in [`docs/`](docs/README.md).
+
 Django + Django REST Framework. One PostgreSQL schema per Consultancy via `django-tenants`,
 resolved from the request's subdomain (ADR 0001: one schema per Consultancy).
 
@@ -494,7 +496,17 @@ No commit may credit an AI tool as co-author (`Co-authored-by: Claude ...`, `...
 `scripts/check_commit_message.py` enforces both rules as the `commit-msg` hook. Install the
 hooks once after cloning: `uv run pre-commit install`. The `commit-messages` job in
 `.github/workflows/ci.yml` checks every pushed commit again, so skipping the hook doesn't help;
-make it a required check on `main` (Settings → Branches) so nothing merges without it.
+`main` and `dev` take changes only through pull requests, with `commit-messages`, `checks`
+and `pr-title` required (the branch ruleset). Branch from `dev`; merge into `dev` with **Squash
+and merge**, so the pull request title becomes the commit (`.github/workflows/pr-title.yml` checks
+it by the same rules). Release with a pull request from `dev` into `main`, merged with **Create a
+merge commit**.
+
+**Checks on your machine.** Every commit runs ruff format, ruff check and mypy, and checks for a
+missing migration when a models file changed. Pushing runs nothing more, so it is fast;
+`sh scripts/check-all.sh` runs them all over the whole repo when you want. Tests run on CI for every
+pull request; run them here with `uv run pytest -n auto`. Install the hooks once:
+`uv run pre-commit install`. Never skip them with `--no-verify`.
 
 ## Run the whole app
 

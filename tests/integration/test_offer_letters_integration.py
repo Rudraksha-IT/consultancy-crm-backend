@@ -66,15 +66,15 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def letters_url(student: Student | int) -> str:
+def letters_url(student: Student | int | str) -> str:
     """Where a Student's Offer Letters are added."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/offer-letters/"
 
 
-def chosen_url(student: Student | int) -> str:
+def chosen_url(student: Student | int | str) -> str:
     """A Student's Chosen Offer."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/chosen-offer/"
 
 
@@ -84,7 +84,7 @@ def a_letter(content: bytes = PDF_BYTES, name: str = "deakin-offer.pdf") -> Simp
 
 
 def add_letter(
-    office: ConsultancyContext, student: Student | int, **fields: object
+    office: ConsultancyContext, student: Student | int | str, **fields: object
 ) -> _MonkeyPatchedResponse:
     """POST an Offer Letter as a form: a conditional PDF unless `fields` say otherwise."""
     body: dict[str, object] = {"kind": "conditional", "file": a_letter(), **fields}
@@ -93,7 +93,7 @@ def add_letter(
 
 
 def choose(
-    office: ConsultancyContext, student: Student | int, body: object
+    office: ConsultancyContext, student: Student | int | str, body: object
 ) -> _MonkeyPatchedResponse:
     """PUT the Chosen Offer."""
     return office.client.put(chosen_url(student), body, format="json")
@@ -154,7 +154,7 @@ class TestAddingAnOfferLetter:
         student = make_student(abc, me, Stage.APPLYING)
         application = applied(abc, student, "Deakin University")
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         body = response.json()
@@ -166,8 +166,8 @@ class TestAddingAnOfferLetter:
         [document] = documents_of(abc, student)
         [file] = files_of(abc, document)
         assert answer["offer_letter"] == {
-            "id": document.pk,
-            "files": [{"id": file.pk, "file_name": "deakin-offer.pdf"}],
+            "id": str(document.public_id),
+            "files": [{"id": str(file.public_id), "file_name": "deakin-offer.pdf"}],
         }
         assert document.document_type.name == "Offer letter"
         assert document.application_id == application.pk
@@ -185,7 +185,7 @@ class TestAddingAnOfferLetter:
         with_offer(abc, student)
         other = applied(abc, student, "RMIT University")
 
-        response = add_letter(abc, student, application=str(other.pk), kind="unconditional")
+        response = add_letter(abc, student, application=str(other.public_id), kind="unconditional")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["stage"] == "offer"
@@ -201,8 +201,8 @@ class TestAddingAnOfferLetter:
         first = applied(abc, student, "Deakin University")
         second = applied(abc, student, "RMIT University")
 
-        add_letter(abc, student, application=str(first.pk))
-        add_letter(abc, student, application=str(second.pk))
+        add_letter(abc, student, application=str(first.public_id))
+        add_letter(abc, student, application=str(second.public_id))
 
         with tenant_context(abc.consultancy):
             assert DocumentType.objects.filter(name__iexact="offer letter").count() == 1
@@ -213,7 +213,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         photo = a_letter(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00rest", "scan.html")
 
-        add_letter(abc, student, application=str(application.pk), file=photo)
+        add_letter(abc, student, application=str(application.public_id), file=photo)
 
         [document] = documents_of(abc, student)
         [file] = files_of(abc, document)
@@ -226,7 +226,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         abc.log_in_as(Role.ADMIN)
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
 
@@ -237,7 +237,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         abc.log_in_as(Role.COUNSELLOR)
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == NOT_YOUR_STUDENT
@@ -257,7 +257,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         abc.log_in_as(role)
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == refusal
@@ -271,7 +271,7 @@ class TestAddingAnOfferLetter:
 
         response = abc.new_client().post(
             letters_url(student),
-            {"application": str(application.pk), "kind": "conditional", "file": a_letter()},
+            {"application": str(application.public_id), "kind": "conditional", "file": a_letter()},
             format="multipart",
         )
 
@@ -287,7 +287,7 @@ class TestAddingAnOfferLetter:
         _, student = counselled_student(abc, Stage.OFFER)
         application = make_application(abc, student, make_course(abc), at)
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == WAITING_FOR_OFFER
@@ -301,7 +301,7 @@ class TestAddingAnOfferLetter:
         someone_else = make_student(abc, me, Stage.APPLYING, name="Ram Thapa")
         theirs = applied(abc, someone_else, "Deakin University")
 
-        response = add_letter(abc, student, application=str(theirs.pk))
+        response = add_letter(abc, student, application=str(theirs.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == NOT_THIS_STUDENTS
@@ -335,7 +335,7 @@ class TestAddingAnOfferLetter:
         _, student = counselled_student(abc, Stage.APPLYING)
         application = applied(abc, student, "Deakin University")
 
-        response = add_letter(abc, student, application=str(application.pk), kind=value)
+        response = add_letter(abc, student, application=str(application.public_id), kind=value)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == CHOOSE_KIND
@@ -344,7 +344,7 @@ class TestAddingAnOfferLetter:
     def test_a_missing_kind_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.APPLYING)
         application = applied(abc, student, "Deakin University")
-        body = {"application": str(application.pk), "file": a_letter()}
+        body = {"application": str(application.public_id), "file": a_letter()}
 
         response = abc.client.post(letters_url(student), body, format="multipart")
 
@@ -353,7 +353,7 @@ class TestAddingAnOfferLetter:
     def test_a_missing_file_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.APPLYING)
         application = applied(abc, student, "Deakin University")
-        body = {"application": str(application.pk), "kind": "conditional"}
+        body = {"application": str(application.public_id), "kind": "conditional"}
 
         response = abc.client.post(letters_url(student), body, format="multipart")
 
@@ -369,7 +369,10 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
 
         response = add_letter(
-            abc, student, application=str(application.pk), file=a_letter(content, "offer.pdf")
+            abc,
+            student,
+            application=str(application.public_id),
+            file=a_letter(content, "offer.pdf"),
         )
 
         assert response.json() == FILE_KIND
@@ -380,7 +383,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         big = a_letter(PDF_BYTES + b"0" * MAX_DOCUMENT_BYTES)
 
-        response = add_letter(abc, student, application=str(application.pk), file=big)
+        response = add_letter(abc, student, application=str(application.public_id), file=big)
 
         assert response.json() == {"file": ["The file is too big. Upload at most 10 MB."]}
         assert documents_of(abc, student) == []
@@ -390,7 +393,11 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
 
         response = add_letter(
-            abc, student, application=str(application.pk), document_type="1", verification="ok"
+            abc,
+            student,
+            application=str(application.public_id),
+            document_type="1",
+            verification="ok",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -412,7 +419,7 @@ class TestAddingAnOfferLetter:
 
         response = abc.client.post(
             letters_url(student),
-            {"application": application.pk, "kind": "conditional"},
+            {"application": str(application.public_id), "kind": "conditional"},
             format="json",
         )
 
@@ -425,7 +432,7 @@ class TestAddingAnOfferLetter:
         application = applied(abc, student, "Deakin University")
         fake_document_storage.is_down = True
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
         assert response.json() == {"detail": "We couldn't store the file. Try again."}
@@ -448,7 +455,7 @@ class TestAddingAnOfferLetter:
                 for number in range(MAX_DOCUMENTS_PER_STUDENT)
             )
 
-        response = add_letter(abc, student, application=str(application.pk))
+        response = add_letter(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -475,7 +482,9 @@ class TestAddingAnOfferLetter:
         _, student = counselled_student(abc, Stage.APPLYING)
         application = applied(abc, student, "Deakin University")
 
-        add_letter(abc, student, application=str(application.pk), file=a_letter(name="sita.pdf"))
+        add_letter(
+            abc, student, application=str(application.public_id), file=a_letter(name="sita.pdf")
+        )
 
         text = json_logs.text()
         assert f"Offer letter added: application_id={application.pk}" in text
@@ -500,11 +509,11 @@ class TestChoosingAnOffer:
         deakin = with_offer(abc, student, "Deakin University")
         with_offer(abc, student, "RMIT University")
 
-        response = choose(abc, student, {"application": deakin.pk})
+        response = choose(abc, student, {"application": str(deakin.public_id)})
 
         assert response.status_code == status.HTTP_200_OK
         body = response.json()
-        assert body["chosen_offer_id"] == deakin.pk
+        assert body["chosen_offer_id"] == str(deakin.public_id)
         assert body["stage"] == "offer"
         assert body["progress"] == {
             "percent": 76,
@@ -525,9 +534,9 @@ class TestChoosingAnOffer:
         rmit = with_offer(abc, student, "RMIT University")
         set_chosen(abc, student, deakin)
 
-        response = choose(abc, student, {"application": rmit.pk})
+        response = choose(abc, student, {"application": str(rmit.public_id)})
 
-        assert response.json()["chosen_offer_id"] == rmit.pk
+        assert response.json()["chosen_offer_id"] == str(rmit.public_id)
         [entry] = entries(abc, student, HistoryKind.CHOSEN_OFFER_CHANGED)
         assert (entry.before, entry.after) == ("Deakin University", "RMIT University")
 
@@ -536,7 +545,7 @@ class TestChoosingAnOffer:
         deakin = with_offer(abc, student)
         set_chosen(abc, student, deakin)
 
-        response = choose(abc, student, {"application": deakin.pk})
+        response = choose(abc, student, {"application": str(deakin.public_id)})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ALREADY_CHOSEN
@@ -549,7 +558,7 @@ class TestChoosingAnOffer:
         _, student = counselled_student(abc, Stage.OFFER)
         application = make_application(abc, student, make_course(abc), at)
 
-        response = choose(abc, student, {"application": application.pk})
+        response = choose(abc, student, {"application": str(application.public_id)})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == CHOOSE_OFFER
@@ -560,7 +569,7 @@ class TestChoosingAnOffer:
         someone_else = make_student(abc, me, Stage.OFFER, name="Ram Thapa")
         theirs = with_offer(abc, someone_else)
 
-        response = choose(abc, student, {"application": theirs.pk})
+        response = choose(abc, student, {"application": str(theirs.public_id)})
 
         assert response.json() == CHOOSE_OFFER
         assert chosen_of(abc, student) is None
@@ -576,7 +585,7 @@ class TestChoosingAnOffer:
         with tenant_context(abc.consultancy):
             Visa.objects.create(student=student, application=deakin, status=VisaStatus.APPLIED)
 
-        response = choose(abc, student, {"application": rmit.pk})
+        response = choose(abc, student, {"application": str(rmit.public_id)})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == CHOICE_LOCKED
@@ -590,11 +599,15 @@ class TestChoosingAnOffer:
         rmit = with_offer(abc, student, "RMIT University")
         set_chosen(abc, student, deakin)
         visa = abc.client.post(
-            f"/api/students/{student.pk}/visas/", {"application": deakin.pk}, format="json"
+            f"/api/students/{student.public_id}/visas/",
+            {"application": str(deakin.public_id)},
+            format="json",
         ).json()["visas"][0]
 
         refused = abc.client.patch(
-            f"/api/students/{student.pk}/visas/{visa['id']}/", {"status": "refused"}, format="json"
+            f"/api/students/{student.public_id}/visas/{visa['id']}/",
+            {"status": "refused"},
+            format="json",
         )
 
         assert refused.json()["chosen_offer_id"] is None
@@ -602,7 +615,10 @@ class TestChoosingAnOffer:
         cleared = entries(abc, student, HistoryKind.CHOSEN_OFFER_CHANGED)[-1]
         assert (cleared.before, cleared.after) == ("Deakin University", "")
         assert cleared.detail == "Automatic: Deakin University visa is Refused."
-        assert choose(abc, student, {"application": deakin.pk}).status_code == status.HTTP_200_OK
+        assert (
+            choose(abc, student, {"application": str(deakin.public_id)}).status_code
+            == status.HTTP_200_OK
+        )
         set_chosen(abc, student, rmit)
         assert chosen_of(abc, student) == rmit.pk
 
@@ -613,7 +629,10 @@ class TestChoosingAnOffer:
         deakin = with_offer(abc, student)
         abc.log_in_as(Role.ADMIN)
 
-        assert choose(abc, student, {"application": deakin.pk}).status_code == status.HTTP_200_OK
+        assert (
+            choose(abc, student, {"application": str(deakin.public_id)}).status_code
+            == status.HTTP_200_OK
+        )
 
     @pytest.mark.parametrize(
         ("role", "refusal"),
@@ -632,7 +651,7 @@ class TestChoosingAnOffer:
         deakin = with_offer(abc, student)
         abc.log_in_as(role)
 
-        response = choose(abc, student, {"application": deakin.pk})
+        response = choose(abc, student, {"application": str(deakin.public_id)})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == refusal
@@ -645,7 +664,7 @@ class TestChoosingAnOffer:
         deakin = with_offer(abc, student)
 
         response = abc.new_client().put(
-            chosen_url(student), {"application": deakin.pk}, format="json"
+            chosen_url(student), {"application": str(deakin.public_id)}, format="json"
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -672,7 +691,7 @@ class TestChoosingAnOffer:
         _, student = counselled_student(abc, Stage.OFFER)
         deakin = with_offer(abc, student)
 
-        response = choose(abc, student, {"application": deakin.pk, "stage": "visa"})
+        response = choose(abc, student, {"application": str(deakin.public_id), "stage": "visa"})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
@@ -711,7 +730,9 @@ class TestAVisaFollowsTheChosenOffer:
         set_chosen(abc, student, deakin)
 
         response = abc.client.post(
-            f"/api/students/{student.pk}/visas/", {"application": rmit.pk}, format="json"
+            f"/api/students/{student.public_id}/visas/",
+            {"application": str(rmit.public_id)},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -724,7 +745,9 @@ class TestAVisaFollowsTheChosenOffer:
         deakin = with_offer(abc, student)
 
         response = abc.client.post(
-            f"/api/students/{student.pk}/visas/", {"application": deakin.pk}, format="json"
+            f"/api/students/{student.public_id}/visas/",
+            {"application": str(deakin.public_id)},
+            format="json",
         )
 
         assert response.json() == NOT_CHOSEN
@@ -740,11 +763,13 @@ class TestAVisaFollowsTheChosenOffer:
             )
 
         response = abc.client.patch(
-            f"/api/students/{student.pk}/visas/{visa.pk}/", {"status": "applied"}, format="json"
+            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
+            {"status": "applied"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["chosen_offer_id"] == deakin.pk
+        assert response.json()["chosen_offer_id"] == str(deakin.public_id)
         [entry] = entries(abc, student, HistoryKind.CHOSEN_OFFER_CHANGED)
         assert (entry.before, entry.after) == ("", "Deakin University")
 
@@ -761,7 +786,9 @@ class TestAVisaFollowsTheChosenOffer:
             )
 
         response = abc.client.patch(
-            f"/api/students/{student.pk}/visas/{visa.pk}/", {"status": "applied"}, format="json"
+            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
+            {"status": "applied"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -778,10 +805,12 @@ class TestAVisaFollowsTheChosenOffer:
             visa = Visa.objects.create(student=student, application=deakin)
 
         response = abc.client.patch(
-            f"/api/students/{student.pk}/visas/{visa.pk}/", {"status": "granted"}, format="json"
+            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
+            {"status": "granted"},
+            format="json",
         )
 
-        assert response.json()["chosen_offer_id"] == deakin.pk
+        assert response.json()["chosen_offer_id"] == str(deakin.public_id)
         assert entries(abc, student, HistoryKind.CHOSEN_OFFER_CHANGED) == []
 
 

@@ -24,7 +24,7 @@ def clock_answer(state: ClockState) -> dict[str, object]:
         "anywhere": None if state.anywhere is None else state.anywhere.value,
         "open": None
         if session is None
-        else {"id": session.pk, "clocked_in_at": moment(session.clocked_in_at)},
+        else {"id": session.public_id, "clocked_in_at": moment(session.clocked_in_at)},
         "forgotten_day": None if state.forgotten_day is None else state.forgotten_day.isoformat(),
         "today_minutes": state.today_minutes,
         "last_out": moment(state.last_out),
@@ -34,7 +34,7 @@ def clock_answer(state: ClockState) -> dict[str, object]:
 def staff_answer(staff: Staff) -> dict[str, object]:
     """Who: name and job title, and whether they have left."""
     return {
-        "id": staff.pk,
+        "id": staff.public_id,
         "name": staff.name,
         "job_title": staff.job_title,
         "has_left": staff.status == StaffStatus.DEACTIVATED,
@@ -54,7 +54,7 @@ def figures_answer(summary: MonthSummary) -> dict[str, object]:
 
 def _session_answer(session: SessionTimes, now: datetime) -> dict[str, object]:
     return {
-        "id": session.id,
+        "id": session.public_id,
         "clocked_in_at": moment(session.clocked_in_at),
         "clocked_out_at": moment(session.clocked_out_at),
         "missing_clock_out": is_missing_clock_out(session, now),
@@ -91,7 +91,7 @@ def day_answer(day: DaySummary, now: datetime) -> dict[str, object]:
 def correction_answer(change: WorkSessionChange) -> dict[str, object]:
     """One correction: which day, before, after, why, who and when."""
     return {
-        "id": change.pk,
+        "id": change.public_id,
         "day": change.day.isoformat(),
         "before": change.before,
         "after": change.after,
@@ -110,7 +110,7 @@ def person_now_answer(person: PersonNow) -> dict[str, object]:
     else:
         state = "not_in"
     return {
-        "id": person.staff.pk,
+        "id": person.staff.public_id,
         "name": person.staff.name,
         "job_title": person.staff.job_title,
         "state": state,
@@ -122,7 +122,7 @@ def person_now_answer(person: PersonNow) -> dict[str, object]:
 def working_day_change_answer(change: WorkingDayChange) -> dict[str, object]:
     """One change of the Working Day."""
     return {
-        "id": change.pk,
+        "id": change.public_id,
         "old_minutes": change.old_minutes,
         "new_minutes": change.new_minutes,
         "by": change.by_name,
@@ -133,8 +133,8 @@ def working_day_change_answer(change: WorkingDayChange) -> dict[str, object]:
 def work_from_home_answer(dates: WorkFromHome) -> dict[str, object]:
     """One set of Work From Home dates: when, why, where it is, who asked or set and answered."""
     return {
-        "id": dates.pk,
-        "staff_id": dates.staff_id,
+        "id": dates.public_id,
+        "staff_id": dates.staff.public_id,
         "starts_on": dates.starts_on.isoformat(),
         "ends_on": None if dates.ends_on is None else dates.ends_on.isoformat(),
         "reason": dates.reason,
@@ -149,4 +149,4 @@ def work_from_home_answer(dates: WorkFromHome) -> dict[str, object]:
 
 def holiday_answer(holiday: Holiday) -> dict[str, object]:
     """One holiday: its day and name."""
-    return {"id": holiday.pk, "date": holiday.day.isoformat(), "name": holiday.name}
+    return {"id": holiday.public_id, "date": holiday.day.isoformat(), "name": holiday.name}

@@ -8,13 +8,20 @@ from datetime import datetime
 from django.http import HttpRequest
 from rest_framework.request import Request
 
+from emails.types import OfficeDetails
 from modules.services import get_enabled_modules
 from modules.types import Module
 from staff.actors import is_platform_visitor
 from staff.exceptions import StaffNotAuthenticatedError
 from staff.models import Staff
 from tenancy.models import Consultancy
-from tenancy.services import get_access, get_date_display, get_logo, get_theme
+from tenancy.services import (
+    get_access,
+    get_date_display,
+    get_logo,
+    get_office_details,
+    get_theme,
+)
 from tenancy.status import ConsultancyStatus
 from tenancy.subdomains import get_platform_host
 from tenancy.theme import ThemeConfig
@@ -25,7 +32,7 @@ from tenancy.types import DateDisplay, OfficeLogo
 class StaffSummary:
     """Who is logged in."""
 
-    id: int
+    id: str  # their UUID (ADR 0027)
     name: str
     email: str
     role: str
@@ -44,6 +51,10 @@ class ConsultancySummary:
     status: ConsultancyStatus
     status_message: str | None
     evaluation_ends_at: datetime | None
+    # Office details (Configuration → General), printed at the bottom of every email; emails to
+    # Students can't be sent until the contact email is set (spec stories 11-13).
+    office_details: OfficeDetails
+    has_contact_email: bool
 
 
 @dataclass(frozen=True)
@@ -85,9 +96,10 @@ def get_request_staff(request: HttpRequest | Request) -> Staff:
 def build_staff_context(staff: Staff, consultancy: Consultancy) -> StaffContext:
     """Return the session context for a Staff member of a Consultancy."""
     access = get_access(consultancy)
+    office_details = get_office_details(consultancy)
     return StaffContext(
         staff=StaffSummary(
-            id=staff.pk,
+            id=str(staff.public_id),
             name=staff.name,
             email=staff.email,
             role=staff.role,
@@ -99,6 +111,8 @@ def build_staff_context(staff: Staff, consultancy: Consultancy) -> StaffContext:
             status=access.status,
             status_message=access.message,
             evaluation_ends_at=access.evaluation_ends_at,
+            office_details=office_details,
+            has_contact_email=bool(office_details.contact_email),
         ),
         modules=get_enabled_modules(consultancy),
         date_display=get_date_display(consultancy),

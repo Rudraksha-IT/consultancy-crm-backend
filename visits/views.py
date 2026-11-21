@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from django.core.paginator import EmptyPage, Paginator
 from django.utils import timezone
 from rest_framework import status
@@ -58,7 +60,7 @@ class StudentVisitsView(APIView):
     permission_classes = (IsAuthenticated, CanLogVisits)
     parser_classes = (JSONParser,)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return one page of the Student's Visits, newest first."""
         student = _student(student_id)
         query = VisitPageQuerySerializer(data=request.query_params)
@@ -76,7 +78,7 @@ class StudentVisitsView(APIView):
             }
         )
 
-    def post(self, request: Request, student_id: int) -> Response:
+    def post(self, request: Request, student_id: UUID) -> Response:
         """Log the Visit, made now by the Staff member, and return it."""
         student = _student(student_id)
         serializer = NewVisitSerializer(data=request.data)
@@ -90,8 +92,8 @@ class StudentVisitsView(APIView):
         return Response(visit_answer(visit), status=status.HTTP_201_CREATED)
 
 
-def _student(student_id: int) -> Student:
+def _student(student_id: UUID) -> Student:
     try:
-        return Student.objects.get(pk=student_id)
+        return Student.objects.get(public_id=student_id)
     except Student.DoesNotExist as error:
         raise NotFound from error

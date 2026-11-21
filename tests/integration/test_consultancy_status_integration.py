@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -45,7 +46,7 @@ DAY = timedelta(days=1)
 INJECTION = "<script>alert(1)</script>'; DROP TABLE tenancy_consultancy; --"
 
 
-def status_url(consultancy_id: int) -> str:
+def status_url(consultancy_id: object) -> str:
     """Return the URL that changes a Consultancy's Status."""
     return f"{CONSULTANCIES_URL}{consultancy_id}/status/"
 
@@ -78,7 +79,7 @@ def changes(office: ConsultancyContext) -> list[ConsultancyStatusChange]:
 
 def change(platform: PlatformContext, office: ConsultancyContext, **body: object) -> Any:  # noqa: ANN401
     """Ask the Platform API to change the Consultancy's Status."""
-    return platform.client.post(status_url(office.consultancy.pk), body, format="json")
+    return platform.client.post(status_url(office.consultancy.public_id), body, format="json")
 
 
 @pytest.fixture
@@ -115,7 +116,7 @@ class TestNewConsultancy:
         ends_at = datetime.fromisoformat(body["evaluation_ends_at"])
         assert before + timedelta(days=14) <= ends_at <= timezone.now() + timedelta(days=14)
         with schema_context(PUBLIC_SCHEMA):
-            record = ConsultancyStatusChange.objects.get(consultancy_id=body["id"])
+            record = ConsultancyStatusChange.objects.get(consultancy__public_id=body["id"])
         assert (record.from_status, record.to_status, record.changed_by_id) == (
             "",
             "evaluation",
@@ -187,6 +188,7 @@ def new_consultancy(**overrides: object) -> dict[str, object]:
     return {
         "name": "Everest Education",
         "subdomain": "everest",
+        "contact_email": "info@everest.test",
         **overrides,
     }
 
@@ -437,7 +439,9 @@ class TestRefusedInput:
     ) -> None:
         set_status(abc, "active")
 
-        response = platform_site.client.post(status_url(abc.consultancy.pk), body, format="json")
+        response = platform_site.client.post(
+            status_url(abc.consultancy.public_id), body, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert field in response.json()
@@ -459,7 +463,7 @@ class TestRefusedInput:
         self, abc: ConsultancyContext, platform_site: PlatformContext, ops: PlatformAdmin
     ) -> None:
         response = platform_site.client.post(
-            status_url(abc.consultancy.pk),
+            status_url(abc.consultancy.public_id),
             "status=terminated&reason=x",
             content_type="text/plain",
         )
@@ -475,7 +479,7 @@ class TestRefusedInput:
         ops: PlatformAdmin,
         method: str,
     ) -> None:
-        response = getattr(platform_site.client, method)(status_url(abc.consultancy.pk))
+        response = getattr(platform_site.client, method)(status_url(abc.consultancy.public_id))
 
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -483,7 +487,7 @@ class TestRefusedInput:
         self, platform_site: PlatformContext, ops: PlatformAdmin
     ) -> None:
         response = platform_site.client.post(
-            status_url(999_999), {"status": "terminated", "reason": "x"}, format="json"
+            status_url(uuid.uuid4()), {"status": "terminated", "reason": "x"}, format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -494,7 +498,9 @@ class TestWhoCanChangeIt:
         self, abc: ConsultancyContext, platform_site: PlatformContext
     ) -> None:
         response = platform_site.new_client().post(
-            status_url(abc.consultancy.pk), {"status": "terminated", "reason": "x"}, format="json"
+            status_url(abc.consultancy.public_id),
+            {"status": "terminated", "reason": "x"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -509,7 +515,9 @@ class TestWhoCanChangeIt:
         use_access_token(client, tokens.access)
 
         response = client.post(
-            status_url(abc.consultancy.pk), {"status": "terminated", "reason": "x"}, format="json"
+            status_url(abc.consultancy.public_id),
+            {"status": "terminated", "reason": "x"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -519,7 +527,9 @@ class TestWhoCanChangeIt:
         abc.log_in_as(Role.ADMIN)
 
         response = abc.client.post(
-            status_url(abc.consultancy.pk), {"status": "terminated", "reason": "x"}, format="json"
+            status_url(abc.consultancy.public_id),
+            {"status": "terminated", "reason": "x"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -764,6 +774,7 @@ class TestServicesGuardThemselves:
             name="Everest Education",
             subdomain="everest",
             theme=DEFAULT_THEME,
+            contact_email="info@everest.test",
             status=ConsultancyStatus.ACTIVE,
         )
 

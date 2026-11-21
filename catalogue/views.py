@@ -13,8 +13,17 @@ from rest_framework.views import APIView
 
 from catalogue.answers import course_answer, import_answer, university_answer
 from catalogue.csv_import import CatalogueFileError, parse_catalogue_csv
-from catalogue.edit_serializers import UniversityEditSerializer, used_by_message
-from catalogue.exceptions import DuplicateNameError, InUseError, NotArchivedError
+from catalogue.edit_serializers import (
+    UniversityEditSerializer,
+    kept_files_message,
+    used_by_message,
+)
+from catalogue.exceptions import (
+    DuplicateNameError,
+    InUseError,
+    KeepsFilesError,
+    NotArchivedError,
+)
 from catalogue.models import Course, University
 from catalogue.permissions import CanChangeCatalogue, CanReadCatalogue
 from catalogue.serializers import (
@@ -136,6 +145,9 @@ class UniversityView(_CatalogueView):
             delete_university(university, by=get_request_staff(request))
         except NotArchivedError as error:
             raise ValidationError({"detail": ARCHIVE_UNIVERSITY_FIRST_MESSAGE}) from error
+        except KeepsFilesError as error:
+            message = kept_files_message(error.count, of_courses=True)
+            raise ValidationError({"detail": message}) from error
         except InUseError as error:
             raise ValidationError({"detail": used_by_message(error.count, error.what)}) from error
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -19,7 +19,7 @@ def shown_network(stored: str) -> str:
 def office_network_answer(office_network: OfficeNetwork) -> dict[str, object]:
     """One Office Network: its name and address or range."""
     return {
-        "id": office_network.pk,
+        "id": office_network.public_id,
         "label": office_network.label,
         "network": shown_network(office_network.network),
     }
@@ -28,7 +28,7 @@ def office_network_answer(office_network: OfficeNetwork) -> dict[str, object]:
 def office_network_change_answer(change: OfficeNetworkChange) -> dict[str, object]:
     """One add or remove: what, which network, who and when."""
     return {
-        "id": change.pk,
+        "id": change.public_id,
         "action": change.action,
         "label": change.label,
         "network": shown_network(change.network),

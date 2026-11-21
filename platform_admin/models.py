@@ -7,6 +7,7 @@ from django.db import models
 from django.db.models.functions import Lower
 
 from codes.models import CodeRecord
+from config.public_ids import public_id_field
 from tenancy.models import LOGO_CONTENT_TYPE_MAX_LENGTH, LOGO_KEY_MAX_LENGTH
 
 PLATFORM_ADMIN_NAME_MAX_LENGTH = 200
@@ -18,6 +19,8 @@ class PlatformAdminManager(BaseUserManager["PlatformAdmin"]):
 
 class PlatformAdmin(AbstractBaseUser):
     """A member of the team running the product; not Staff of any Consultancy."""
+
+    public_id = public_id_field()
 
     name = models.CharField(max_length=PLATFORM_ADMIN_NAME_MAX_LENGTH)
     email = models.EmailField(unique=True)
@@ -56,6 +59,8 @@ class PlatformAdminChange(models.Model):
     `by` is empty when the deploy (the system) created the Platform Admin.
     """
 
+    public_id = public_id_field()
+
     platform_admin = models.ForeignKey(
         PlatformAdmin, on_delete=models.PROTECT, related_name="changes"
     )
@@ -87,6 +92,8 @@ class SupportVisit(models.Model):
     open from `started_at` until it is left (`ended_at`) or until `ends_by`, whichever is first;
     its login tokens work only while it is open.
     """
+
+    public_id = public_id_field()
 
     platform_admin = models.ForeignKey(PlatformAdmin, on_delete=models.PROTECT, related_name="+")
     consultancy = models.ForeignKey(
@@ -167,3 +174,26 @@ class ProductBrand(models.Model):
 
     def __str__(self) -> str:
         return "Product brand"
+
+
+EMAIL_TEST_REFERENCE_MAX_LENGTH = 64
+
+
+class EmailTest(models.Model):
+    """One "Send a test email" from Platform → Settings (spec 2026-11-18 stories 3-4).
+
+    The newest one is the email status the Platform shows; the last hour's count towards each
+    Platform Admin's limit. A failed one keeps the reference to quote (the request's correlation
+    ID), never the mail server's words. Written only by `platform_admin.email_check`.
+    """
+
+    platform_admin = models.ForeignKey(PlatformAdmin, on_delete=models.CASCADE)
+    tested_at = models.DateTimeField()
+    sent = models.BooleanField()
+    reference = models.CharField(max_length=EMAIL_TEST_REFERENCE_MAX_LENGTH, blank=True, default="")
+
+    class Meta:
+        indexes: ClassVar = [models.Index(fields=["platform_admin", "tested_at"])]
+
+    def __str__(self) -> str:
+        return f"Email test {self.pk}"

@@ -6,6 +6,7 @@ Every later endpoint adds its own case here (see the spec's Testing Decisions).
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import timedelta
 
 import pytest
@@ -28,10 +29,12 @@ from clock_in.models import (
     WorkSessionChange,
 )
 from commission.models import Commission
-from communication.models import Message, ProviderSettings
+from communication.models import Message
 from documents.models import Document, DocumentFile, DocumentRequirement, DocumentType
+from emails.types import OfficeDetails
 from expenses.models import Expense
 from exports.models import ExportRecord
+from fee_types.models import FeeType
 from fees.models import Fee
 from history.models import HistoryEntry, HistoryKind
 from inbox.models import InboxMessage
@@ -46,6 +49,7 @@ from students.models import Student, WorkExperience
 from tasks.models import Task
 from tenancy.context import activate_public_schema
 from tenancy.models import Consultancy
+from tenancy.services import set_office_details
 from tests.conftest import (
     PLATFORM_TEST_PASSWORD,
     TEST_PASSWORD,
@@ -57,17 +61,22 @@ from tests.conftest import (
     run_queued_jobs,
     use_access_token,
 )
-from tests.fakes import FakeDocumentStorage, FakeSmsGateway
+from tests.fakes import FakeDocumentStorage, StoredFile
+from tests.integration.test_record_ids_office_integration import (
+    office_with_every_record,
+    record_addresses,
+)
 from tests.support_access import open_as_platform_admin
 from tests.support_access import start as start_visit
 from transfer_requests.models import TransferRequest, TransferRequestStatus
 from visits.models import Visit
 
+# A UUID no record has, fixed so every test worker collects the same tests.
+NO_RECORD_ID = "00000000-0000-4000-8000-000000000000"
 LOGIN_URL = "/api/auth/login/"
 REFRESH_URL = "/api/auth/refresh/"
 LOGOUT_URL = "/api/auth/logout/"
 CONTEXT_URL = "/api/context/"
-COMMS_SETTINGS_URL = "/api/communication/settings/"
 
 
 class TestTenantIsolation:
@@ -305,9 +314,9 @@ class TestPlatformTeamAndBrandIsolation:
         [
             ("get", "/api/platform/admins/"),
             ("post", "/api/platform/admins/"),
-            ("post", "/api/platform/admins/1/deactivate/"),
-            ("post", "/api/platform/admins/1/resend/"),
-            ("post", "/api/platform/admins/1/reactivate/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/deactivate/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/resend/"),
+            ("post", f"/api/platform/admins/{NO_RECORD_ID}/reactivate/"),
             ("post", "/api/platform/brand/logo/"),
             ("delete", "/api/platform/brand/logo/"),
             ("patch", "/api/platform/me/"),
@@ -348,7 +357,9 @@ class TestThemeIsolation:
         platform_site.log_in()
 
         platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/theme/", NEW_THEME, format="json"
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/theme/",
+            NEW_THEME,
+            format="json",
         )
 
         assert abc.new_client().get("/api/consultancy/").json()["theme"]["page"] == "ice"
@@ -364,7 +375,9 @@ class TestThemeIsolation:
         use_access_token(client, access)
 
         response = client.put(
-            f"/api/platform/consultancies/{xyz.consultancy.pk}/theme/", NEW_THEME, format="json"
+            f"/api/platform/consultancies/{xyz.consultancy.public_id}/theme/",
+            NEW_THEME,
+            format="json",
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -441,6 +454,78 @@ class TestOfficeLogoIsolation:
         assert xyz.new_client().get("/api/consultancy/logo/1/").content == LOGO_PNG
 
 
+OFFICE_DETAILS_URL = "/api/configuration/office-details/"
+ABC_DETAILS = {
+    "contact_email": "info@abc.com",
+    "phone": "01-4412345",
+    "address_line1": "Putalisadak, Kathmandu",
+    "address_line2": "",
+    "website": "https://abc.com",
+}
+
+
+class TestOfficeDetailsIsolation:
+    def test_each_office_reads_only_its_own_details(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.COUNSELLOR)
+
+        abc.client.put(OFFICE_DETAILS_URL, ABC_DETAILS, format="json")
+
+        assert abc.client.get("/api/context/").json()["consultancy"]["office_details"] == (
+            ABC_DETAILS
+        )
+        theirs = xyz.client.get("/api/context/").json()["consultancy"]
+        assert theirs["has_contact_email"] is False
+        assert "info@abc.com" not in str(theirs)
+
+    def test_an_admins_token_cannot_change_another_offices_details(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz.log_in_as(Role.ADMIN)  # Same primary key as ABC's Admin, so only the schema differs.
+        intruder = xyz.new_client()
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        response = intruder.put(OFFICE_DETAILS_URL, ABC_DETAILS, format="json")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert xyz.client.get("/api/context/").json()["consultancy"]["has_contact_email"] is False
+
+
+class TestAccountEmailIsolation:
+    def test_each_offices_code_email_carries_only_its_own_look(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        set_office_details(abc.consultancy, OfficeDetails(contact_email="info@abc.com"))
+        staff = xyz.add_staff(Role.COUNSELLOR)
+
+        xyz.new_client().post("/api/auth/password-reset/", {"email": str(staff.email)})
+
+        [sent] = mail.outbox
+        assert sent.from_email.startswith("XYZ Overseas")
+        assert sent.reply_to == []
+        assert "ABC Education" not in str(sent.body)
+        assert "info@abc.com" not in str(sent.body)
+
+    def test_an_offices_admin_cannot_reach_the_platform_test_email(
+        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        on_platform = platform_site.new_client()
+        use_access_token(on_platform, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        assert on_platform.post("/api/platform/email/test/").status_code in {401, 403}
+        assert on_platform.get("/api/platform/email/").status_code in {401, 403}
+        assert mail.outbox == []
+
+
 class TestModuleIsolation:
     def test_switching_one_consultancys_modules_leaves_another_alone(
         self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
@@ -452,7 +537,7 @@ class TestModuleIsolation:
         platform_site.log_in()
 
         platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/modules/",
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/modules/",
             {
                 "batches": True,
                 "communication": True,
@@ -476,7 +561,7 @@ class TestModuleIsolation:
         platform_site.log_in()
         for office in (abc, xyz):
             platform_site.client.put(
-                f"/api/platform/consultancies/{office.consultancy.pk}/modules/",
+                f"/api/platform/consultancies/{office.consultancy.public_id}/modules/",
                 {
                     "batches": True,
                     "communication": True,
@@ -554,10 +639,12 @@ class TestStaffManagementIsolation:
         xyz.add_staff(Role.ADMIN, email="boss@xyz.test")
         target = xyz.add_staff(Role.COUNSELLOR, email="ram@xyz.test")  # id 2, absent on ABC
 
-        changed = abc.client.patch(f"{STAFF_URL}{target.pk}/", {"role": "admin"}, format="json")
-        deactivated = abc.client.post(f"{STAFF_URL}{target.pk}/deactivate/")
-        resent = abc.client.post(f"{STAFF_URL}{target.pk}/invite/")
-        cancelled = abc.client.delete(f"{STAFF_URL}{target.pk}/invite/")
+        changed = abc.client.patch(
+            f"{STAFF_URL}{target.public_id}/", {"role": "admin"}, format="json"
+        )
+        deactivated = abc.client.post(f"{STAFF_URL}{target.public_id}/deactivate/")
+        resent = abc.client.post(f"{STAFF_URL}{target.public_id}/invite/")
+        cancelled = abc.client.delete(f"{STAFF_URL}{target.public_id}/invite/")
 
         assert {r.status_code for r in (changed, deactivated, resent, cancelled)} == {
             status.HTTP_404_NOT_FOUND
@@ -695,11 +782,17 @@ class TestStudentProfileIsolation:
             "id"
         ]
         ram_id = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
-        assert sita_id == ram_id  # Each schema numbers its own Students.
+        assert sita_id != ram_id  # Every Student has their own UUID, whichever office.
 
-        opened = xyz.client.get(f"{STUDENTS_URL}{sita_id}/").json()
+        theirs = xyz.client.get(f"{STUDENTS_URL}{sita_id}/")
+        own = xyz.client.get(f"{STUDENTS_URL}{ram_id}/").json()
+        with tenant_context(abc.consultancy):
+            sita_number = Student.objects.get(public_id=sita_id).pk
+        by_number = xyz.client.get(f"{STUDENTS_URL}{sita_number}/")
 
-        assert opened["name"] == "Ram Thapa"
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
+        assert own["name"] == "Ram Thapa"
+        assert by_number.status_code == status.HTTP_404_NOT_FOUND
 
     def test_a_student_only_in_another_consultancy_cannot_be_read_or_changed(
         self, make_consultancy: ConsultancyFactory
@@ -725,7 +818,7 @@ class TestStudentProfileIsolation:
 
         assert [response.status_code for response in responses] == [status.HTTP_404_NOT_FOUND] * 6
         with tenant_context(abc.consultancy):
-            gita = Student.objects.get(pk=only_abc)
+            gita = Student.objects.get(public_id=only_abc)
             assert gita.father_name == ""
             assert gita.note == ""
 
@@ -767,7 +860,7 @@ class TestStudentProfileIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
         with tenant_context(xyz.consultancy):
-            assert Student.objects.get(pk=ram_id).note != "Stolen"
+            assert Student.objects.get(public_id=ram_id).note != "Stolen"
 
 
 class TestEditDetailsIsolation:
@@ -800,7 +893,7 @@ class TestEditDetailsIsolation:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            gita = Student.objects.get(pk=only_abc)
+            gita = Student.objects.get(public_id=only_abc)
             assert gita.name == "Gita Rai"
             assert not gita.academic_records.exists()
 
@@ -818,7 +911,6 @@ class TestEditDetailsIsolation:
             {"level": "see", "institution": "ABC school"},
             format="json",
         ).json()["id"]
-        assert sita == ram
         stolen = {
             **self._save("Ram Thapa"),
             "version": 1,
@@ -829,7 +921,10 @@ class TestEditDetailsIsolation:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         with tenant_context(abc.consultancy):
-            assert Student.objects.get(pk=sita).academic_records.get().institution == "ABC school"
+            sita_rows = Student.objects.get(public_id=sita).academic_records
+            assert sita_rows.get().institution == "ABC school"
+        with tenant_context(xyz.consultancy):
+            assert not Student.objects.get(public_id=ram).academic_records.exists()
 
     def test_a_token_from_another_consultancy_is_refused(
         self, make_consultancy: ConsultancyFactory
@@ -847,7 +942,7 @@ class TestEditDetailsIsolation:
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         with tenant_context(xyz.consultancy):
-            assert Student.objects.get(pk=ram_id).name == "Ram Thapa"
+            assert Student.objects.get(public_id=ram_id).name == "Ram Thapa"
 
 
 class TestWorkExperienceIsolation:
@@ -860,7 +955,7 @@ class TestWorkExperienceIsolation:
         xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
         abc.log_in_as(Role.ADMIN)
         xyz.log_in_as(Role.ADMIN)
-        xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json")
+        ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
         sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()["id"]
         gita = abc.client.post(STUDENTS_URL, _lead_body("Gita Rai"), format="json").json()["id"]
         job = {"employer": "Bir Hospital", "job_title": "Nurse", "started_on": "2024-04"}
@@ -874,13 +969,15 @@ class TestWorkExperienceIsolation:
             xyz.client.patch(f"{url}{job_id}/", {"employer": "Stolen"}, format="json"),
             xyz.client.delete(f"{url}{job_id}/"),
         ]
-        on_xyz = xyz.client.get(f"{STUDENTS_URL}{sita}/").json()
+        abc_sita_on_xyz = xyz.client.get(f"{STUDENTS_URL}{sita}/")
+        on_xyz = xyz.client.get(f"{STUDENTS_URL}{ram}/").json()
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 3
+        assert abc_sita_on_xyz.status_code == status.HTTP_404_NOT_FOUND
         assert on_xyz["name"] == "Ram Thapa"
         assert on_xyz["work_experience"] == []
         with tenant_context(abc.consultancy):
-            assert WorkExperience.objects.get(pk=job_id).employer == "Bir Hospital"
+            assert WorkExperience.objects.get(public_id=job_id).employer == "Bir Hospital"
 
     def test_a_token_from_one_consultancy_cannot_touch_jobs_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -903,7 +1000,7 @@ class TestWorkExperienceIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
         with tenant_context(xyz.consultancy):
-            assert WorkExperience.objects.filter(student_id=ram).count() == 1
+            assert WorkExperience.objects.filter(student__public_id=ram).count() == 1
 
 
 class TestStageAndCounsellorIsolation:
@@ -922,13 +1019,17 @@ class TestStageAndCounsellorIsolation:
 
         responses = [
             xyz.client.post(f"{url}stage/", {"stage": "lost", "lost_reason": "x"}, format="json"),
-            xyz.client.post(f"{url}assign/", {"counsellor": xyz_admin.pk}, format="json"),
-            xyz.client.post(f"{url}transfer/", {"counsellor": xyz_admin.pk}, format="json"),
+            xyz.client.post(
+                f"{url}assign/", {"counsellor": str(xyz_admin.public_id)}, format="json"
+            ),
+            xyz.client.post(
+                f"{url}transfer/", {"counsellor": str(xyz_admin.public_id)}, format="json"
+            ),
         ]
 
         assert [response.status_code for response in responses] == [status.HTTP_404_NOT_FOUND] * 3
         with tenant_context(abc.consultancy):
-            gita = Student.objects.get(pk=only_abc)
+            gita = Student.objects.get(public_id=only_abc)
             assert (gita.stage, gita.assigned_counsellor_id) == ("lead", None)
 
     def test_a_counsellor_of_another_consultancy_cannot_be_chosen(
@@ -942,12 +1043,14 @@ class TestStageAndCounsellorIsolation:
         ram_id = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
 
         response = xyz.client.post(
-            f"{STUDENTS_URL}{ram_id}/assign/", {"counsellor": abc_counsellor.pk}, format="json"
+            f"{STUDENTS_URL}{ram_id}/assign/",
+            {"counsellor": str(abc_counsellor.public_id)},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         with tenant_context(xyz.consultancy):
-            assert Student.objects.get(pk=ram_id).assigned_counsellor_id is None
+            assert Student.objects.get(public_id=ram_id).assigned_counsellor_id is None
 
     def test_the_assigned_students_list_shows_only_this_consultancys_students(
         self, make_consultancy: ConsultancyFactory
@@ -963,7 +1066,7 @@ class TestStageAndCounsellorIsolation:
             format="json",
         )
 
-        response = xyz.client.get(f"/api/staff/{xyz_admin.pk}/assigned-students/")
+        response = xyz.client.get(f"/api/staff/{xyz_admin.public_id}/assigned-students/")
 
         assert response.json() == []
 
@@ -980,28 +1083,30 @@ class TestStageAndCounsellorIsolation:
 
         responses = [
             intruder.post(f"{url}stage/", {"stage": "counselling"}, format="json"),
-            intruder.post(f"{url}assign/", {"counsellor": xyz_admin.pk}, format="json"),
-            intruder.post(f"{url}transfer/", {"counsellor": xyz_admin.pk}, format="json"),
-            intruder.get(f"/api/staff/{xyz_admin.pk}/assigned-students/"),
+            intruder.post(f"{url}assign/", {"counsellor": str(xyz_admin.public_id)}, format="json"),
+            intruder.post(
+                f"{url}transfer/", {"counsellor": str(xyz_admin.public_id)}, format="json"
+            ),
+            intruder.get(f"/api/staff/{xyz_admin.public_id}/assigned-students/"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
         with tenant_context(xyz.consultancy):
-            assert Student.objects.get(pk=ram_id).stage == "lead"
+            assert Student.objects.get(public_id=ram_id).stage == "lead"
 
 
 CATALOGUE_URL = "/api/catalogue/universities/"
 
 
-def _university_url(university_id: int) -> str:
+def _university_url(university_id: object) -> str:
     return f"{CATALOGUE_URL}{university_id}/"
 
 
-def _courses_url(university_id: int) -> str:
+def _courses_url(university_id: object) -> str:
     return f"{CATALOGUE_URL}{university_id}/courses/"
 
 
-def _course_url(course_id: int) -> str:
+def _course_url(course_id: object) -> str:
     return f"/api/catalogue/courses/{course_id}/"
 
 
@@ -1103,7 +1208,7 @@ class TestCatalogueIsolation:
         assert saved.status_code == status.HTTP_404_NOT_FOUND
         assert deleted.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            stored = University.objects.get(pk=university["id"])
+            stored = University.objects.get(public_id=university["id"])
             assert stored.name == "Deakin University"
             assert not stored.courses.get().archived
 
@@ -1143,8 +1248,8 @@ class TestCatalogueIsolation:
             "deleted_courses": [],
         }
 
-        saved = xyz.client.put(_university_url(target.pk), page, format="json")
-        deleted = xyz.client.delete(_university_url(target.pk))
+        saved = xyz.client.put(_university_url(target.public_id), page, format="json")
+        deleted = xyz.client.delete(_university_url(target.public_id))
 
         assert saved.status_code == status.HTTP_401_UNAUTHORIZED
         assert deleted.status_code == status.HTTP_401_UNAUTHORIZED
@@ -1215,7 +1320,7 @@ def _course_in(office: ConsultancyContext, name: str = "Deakin University") -> C
         return course
 
 
-def _applications_url(student_id: int) -> str:
+def _applications_url(student_id: str) -> str:
     return f"{STUDENTS_URL}{student_id}/applications/"
 
 
@@ -1234,7 +1339,7 @@ class TestApplicationIsolation:
         abc_course = _course_in(abc)
         added = abc.client.post(
             _applications_url(only_abc),
-            {"course": abc_course.pk, "intake": "2027-03"},
+            {"course": str(abc_course.public_id), "intake": "2027-03"},
             format="json",
         ).json()["applications"][0]
         xyz_course = _course_in(xyz)  # Same id as ABC's Course.
@@ -1242,7 +1347,7 @@ class TestApplicationIsolation:
         responses = [
             xyz.client.post(
                 _applications_url(only_abc),
-                {"course": xyz_course.pk, "intake": "2027-03"},
+                {"course": str(xyz_course.public_id), "intake": "2027-03"},
                 format="json",
             ),
             xyz.client.patch(
@@ -1257,7 +1362,7 @@ class TestApplicationIsolation:
         with tenant_context(abc.consultancy):
             [stored] = Application.objects.all()
             assert stored.status == "applied"
-            assert Student.objects.get(pk=only_abc).stage == "applying"
+            assert Student.objects.get(public_id=only_abc).stage == "applying"
 
     def test_an_application_id_of_another_consultancy_is_not_found_on_its_own_student(
         self, make_consultancy: ConsultancyFactory
@@ -1269,7 +1374,7 @@ class TestApplicationIsolation:
         abc_student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
         abc.client.post(
             _applications_url(abc_student["id"]),
-            {"course": _course_in(abc).pk, "intake": "2027-03"},
+            {"course": str(_course_in(abc).public_id), "intake": "2027-03"},
             format="json",
         )
         xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
@@ -1292,7 +1397,9 @@ class TestApplicationIsolation:
         ram_id = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
 
         response = xyz.client.post(
-            _applications_url(ram_id), {"course": abc_course.pk, "intake": "2027-03"}, format="json"
+            _applications_url(ram_id),
+            {"course": str(abc_course.public_id), "intake": "2027-03"},
+            format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -1310,14 +1417,14 @@ class TestApplicationIsolation:
         abc_id = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()["id"]
         abc.client.post(
             _applications_url(abc_id),
-            {"course": _course_in(abc).pk, "intake": "2027-03"},
+            {"course": str(_course_in(abc).public_id), "intake": "2027-03"},
             format="json",
         )
         xyz_id = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
 
         profile = xyz.client.get(f"{STUDENTS_URL}{xyz_id}/").json()
 
-        assert abc_id == xyz_id
+        assert abc_id != xyz_id
         assert profile["applications"] == []
 
     def test_a_token_from_one_consultancy_cannot_add_or_change_on_another(
@@ -1329,14 +1436,18 @@ class TestApplicationIsolation:
         ram_id = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
         course = _course_in(xyz)
         added = xyz.client.post(
-            _applications_url(ram_id), {"course": course.pk, "intake": "2027-03"}, format="json"
+            _applications_url(ram_id),
+            {"course": str(course.public_id), "intake": "2027-03"},
+            format="json",
         ).json()["applications"][0]
         intruder = api_client(xyz.host)
         use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
 
         responses = [
             intruder.post(
-                _applications_url(ram_id), {"course": course.pk, "intake": "2027-03"}, format="json"
+                _applications_url(ram_id),
+                {"course": str(course.public_id), "intake": "2027-03"},
+                format="json",
             ),
             intruder.patch(
                 f"{_applications_url(ram_id)}{added['id']}/", {"status": "rejected"}, format="json"
@@ -1361,7 +1472,7 @@ class TestApplicationListIsolation:
         sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()["id"]
         abc.client.post(
             _applications_url(sita),
-            {"course": _course_in(abc).pk, "intake": "2027-03"},
+            {"course": str(_course_in(abc).public_id), "intake": "2027-03"},
             format="json",
         )
         xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json")
@@ -1384,7 +1495,7 @@ class TestApplicationListIsolation:
         ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
         xyz.client.post(
             _applications_url(ram),
-            {"course": _course_in(xyz).pk, "intake": "2027-03"},
+            {"course": str(_course_in(xyz).public_id), "intake": "2027-03"},
             format="json",
         )
         intruder = api_client(xyz.host)
@@ -1398,36 +1509,37 @@ class TestApplicationListIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
 
 
-def _student_with_coe(office: ConsultancyContext, name: str) -> tuple[int, int]:
+def _student_with_coe(office: ConsultancyContext, name: str) -> tuple[str, str]:
     """Add a Student through the API with an Application at Offer, chosen; return both ids."""
     student_id = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()["id"]
     added = office.client.post(
         _applications_url(student_id),
-        {"course": _course_in(office).pk, "intake": "2027-03"},
+        {"course": str(_course_in(office).public_id), "intake": "2027-03"},
         format="json",
     ).json()["applications"][0]
     with tenant_context(office.consultancy):
-        Application.objects.filter(pk=added["id"]).update(status="offer")
-        Student.objects.filter(pk=student_id).update(chosen_offer_id=added["id"])
+        application = Application.objects.get(public_id=added["id"])
+        Application.objects.filter(pk=application.pk).update(status="offer")
+        Student.objects.filter(public_id=student_id).update(chosen_offer=application)
     return student_id, added["id"]
 
 
-def _visas_url(student_id: int) -> str:
+def _visas_url(student_id: str) -> str:
     return f"{STUDENTS_URL}{student_id}/visas/"
 
 
-def _student_applying(office: ConsultancyContext, name: str) -> tuple[int, int]:
+def _student_applying(office: ConsultancyContext, name: str) -> tuple[str, str]:
     """Add a Student through the API with an Application waiting for an offer; both ids."""
     student_id = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()["id"]
     added = office.client.post(
         _applications_url(student_id),
-        {"course": _course_in(office, f"{name} University").pk, "intake": "2027-03"},
+        {"course": str(_course_in(office, f"{name} University").public_id), "intake": "2027-03"},
         format="json",
     ).json()["applications"][0]
     return student_id, added["id"]
 
 
-def _offer_letter_form(application_id: int) -> dict[str, object]:
+def _offer_letter_form(application_id: str) -> dict[str, object]:
     return {
         "application": str(application_id),
         "kind": "conditional",
@@ -1448,7 +1560,7 @@ class TestOfferLetterAndChosenOfferIsolation:
         sita, waiting = _student_applying(abc, "Sita Karki")
         gita, offered = _student_with_coe(abc, "Gita Rai")
         with tenant_context(abc.consultancy):
-            Student.objects.filter(pk=gita).update(chosen_offer=None)
+            Student.objects.filter(public_id=gita).update(chosen_offer=None)
 
         responses = [
             xyz.client.post(
@@ -1463,9 +1575,9 @@ class TestOfferLetterAndChosenOfferIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
         with tenant_context(abc.consultancy):
-            assert Application.objects.get(pk=waiting).status == "applied"
+            assert Application.objects.get(public_id=waiting).status == "applied"
             assert not Document.objects.exists()
-            assert Student.objects.get(pk=gita).chosen_offer_id is None
+            assert Student.objects.get(public_id=gita).chosen_offer_id is None
 
     def test_ids_of_another_office_are_refused_on_its_own_student(
         self, make_consultancy: ConsultancyFactory
@@ -1493,9 +1605,9 @@ class TestOfferLetterAndChosenOfferIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_400_BAD_REQUEST] * 2
         with tenant_context(xyz.consultancy):
             assert not Document.objects.exists()
-            assert Student.objects.get(pk=ram).chosen_offer_id is None
+            assert Student.objects.get(public_id=ram).chosen_offer_id is None
         with tenant_context(abc.consultancy):
-            assert Application.objects.get(pk=abc_waiting).status == "applied"
+            assert Application.objects.get(public_id=abc_waiting).status == "applied"
 
     def test_a_token_from_one_office_is_refused_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -1520,7 +1632,7 @@ class TestOfferLetterAndChosenOfferIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
         with tenant_context(xyz.consultancy):
-            assert Application.objects.get(pk=waiting).status == "applied"
+            assert Application.objects.get(public_id=waiting).status == "applied"
 
 
 def _visa_letter_form() -> dict[str, object]:
@@ -1548,7 +1660,7 @@ class TestVisaLetterIsolation:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            assert Visa.objects.get(pk=visa_id).status == "applied"
+            assert Visa.objects.get(public_id=visa_id).status == "applied"
             assert not Document.objects.exists()
 
     def test_a_visa_id_of_another_office_is_not_found_on_its_own_student(
@@ -1573,7 +1685,7 @@ class TestVisaLetterIsolation:
         with tenant_context(xyz.consultancy):
             assert not Document.objects.exists()
         with tenant_context(abc.consultancy):
-            assert Visa.objects.get(pk=abc_visa).status == "applied"
+            assert Visa.objects.get(public_id=abc_visa).status == "applied"
 
     def test_a_token_from_one_office_is_refused_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -1594,7 +1706,7 @@ class TestVisaLetterIsolation:
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         with tenant_context(xyz.consultancy):
-            assert Visa.objects.get(pk=visa_id).status == "applied"
+            assert Visa.objects.get(public_id=visa_id).status == "applied"
             assert not Document.objects.exists()
 
 
@@ -1689,7 +1801,7 @@ class TestVisaIsolation:
         with tenant_context(abc.consultancy):
             [stored] = Visa.objects.all()
             assert stored.status == "applied"
-            assert Student.objects.get(pk=only_abc).stage == "visa"
+            assert Student.objects.get(public_id=only_abc).stage == "visa"
 
     def test_ids_of_another_consultancy_are_not_found_on_its_own_student(
         self, make_consultancy: ConsultancyFactory
@@ -1735,7 +1847,7 @@ class TestVisaIsolation:
 
         profile = xyz.client.get(f"{STUDENTS_URL}{xyz_id}/").json()
 
-        assert abc_id == xyz_id
+        assert abc_id != xyz_id
         assert profile["visas"] == []
 
     def test_a_token_from_one_consultancy_cannot_start_or_change_on_another(
@@ -1759,7 +1871,7 @@ class TestVisaIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
         with tenant_context(xyz.consultancy):
             assert Visa.objects.get().status == "applied"
-            assert Student.objects.get(pk=ram_id).stage == "visa"
+            assert Student.objects.get(public_id=ram_id).stage == "visa"
 
 
 _PDF = b"%PDF-1.7\n%%EOF\n"
@@ -1767,26 +1879,26 @@ _TYPES_URL = "/api/configuration/document-types/"
 _PAPERWORK_URL = "/api/documents/students/"
 
 
-def _documents_url(student_id: int) -> str:
+def _documents_url(student_id: str) -> str:
     return f"{STUDENTS_URL}{student_id}/documents/"
 
 
-def _passport_id(office: ConsultancyContext) -> int:
+def _passport_id(office: ConsultancyContext) -> str:
     with tenant_context(office.consultancy):
-        return int(DocumentType.objects.get(name="Passport").pk)
+        return str(DocumentType.objects.get(name="Passport").public_id)
 
 
-def _student_with_passport(office: ConsultancyContext, name: str) -> tuple[int, int]:
+def _student_with_passport(office: ConsultancyContext, name: str) -> tuple[str, str]:
     """Add a counselled Student through the API with an uploaded Passport; return both ids."""
     student_id, document_id, _ = _student_with_passport_file(office, name)
     return student_id, document_id
 
 
-def _file_link_url(student_id: int, document_id: int, file_id: int) -> str:
+def _file_link_url(student_id: str, document_id: str, file_id: str) -> str:
     return f"{_documents_url(student_id)}{document_id}/files/{file_id}/link/"
 
 
-def _student_with_passport_file(office: ConsultancyContext, name: str) -> tuple[int, int, int]:
+def _student_with_passport_file(office: ConsultancyContext, name: str) -> tuple[str, str, str]:
     """Like `_student_with_passport`, also returning the Passport's one file's id."""
     student_id = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()["id"]
     office.client.post(
@@ -1819,7 +1931,7 @@ class TestDocumentIsolation:
             xyz.client.get(_file_link_url(xyz_student["id"], abc_document, abc_file)),
         ]
 
-        assert abc_student == xyz_student["id"]
+        assert abc_student != xyz_student["id"]
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 2
         assert all("url" not in r.json() for r in responses)
 
@@ -1834,16 +1946,25 @@ class TestDocumentIsolation:
         xyz_student, xyz_document, _ = _student_with_passport_file(xyz, "Ram Thapa")
         stored_before = set(fake_document_storage.files)
 
-        added = xyz.client.post(
-            f"{_documents_url(abc_student)}{abc_document}/files/",
-            {"file": SimpleUploadedFile("x.pdf", _PDF, content_type="application/pdf")},
-            format="multipart",
+        page = {"file": SimpleUploadedFile("x.pdf", _PDF, content_type="application/pdf")}
+        into_abc = xyz.client.post(
+            f"{_documents_url(abc_student)}{abc_document}/files/", page, format="multipart"
         )
-        # The same ids exist in both offices; XYZ's own Document, ABC's file id: never ABC's file.
+        page = {"file": SimpleUploadedFile("x.pdf", _PDF, content_type="application/pdf")}
+        abc_document_on_xyz = xyz.client.post(
+            f"{_documents_url(xyz_student)}{abc_document}/files/", page, format="multipart"
+        )
+        page = {"file": SimpleUploadedFile("x.pdf", _PDF, content_type="application/pdf")}
+        own = xyz.client.post(
+            f"{_documents_url(xyz_student)}{xyz_document}/files/", page, format="multipart"
+        )
+        # XYZ's own Document with ABC's file UUID: never ABC's file.
         link = xyz.client.get(_file_link_url(xyz_student, xyz_document, abc_file))
 
-        assert (abc_student, abc_document) == (xyz_student, xyz_document)
-        assert added.status_code == status.HTTP_201_CREATED  # XYZ's own Document, same id
+        assert (abc_student, abc_document) != (xyz_student, xyz_document)
+        assert into_abc.status_code == status.HTTP_404_NOT_FOUND
+        assert abc_document_on_xyz.status_code == status.HTTP_404_NOT_FOUND
+        assert own.status_code == status.HTTP_201_CREATED
         with tenant_context(abc.consultancy):
             assert DocumentFile.objects.count() == 1
         with tenant_context(xyz.consultancy):
@@ -1851,8 +1972,7 @@ class TestDocumentIsolation:
             xyz_keys = set(DocumentFile.objects.values_list("storage_key", flat=True))
         assert all(key.startswith("xyzoverseas/") for key in xyz_keys)
         assert set(fake_document_storage.files) - stored_before <= xyz_keys
-        assert link.status_code == status.HTTP_200_OK
-        assert "abcedu/" not in link.json()["url"]
+        assert link.status_code == status.HTTP_404_NOT_FOUND
 
     def test_a_token_from_one_consultancy_gets_no_link_or_upload_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -1894,9 +2014,9 @@ class TestDocumentIsolation:
         xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
 
         checklist = xyz.client.get(_documents_url(xyz_student["id"])).json()
-        missing = xyz.client.get(_documents_url(999_999))
+        missing = xyz.client.get(_documents_url(str(uuid.uuid4())))
 
-        assert abc_student == xyz_student["id"]
+        assert abc_student != xyz_student["id"]
         assert checklist["items"][0]["state"] == "not_received"
         assert checklist["done"] == 0
         assert missing.status_code == status.HTTP_404_NOT_FOUND
@@ -1965,7 +2085,7 @@ class TestDocumentIsolation:
     def test_another_consultancy_cannot_check_a_document(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        """Issue 17: same ids on both sides; B's Admin reaches only B's own Document."""
+        """Issue 17: B's Admin with A's Student and Document UUIDs reaches nothing of A's."""
         abc = make_consultancy("ABC Education", "abcedu")
         xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
         abc.log_in_as(Role.ADMIN)
@@ -1978,10 +2098,10 @@ class TestDocumentIsolation:
             verification, {"verification": "rejected", "reason": "x"}, format="json"
         )
 
-        assert abc_student == xyz_student["id"]
+        assert abc_student != xyz_student["id"]
         assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            assert Document.objects.get(pk=abc_document).verification == "pending"
+            assert Document.objects.get(public_id=abc_document).verification == "pending"
 
     def test_a_token_from_one_consultancy_cannot_check_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -2016,7 +2136,7 @@ class TestDocumentIsolation:
         ).json()["visas"][0]["id"]
         xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
 
-        def linked_upload(field: str, value: int) -> int:
+        def linked_upload(field: str, value: str) -> int:
             body = {
                 "document_type": str(_passport_id(xyz)),
                 "file": SimpleUploadedFile("p.pdf", _PDF, content_type="application/pdf"),
@@ -2035,9 +2155,9 @@ class TestDocumentIsolation:
 _PICKER_URL = "/api/documents/types/"
 
 
-def _optional_type(office: ConsultancyContext, name: str) -> int:
+def _optional_type(office: ConsultancyContext, name: str) -> str:
     """Add a type asked for only when needed through the picker; return its id."""
-    return int(office.client.post(_PICKER_URL, {"name": name}, format="json").json()["id"])
+    return str(office.client.post(_PICKER_URL, {"name": name}, format="json").json()["id"])
 
 
 def _requirement_count(office: ConsultancyContext) -> int:
@@ -2045,7 +2165,7 @@ def _requirement_count(office: ConsultancyContext) -> int:
         return DocumentRequirement.objects.count()
 
 
-def _bin_a_passport(office: ConsultancyContext, name: str) -> tuple[int, int, int]:
+def _bin_a_passport(office: ConsultancyContext, name: str) -> tuple[str, str, str]:
     """A Student whose two-page Passport a Counsellor put in the Bin; the client is an Admin."""
     admin = office.log_in_as(Role.ADMIN)
     student_id = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()["id"]
@@ -2054,7 +2174,7 @@ def _bin_a_passport(office: ConsultancyContext, name: str) -> tuple[int, int, in
     )
     counsellor = office.add_staff(Role.COUNSELLOR)
     with tenant_context(office.consultancy):
-        Student.objects.filter(pk=student_id).update(assigned_counsellor=counsellor)
+        Student.objects.filter(public_id=student_id).update(assigned_counsellor=counsellor)
     use_access_token(office.client, office.tokens_for(counsellor).access)
     pages = [SimpleUploadedFile(f"p{n}.pdf", _PDF, content_type="application/pdf") for n in (1, 2)]
     body = {"document_type": str(_passport_id(office)), "file": pages}
@@ -2094,7 +2214,7 @@ class TestDocumentBinIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 5
         assert binned.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            assert Document.objects.get(pk=abc_document).binned_at is not None
+            assert Document.objects.get(public_id=abc_document).binned_at is not None
             assert DocumentFile.objects.count() == 2
 
     def test_the_bin_tab_lists_only_its_own_items(
@@ -2131,7 +2251,7 @@ class TestDocumentBinIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 5
         with tenant_context(xyz.consultancy):
-            assert Document.objects.get(pk=document).binned_at is not None
+            assert Document.objects.get(public_id=document).binned_at is not None
 
 
 class TestDocumentRequirementIsolation:
@@ -2149,7 +2269,9 @@ class TestDocumentRequirementIsolation:
         cv = _optional_type(abc, "CV")
         catalogue = "/api/catalogue/"
         abc.client.put(
-            f"{catalogue}courses/{course.pk}/documents/", {"document_types": [cv]}, format="json"
+            f"{catalogue}courses/{course.public_id}/documents/",
+            {"document_types": [cv]},
+            format="json",
         )
         abc.client.put(
             f"{_documents_url(abc_student['id'])}asked/", {"document_types": [cv]}, format="json"
@@ -2157,7 +2279,9 @@ class TestDocumentRequirementIsolation:
 
         responses = [
             xyz.client.put(
-                f"{catalogue}courses/{course.pk}/documents/", {"document_types": []}, format="json"
+                f"{catalogue}courses/{course.public_id}/documents/",
+                {"document_types": []},
+                format="json",
             ),
             xyz.client.put(
                 f"{_documents_url(abc_student['id'])}asked/", {"document_types": []}, format="json"
@@ -2169,7 +2293,7 @@ class TestDocumentRequirementIsolation:
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 4
         assert _requirement_count(abc) == 2
         with tenant_context(abc.consultancy):
-            assert DocumentType.objects.filter(pk=cv).exists()
+            assert DocumentType.objects.filter(public_id=cv).exists()
 
     def test_a_type_of_one_consultancy_cannot_be_asked_for_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -2184,7 +2308,7 @@ class TestDocumentRequirementIsolation:
 
         responses = [
             xyz.client.put(
-                f"/api/catalogue/courses/{xyz_course.pk}/documents/",
+                f"/api/catalogue/courses/{xyz_course.public_id}/documents/",
                 {"document_types": [abc_only]},
                 format="json",
             ),
@@ -2225,7 +2349,7 @@ class TestDocumentRequirementIsolation:
         abc_course = _course_in(abc)
         cv = _optional_type(abc, "CV")
         abc.client.put(
-            f"/api/catalogue/courses/{abc_course.pk}/documents/",
+            f"/api/catalogue/courses/{abc_course.public_id}/documents/",
             {"document_types": [cv]},
             format="json",
         )
@@ -2258,7 +2382,9 @@ class TestDocumentRequirementIsolation:
                 {"documents": [{"document_type": cv, "group": "visa"}]},
                 format="json",
             ),
-            intruder.put(f"/api/catalogue/courses/{course.pk}/documents/", body, format="json"),
+            intruder.put(
+                f"/api/catalogue/courses/{course.public_id}/documents/", body, format="json"
+            ),
             intruder.put(f"{_documents_url(ram)}asked/", body, format="json"),
             intruder.delete(f"{_documents_url(ram)}asked/{cv}/"),
             intruder.delete(f"{_TYPES_URL}{cv}/"),
@@ -2268,13 +2394,13 @@ class TestDocumentRequirementIsolation:
         assert _requirement_count(xyz) == 0
         with tenant_context(xyz.consultancy):
             assert not DocumentType.objects.filter(name="Intruder").exists()
-            assert DocumentType.objects.filter(pk=cv).exists()
+            assert DocumentType.objects.filter(public_id=cv).exists()
 
 
 _LISTS_URL = "/api/configuration/document-lists/"
 
 
-def _country_list(office: ConsultancyContext, country: str, rows: list[tuple[int, str]]) -> int:
+def _country_list(office: ConsultancyContext, country: str, rows: list[tuple[str, str]]) -> int:
     """PUT a Country's list as the logged-in Admin; return the status code."""
     body = {"documents": [{"document_type": pk, "group": group} for pk, group in rows]}
     response = office.client.put(f"{_LISTS_URL}{country}/", body, format="json")
@@ -2346,20 +2472,33 @@ class TestCountryListIsolation:
         assert checklist["total"] == 8
 
 
-def _payment_body() -> dict[str, object]:
+def _fee_type_id(office: ConsultancyContext, name: str = "Visa fee") -> str:
+    """The id of the office's Fee Type with this name."""
+    with tenant_context(office.consultancy):
+        return str(FeeType.objects.get(name=name).public_id)
+
+
+def _payment_body(office: ConsultancyContext) -> dict[str, object]:
+    """One Payment's new details, as an Admin's edit sends them."""
     return {
         "amount": 25000,
         "paid_on": timezone.localdate().isoformat(),
         "method": "cash",
-        "purpose": "Visa processing fee",
+        "fee_type": _fee_type_id(office),
     }
 
 
-def _student_with_payment(office: ConsultancyContext, name: str) -> tuple[int, int]:
+def _visit_body(office: ConsultancyContext, *fee_types: str) -> dict[str, object]:
+    """One visit's Payments, NPR 25,000 a line, for these Fee Types (the Visa fee if none)."""
+    lines = [{"amount": 25000, "fee_type": one} for one in fee_types or (_fee_type_id(office),)]
+    return {"paid_on": timezone.localdate().isoformat(), "method": "cash", "lines": lines}
+
+
+def _student_with_payment(office: ConsultancyContext, name: str) -> tuple[str, str]:
     """A new Student of the office's logged-in Admin, with one Payment: (student id, payment id)."""
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()
     payment = office.client.post(
-        f"/api/students/{student['id']}/payments/", _payment_body(), format="json"
+        f"/api/students/{student['id']}/payments/", _visit_body(office), format="json"
     ).json()
     return student["id"], payment["id"]
 
@@ -2391,7 +2530,7 @@ class TestPaymentIsolation:
         abc_student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
 
         response = xyz.client.post(
-            f"/api/students/{abc_student['id']}/payments/", _payment_body(), format="json"
+            f"/api/students/{abc_student['id']}/payments/", _visit_body(xyz), format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -2412,9 +2551,11 @@ class TestPaymentIsolation:
 
         receipt = xyz.client.get(f"/api/payments/{xyz_payment}/").json()
         history = xyz.client.get(f"/api/students/{xyz_student}/history/").json()["results"]
+        abc_receipt = xyz.client.get(f"/api/payments/{abc_payment}/")
 
-        assert (abc_student, abc_payment) == (xyz_student, xyz_payment)
+        assert (abc_student, abc_payment) != (xyz_student, xyz_payment)
         assert receipt["student"]["name"] == "Ram Thapa"
+        assert abc_receipt.status_code == status.HTTP_404_NOT_FOUND
         assert [entry["kind"] for entry in history] == ["payment_recorded"]
 
     def test_a_token_from_one_consultancy_cannot_record_or_read_on_another(
@@ -2429,12 +2570,69 @@ class TestPaymentIsolation:
 
         responses = [
             intruder.get(f"/api/payments/{payment}/"),
-            intruder.post(f"/api/students/{ram}/payments/", _payment_body(), format="json"),
+            intruder.post(f"/api/students/{ram}/payments/", _visit_body(xyz), format="json"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 2
         with tenant_context(xyz.consultancy):
             assert Payment.objects.count() == 1
+
+
+class TestReceiptIsolation:
+    """Ticket 07: one receipt's lines never cross Consultancies, even with the same numbers."""
+
+    def test_a_receipt_shows_only_this_offices_lines(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
+        ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        three = (
+            _fee_type_id(abc),
+            _fee_type_id(abc, "IELTS class"),
+            _fee_type_id(abc, "PTE class"),
+        )
+        abc_made = abc.client.post(
+            f"/api/students/{sita['id']}/payments/", _visit_body(abc, *three), format="json"
+        ).json()
+        xyz_made = xyz.client.post(
+            f"/api/students/{ram['id']}/payments/", _visit_body(xyz), format="json"
+        ).json()
+
+        receipt = xyz.client.get(f"/api/payments/{xyz_made['id']}/").json()
+        other_lines = [
+            xyz.client.get(f"/api/payments/{line['id']}/") for line in abc_made["lines"][1:]
+        ]
+
+        assert abc_made["receipt_number"] == xyz_made["receipt_number"]
+        assert (len(receipt["lines"]), receipt["total"]) == (1, 25000)
+        assert receipt["student"]["name"] == "Ram Thapa"
+        assert [r.status_code for r in other_lines] == [status.HTTP_404_NOT_FOUND] * 2
+        assert "Sita" not in "".join(r.content.decode() for r in other_lines)
+
+    def test_another_offices_fee_type_on_any_line_saves_nothing(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.FRONT_DESK)
+        abc_only = abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json")
+        assert abc_only.status_code == status.HTTP_201_CREATED
+        ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+
+        response = xyz.client.post(
+            f"/api/students/{ram['id']}/payments/",
+            _visit_body(xyz, abc_only.json()["id"], _fee_type_id(xyz)),
+            format="json",
+        )
+
+        assert response.json() == {"lines": [{"fee_type": ["Choose a Fee Type."]}, {}]}
+        with tenant_context(xyz.consultancy):
+            assert Payment.objects.count() == 0
 
 
 class TestAdminPaymentsIsolation:
@@ -2468,9 +2666,9 @@ class TestAdminPaymentsIsolation:
     ) -> None:
         abc, xyz = self._two_offices(make_consultancy)
         _, abc_payment = _student_with_payment(abc, "Sita Karki")
-        body = {**_payment_body(), "amount": 1}
+        body = {**_payment_body(xyz), "amount": 1}
 
-        edited = xyz.client.put(f"/api/payments/{abc_payment + 1000}/", body, format="json")
+        edited = xyz.client.put(f"/api/payments/{uuid.uuid4()}/", body, format="json")
         edited_same_id = xyz.client.put(f"/api/payments/{abc_payment}/", body, format="json")
         deleted = xyz.client.delete(f"/api/payments/{abc_payment}/")
 
@@ -2478,7 +2676,7 @@ class TestAdminPaymentsIsolation:
             status.HTTP_404_NOT_FOUND
         ] * 3
         with tenant_context(abc.consultancy):
-            assert Payment.objects.get(pk=abc_payment).amount == 25000
+            assert Payment.objects.get(public_id=abc_payment).amount == 25000
 
     def test_the_same_id_changes_only_this_consultancys_payment(
         self, make_consultancy: ConsultancyFactory
@@ -2488,13 +2686,13 @@ class TestAdminPaymentsIsolation:
         _, xyz_payment = _student_with_payment(xyz, "Ram Thapa")
 
         xyz.client.put(
-            f"/api/payments/{xyz_payment}/", {**_payment_body(), "amount": 1}, format="json"
+            f"/api/payments/{xyz_payment}/", {**_payment_body(xyz), "amount": 1}, format="json"
         )
         xyz.client.delete(f"/api/payments/{xyz_payment}/")
 
-        assert abc_payment == xyz_payment
+        assert abc_payment != xyz_payment
         with tenant_context(abc.consultancy):
-            assert Payment.objects.get(pk=abc_payment).amount == 25000
+            assert Payment.objects.get(public_id=abc_payment).amount == 25000
         with tenant_context(xyz.consultancy):
             assert Payment.objects.count() == 0
 
@@ -2509,7 +2707,7 @@ class TestAdminPaymentsIsolation:
 
         responses = [
             intruder.get("/api/payments/"),
-            intruder.put(f"/api/payments/{payment}/", _payment_body(), format="json"),
+            intruder.put(f"/api/payments/{payment}/", _payment_body(xyz), format="json"),
             intruder.delete(f"/api/payments/{payment}/"),
         ]
 
@@ -2562,7 +2760,7 @@ class TestDateDisplayIsolation:
 TASKS_URL = "/api/tasks/"
 
 
-def _task_body(assignee_id: int, student_id: int | None = None) -> dict[str, object]:
+def _task_body(assignee_id: str, student_id: str | None = None) -> dict[str, object]:
     return {
         "title": "Call about the IELTS score",
         "due_on": timezone.localdate().isoformat(),
@@ -2586,16 +2784,18 @@ class TestTaskIsolation:
     ) -> None:
         abc, abc_admin, xyz, xyz_admin = self._two_offices(make_consultancy)
         abc.client.post(
-            TASKS_URL, {**_task_body(abc_admin.pk), "title": "ABC secret"}, format="json"
+            TASKS_URL,
+            {**_task_body(str(abc_admin.public_id)), "title": "ABC secret"},
+            format="json",
         )
-        xyz.client.post(TASKS_URL, _task_body(xyz_admin.pk), format="json")
+        xyz.client.post(TASKS_URL, _task_body(str(xyz_admin.public_id)), format="json")
 
         mine = xyz.client.get(TASKS_URL)
         assignees = xyz.client.get(f"{TASKS_URL}assignees/").json()
 
         assert mine.json()["count"] == 1
         assert "ABC secret" not in mine.content.decode()
-        assert [person["id"] for person in assignees] == [xyz_admin.pk]
+        assert [person["id"] for person in assignees] == [str(xyz_admin.public_id)]
 
     def test_another_consultancys_student_or_staff_cannot_be_linked(
         self, make_consultancy: ConsultancyFactory
@@ -2605,9 +2805,9 @@ class TestTaskIsolation:
         abc_counsellor = abc.add_staff(Role.COUNSELLOR)
 
         linked = xyz.client.post(
-            TASKS_URL, _task_body(xyz_admin.pk, abc_student["id"]), format="json"
+            TASKS_URL, _task_body(str(xyz_admin.public_id), abc_student["id"]), format="json"
         )
-        given = xyz.client.post(TASKS_URL, _task_body(abc_counsellor.pk), format="json")
+        given = xyz.client.post(TASKS_URL, _task_body(str(abc_counsellor.public_id)), format="json")
 
         assert [linked.status_code, given.status_code] == [status.HTTP_400_BAD_REQUEST] * 2
         for office in (abc, xyz):
@@ -2620,15 +2820,15 @@ class TestTaskIsolation:
         abc, abc_admin, xyz, _ = self._two_offices(make_consultancy)
         student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
         task = abc.client.post(
-            TASKS_URL, _task_body(abc_admin.pk, student["id"]), format="json"
+            TASKS_URL, _task_body(str(abc_admin.public_id), student["id"]), format="json"
         ).json()
 
-        ticked = xyz.client.patch(f"{TASKS_URL}{task['id'] + 1000}/", {"done": True}, format="json")
-        listed = xyz.client.get(f"/api/students/{student['id'] + 1000}/tasks/")
+        ticked = xyz.client.patch(f"{TASKS_URL}{task['id']}/", {"done": True}, format="json")
+        listed = xyz.client.get(f"/api/students/{student['id']}/tasks/")
 
         assert [ticked.status_code, listed.status_code] == [status.HTTP_404_NOT_FOUND] * 2
         with tenant_context(abc.consultancy):
-            assert Task.objects.get(pk=task["id"]).is_done is False
+            assert Task.objects.get(public_id=task["id"]).is_done is False
 
     def test_the_same_ids_reach_only_this_consultancys_own_tasks(
         self, make_consultancy: ConsultancyFactory
@@ -2637,34 +2837,39 @@ class TestTaskIsolation:
         abc_student = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()
         xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
         abc_task = abc.client.post(
-            TASKS_URL, _task_body(abc_admin.pk, abc_student["id"]), format="json"
+            TASKS_URL, _task_body(str(abc_admin.public_id), abc_student["id"]), format="json"
         ).json()
         xyz_task = xyz.client.post(
-            TASKS_URL, _task_body(xyz_admin.pk, xyz_student["id"]), format="json"
+            TASKS_URL, _task_body(str(xyz_admin.public_id), xyz_student["id"]), format="json"
         ).json()
 
         xyz.client.patch(f"{TASKS_URL}{xyz_task['id']}/", {"done": True}, format="json")
+        theirs = xyz.client.patch(f"{TASKS_URL}{abc_task['id']}/", {"done": True}, format="json")
         profile = xyz.client.get(f"/api/students/{xyz_student['id']}/tasks/").json()
 
-        assert (abc_task["id"], abc_student["id"]) == (xyz_task["id"], xyz_student["id"])
+        assert abc_task["id"] != xyz_task["id"]  # Each Task has its own UUID (ADR 0027).
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
+        assert abc_student["id"] != xyz_student["id"]
         assert xyz_task["student"]["name"] == "Ram Thapa"
         assert profile["count"] == 0
         with tenant_context(abc.consultancy):
-            assert Task.objects.get(pk=abc_task["id"]).is_done is False
+            assert Task.objects.get(public_id=abc_task["id"]).is_done is False
 
     def test_a_token_from_one_consultancy_is_refused_on_every_task_endpoint(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
         abc, _, xyz, xyz_admin = self._two_offices(make_consultancy)
         student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
-        task = xyz.client.post(TASKS_URL, _task_body(xyz_admin.pk), format="json").json()
+        task = xyz.client.post(
+            TASKS_URL, _task_body(str(xyz_admin.public_id)), format="json"
+        ).json()
         intruder = api_client(xyz.host)
         second = abc.add_staff(Role.ADMIN, email="second-admin@abcedu.test")
         use_access_token(intruder, abc.tokens_for(second).access)
 
         responses = [
             intruder.get(TASKS_URL),
-            intruder.post(TASKS_URL, _task_body(xyz_admin.pk), format="json"),
+            intruder.post(TASKS_URL, _task_body(str(xyz_admin.public_id)), format="json"),
             intruder.patch(f"{TASKS_URL}{task['id']}/", {"done": True}, format="json"),
             intruder.get(f"{TASKS_URL}assignees/"),
             intruder.get(f"/api/students/{student['id']}/tasks/"),
@@ -2681,22 +2886,22 @@ class TestTaskIsolation:
         """Issue 50: the menu count, and "Only me" Tasks, stay in their own office."""
         abc, abc_admin, xyz, xyz_admin = self._two_offices(make_consultancy)
         for _ in range(3):
-            abc.client.post(TASKS_URL, _task_body(abc_admin.pk), format="json")
+            abc.client.post(TASKS_URL, _task_body(str(abc_admin.public_id)), format="json")
         abc_private = abc.client.post(
-            TASKS_URL, {**_task_body(abc_admin.pk), "only_me": True}, format="json"
+            TASKS_URL, {**_task_body(str(abc_admin.public_id)), "only_me": True}, format="json"
         ).json()
-        xyz.client.post(TASKS_URL, _task_body(xyz_admin.pk), format="json")
+        xyz.client.post(TASKS_URL, _task_body(str(xyz_admin.public_id)), format="json")
 
         counts = [
             abc.client.get(f"{TASKS_URL}count/").json(),
             xyz.client.get(f"{TASKS_URL}count/").json(),
         ]
-        # The same id in XYZ is at most XYZ's own Task; ABC's private one is never touched.
+        # ABC's private Task is unknown in XYZ and never touched.
         xyz.client.patch(f"{TASKS_URL}{abc_private['id']}/", {"done": True}, format="json")
 
         assert counts == [{"count": 4}, {"count": 1}]
         with tenant_context(abc.consultancy):
-            assert Task.objects.get(pk=abc_private["id"]).is_done is False
+            assert Task.objects.get(public_id=abc_private["id"]).is_done is False
 
 
 NOTIFICATIONS_URL = "/api/notifications/"
@@ -2709,7 +2914,9 @@ class TestNotificationIsolation:
         """An Admin gives a new Counsellor a Task due today; return (admin, counsellor)."""
         admin = office.log_in_as(Role.ADMIN)
         counsellor = office.add_staff(Role.COUNSELLOR)
-        office.client.post(TASKS_URL, {**_task_body(counsellor.pk), "title": title}, format="json")
+        office.client.post(
+            TASKS_URL, {**_task_body(str(counsellor.public_id)), "title": title}, format="json"
+        )
         use_access_token(office.client, office.tokens_for(counsellor).access)
         return admin, counsellor
 
@@ -2734,16 +2941,12 @@ class TestNotificationIsolation:
         self._given_a_task(abc, "ABC secret")
         self._given_a_task(xyz, "XYZ task")
         with tenant_context(abc.consultancy):
-            [abc_id] = Notification.objects.values_list("pk", flat=True)
+            [abc_id] = Notification.objects.values_list("public_id", flat=True)
 
-        read = xyz.client.patch(f"{NOTIFICATIONS_URL}{abc_id}/", {"read": True}, format="json")
-        missing = xyz.client.patch(
-            f"{NOTIFICATIONS_URL}{abc_id + 1000}/", {"read": True}, format="json"
-        )
+        theirs = xyz.client.patch(f"{NOTIFICATIONS_URL}{abc_id}/", {"read": True}, format="json")
         xyz.client.post(f"{NOTIFICATIONS_URL}read-all/", {}, format="json")
 
-        assert read.json()["task"]["title"] == "XYZ task"
-        assert missing.status_code == status.HTTP_404_NOT_FOUND
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
             assert list(Notification.objects.values_list("read_at", flat=True)) == [None]
 
@@ -2825,7 +3028,8 @@ class TestBatchIsolation:
         xyz, _, _ = self._office_with_a_class(
             make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
-        abc_teacher = abc_batch.teacher_id
+        with tenant_context(abc.consultancy):
+            abc_teacher = str(Staff.objects.get(pk=abc_batch.teacher_id).public_id)
         body = {
             "name": "Taken over",
             "test_type": "pte",
@@ -2834,21 +3038,20 @@ class TestBatchIsolation:
             "starts_on": timezone.localdate().isoformat(),
             "ends_on": timezone.localdate().isoformat(),
         }
-        other_id = abc_batch.pk + 1000
+        other_id = abc_batch.public_id
 
         responses = [
             xyz.client.get(f"{BATCHES_URL}{other_id}/"),
             xyz.client.put(f"{BATCHES_URL}{other_id}/", body, format="json"),
             xyz.client.post(
-                f"{BATCHES_URL}{other_id}/students/", {"student": abc_student.pk}, format="json"
+                f"{BATCHES_URL}{other_id}/students/",
+                {"student": str(abc_student.public_id)},
+                format="json",
             ),
-            xyz.client.delete(f"{BATCHES_URL}{other_id}/students/{abc_student.pk}/"),
+            xyz.client.delete(f"{BATCHES_URL}{other_id}/students/{abc_student.public_id}/"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 4
-        # The same id is XYZ's own class: it answers with XYZ's, never ABC's.
-        same = xyz.client.get(f"{BATCHES_URL}{abc_batch.pk}/").json()
-        assert (same["name"], same["students"][0]["name"]) == ("XYZ class", "XYZ Student")
         with tenant_context(abc.consultancy):
             assert Batch.objects.get().name == "ABC class"
             assert BatchMembership.objects.count() == 1
@@ -2863,15 +3066,17 @@ class TestBatchIsolation:
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        one = f"{BATCHES_URL}{xyz_batch.pk}/"
+        one = f"{BATCHES_URL}{xyz_batch.public_id}/"
 
         responses = [
             intruder.get(BATCHES_URL),
             intruder.post(BATCHES_URL, {}, format="json"),
             intruder.get(one),
             intruder.put(one, {}, format="json"),
-            intruder.post(f"{one}students/", {"student": xyz_student.pk}, format="json"),
-            intruder.delete(f"{one}students/{xyz_student.pk}/"),
+            intruder.post(
+                f"{one}students/", {"student": str(xyz_student.public_id)}, format="json"
+            ),
+            intruder.delete(f"{one}students/{xyz_student.public_id}/"),
             intruder.get(f"{BATCHES_URL}students/"),
             intruder.get(f"{BATCHES_URL}teachers/"),
         ]
@@ -2930,24 +3135,32 @@ class TestAttendanceIsolation:
         abc, abc_batch, abc_student = self._office_with_a_marked_class(
             make_consultancy, "ABC Education", "abcedu", "ABC"
         )
-        xyz, _, _ = self._office_with_a_marked_class(
+        xyz, xyz_batch, xyz_student = self._office_with_a_marked_class(
             make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
         today = timezone.localdate().isoformat()
-        other = abc_batch.pk + 1000
-        mark = {"marks": [{"student": abc_student.pk, "mark": "absent"}]}
+        other = abc_batch.public_id
+        mark = {"marks": [{"student": str(abc_student.public_id), "mark": "absent"}]}
 
         responses = [
             xyz.client.get(f"{BATCHES_URL}{other}/attendance/{today}/"),
             xyz.client.put(f"{BATCHES_URL}{other}/attendance/{today}/", mark, format="json"),
-            xyz.client.get(f"/api/students/{abc_student.pk + 1000}/batches/"),
+            xyz.client.get(f"/api/students/{uuid.uuid4()}/batches/"),
+            xyz.client.get(f"/api/students/{abc_student.public_id}/batches/"),
         ]
 
-        assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 3
-        # The same ids are XYZ's own class and Student: XYZ's answers, never ABC's.
-        classes = xyz.client.get(f"/api/students/{abc_student.pk}/batches/").json()
+        assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 4
+        # XYZ's own class refuses ABC's Student UUID.
+        refused = xyz.client.put(
+            f"{BATCHES_URL}{xyz_batch.public_id}/attendance/{today}/", mark, format="json"
+        )
+        assert refused.status_code == status.HTTP_400_BAD_REQUEST
+        classes = xyz.client.get(f"/api/students/{xyz_student.public_id}/batches/").json()
         assert [c["name"] for c in classes] == ["XYZ class"]
-        xyz.client.put(f"{BATCHES_URL}{abc_batch.pk}/attendance/{today}/", mark, format="json")
+        own = {"marks": [{"student": str(xyz_student.public_id), "mark": "absent"}]}
+        xyz.client.put(
+            f"{BATCHES_URL}{xyz_batch.public_id}/attendance/{today}/", own, format="json"
+        )
         with tenant_context(abc.consultancy):
             assert Attendance.objects.get().mark == Mark.PRESENT
         with tenant_context(xyz.consultancy):
@@ -2965,12 +3178,14 @@ class TestAttendanceIsolation:
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        one_day = f"{BATCHES_URL}{xyz_batch.pk}/attendance/{timezone.localdate().isoformat()}/"
+        one_day = (
+            f"{BATCHES_URL}{xyz_batch.public_id}/attendance/{timezone.localdate().isoformat()}/"
+        )
 
         responses = [
             intruder.get(one_day),
             intruder.put(one_day, {"marks": []}, format="json"),
-            intruder.get(f"/api/students/{xyz_student.pk}/batches/"),
+            intruder.get(f"/api/students/{xyz_student.public_id}/batches/"),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
@@ -2979,124 +3194,114 @@ class TestAttendanceIsolation:
 
 
 class TestCommunicationIsolation:
-    """Issue 25: provider settings and messages never cross Consultancies."""
+    """Issue 04: emails never cross Consultancies, and each goes out under its own office."""
 
-    def _office_with_a_message(
+    def _office_with_an_email(
         self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, label: str
     ) -> tuple[ConsultancyContext, Student]:
-        """An office with SMS set up, its Admin in, and one SMS sent to its Student."""
+        """An office with a contact email, its Admin in, and one email sent to its Student."""
         office = make_consultancy(name, subdomain)
         switch_modules(office.consultancy, {Module.COMMUNICATION})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
         office.log_in_as(Role.ADMIN)
-        settings = {
-            "sms_provider": "sparrow",
-            "sms_sender": label,
-            "sms_token": f"{label}-sms-token-secret",
-            "email_host": "",
-            "email_port": 587,
-            "email_username": "",
-            "email_from": "",
-        }
-        assert office.client.put(COMMS_SETTINGS_URL, settings, format="json").status_code == 200
         with tenant_context(office.consultancy):
             student = Student.objects.create(
-                name=f"{label} Student", phone="9841000001", country="australia", source="walk_in"
+                name=f"{label} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
             )
         sent = office.client.post(
-            f"/api/students/{student.pk}/messages/",
-            {"channel": "sms", "body": f"{label} message"},
+            f"/api/students/{student.public_id}/messages/",
+            {"subject": f"{label} subject", "body": f"{label} message"},
             format="json",
         )
         assert sent.status_code == 201
         activate_public_schema()  # The request left the connection on this office's schema.
         return office, student
 
-    def test_each_office_sees_only_its_own_settings_and_messages(
+    def test_each_office_sees_only_its_own_emails_sent_under_its_own_name(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, abc_student = self._office_with_a_message(
+        abc, abc_student = self._office_with_an_email(
             make_consultancy, "ABC Education", "abcedu", "ABC"
         )
-        xyz, _ = self._office_with_a_message(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
+        xyz, xyz_student = self._office_with_an_email(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
+        )
 
-        assert xyz.client.get(COMMS_SETTINGS_URL).json()["sms_sender"] == "XYZ"
         listed = xyz.client.get("/api/messages/").json()["results"]
-        assert [m["body"] for m in listed] == ["XYZ message"]
-        # The same Student id is XYZ's own Student: XYZ's messages, never ABC's.
-        same_id = xyz.client.get(f"/api/students/{abc_student.pk}/messages/").json()["results"]
-        assert [m["body"] for m in same_id] == ["XYZ message"]
+        assert [m["subject"] for m in listed] == ["XYZ subject"]
+        # ABC's Student UUID finds nobody at XYZ; XYZ's own UUID lists XYZ's emails only.
+        theirs = xyz.client.get(f"/api/students/{abc_student.public_id}/messages/")
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
+        own = xyz.client.get(f"/api/students/{xyz_student.public_id}/messages/").json()["results"]
+        assert [m["subject"] for m in own] == ["XYZ subject"]
         other = xyz.client.post(
-            f"/api/students/{abc_student.pk + 1000}/messages/",
-            {"channel": "sms", "body": "Hi"},
+            f"/api/students/{abc_student.public_id}/messages/",
+            {"subject": "Hi", "body": "Hi"},
             format="json",
         )
         assert other.status_code == status.HTTP_404_NOT_FOUND
-        # XYZ's message went out on XYZ's own account.
-        assert [sms.account.token for sms in FakeSmsGateway.sent] == [
-            "ABC-sms-token-secret",
-            "XYZ-sms-token-secret",
+        # Each email went under its own office's name, with its own contact email.
+        assert [(m.to, m.reply_to, m.from_email.split(" <")[0]) for m in mail.outbox] == [
+            (["student@abcedu.test"], ["info@abcedu.test"], "ABC Education"),
+            (["student@xyzoverseas.test"], ["info@xyzoverseas.test"], "XYZ Overseas"),
         ]
         with tenant_context(abc.consultancy):
-            assert [m.body for m in Message.objects.all()] == ["ABC message"]
+            assert [m.subject for m in Message.objects.all()] == ["ABC subject"]
 
-    def test_a_token_from_one_consultancy_is_refused_on_every_communication_endpoint(
+    def test_a_token_from_one_consultancy_is_refused_on_every_email_endpoint(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, _ = self._office_with_a_message(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_student = self._office_with_a_message(
+        abc, _ = self._office_with_an_email(make_consultancy, "ABC Education", "abcedu", "ABC")
+        xyz, xyz_student = self._office_with_an_email(
             make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        one_student = f"/api/students/{xyz_student.pk}/messages/"
+        one_student = f"/api/students/{xyz_student.public_id}/messages/"
 
         responses = [
-            intruder.get(COMMS_SETTINGS_URL),
-            intruder.put(COMMS_SETTINGS_URL, {}, format="json"),
-            intruder.post("/api/communication/settings/test-sms/", {}, format="json"),
             intruder.get("/api/messages/"),
             intruder.get(one_student),
-            intruder.post(one_student, {"channel": "sms", "body": "Hi"}, format="json"),
+            intruder.post(one_student, {"subject": "Hi", "body": "Hi"}, format="json"),
         ]
 
-        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 6
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
         with tenant_context(xyz.consultancy):
             assert Message.objects.count() == 1
-            assert ProviderSettings.objects.get().sms_sender == "XYZ"
 
 
 class TestBulkMessageIsolation:
-    """Issue 26: one message to many Students reaches only this Consultancy's Students."""
+    """Issue 04: an email to many Students reaches only this Consultancy's Students."""
 
     def _office(
         self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, label: str
-    ) -> tuple[ConsultancyContext, Batch]:
-        """An office with SMS set up, its Admin in, two Students and a class holding one."""
+    ) -> tuple[ConsultancyContext, Batch, list[Student]]:
+        """An office with a contact email, its Admin in, two Students and a class holding one."""
         office = make_consultancy(name, subdomain)
         switch_modules(office.consultancy, {Module.COMMUNICATION, Module.BATCHES})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
         office.log_in_as(Role.ADMIN)
-        settings = {
-            "sms_provider": "aakash",
-            "sms_sender": "",
-            "sms_token": f"{label}-sms-token-secret",
-            "email_host": "",
-            "email_port": 587,
-            "email_username": "",
-            "email_from": "",
-        }
-        assert office.client.put(COMMS_SETTINGS_URL, settings, format="json").status_code == 200
         teacher = office.add_staff(Role.TEACHER)
         with tenant_context(office.consultancy):
-            first, _ = (
+            people = [
                 Student.objects.create(
                     name=f"{label} Student {n}",
                     phone=f"984100000{n}",
+                    email=f"student{n}@{subdomain}.test",
                     country="australia",
                     source="walk_in",
                 )
                 for n in (1, 2)
-            )
+            ]
             batch = Batch.objects.create(
                 name=f"{label} class",
                 test_type="ielts",
@@ -3105,58 +3310,191 @@ class TestBulkMessageIsolation:
                 starts_on=timezone.localdate(),
                 ends_on=timezone.localdate(),
             )
-            BatchMembership.objects.create(batch=batch, student=first)
+            BatchMembership.objects.create(batch=batch, student=people[0])
         activate_public_schema()
-        return office, batch
+        return office, batch, people
 
-    def test_a_list_or_a_class_goes_only_to_this_offices_students(
+    def test_only_this_offices_students_can_be_chosen_or_pre_ticked(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, abc_batch = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_batch = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
-        body = {"channel": "sms", "body": "Hi"}
-
-        everyone = xyz.client.post("/api/messages/bulk/", {**body, "students": {}}, format="json")
-        in_class = xyz.client.post(
-            "/api/messages/bulk/", {**body, "batch": xyz_batch.pk}, format="json"
+        abc, abc_batch, abc_people = self._office(
+            make_consultancy, "ABC Education", "abcedu", "ABC"
         )
-        other_class = xyz.client.post(
-            "/api/messages/bulk/", {**body, "batch": abc_batch.pk + 1000}, format="json"
+        xyz, xyz_batch, xyz_people = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
         )
+        body = {"subject": "Hi", "body": "Hi"}
 
-        assert (everyone.json()["sent"], in_class.json()["sent"]) == (2, 1)
+        mine = xyz.client.post(
+            "/api/messages/bulk/",
+            {**body, "students": [str(s.public_id) for s in xyz_people]},
+            format="json",
+        )
+        foreign = xyz.client.post(
+            "/api/messages/bulk/",
+            {**body, "students": [str(s.public_id) for s in abc_people]},
+            format="json",
+        )
+        other_class = xyz.client.get("/api/messages/bulk/", {"batch": str(abc_batch.public_id)})
+        pre_ticked = xyz.client.get(
+            "/api/messages/bulk/", {"batch": str(xyz_batch.public_id)}
+        ).json()
+
+        assert mine.json()["sent"] == 2
+        assert foreign.status_code == status.HTTP_400_BAD_REQUEST
         assert other_class.status_code == status.HTTP_404_NOT_FOUND
-        assert xyz.client.get("/api/messages/bulk/").json()["count"] == 2
-        assert {sms.account.token for sms in FakeSmsGateway.sent} == {"XYZ-sms-token-secret"}
-        with tenant_context(xyz.consultancy):
-            assert {m.student.name for m in Message.objects.select_related("student")} == {
-                "XYZ Student 1",
-                "XYZ Student 2",
-            }
+        assert [s["name"] for s in pre_ticked["students"]] == ["XYZ Student 1"]
+        everyone = xyz.client.get("/api/messages/bulk/").json()["students"]
+        assert {s["name"] for s in everyone} == {"XYZ Student 1", "XYZ Student 2"}
+        assert {m.to[0] for m in mail.outbox} == {
+            "student1@xyzoverseas.test",
+            "student2@xyzoverseas.test",
+        }
         with tenant_context(abc.consultancy):
             assert Message.objects.count() == 0
 
     def test_a_token_from_one_consultancy_is_refused_on_bulk_send(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
-        abc, _ = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
-        xyz, xyz_batch = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
+        abc, _, _ = self._office(make_consultancy, "ABC Education", "abcedu", "ABC")
+        xyz, xyz_batch, xyz_people = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ"
+        )
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        body = {"channel": "sms", "body": "Hi"}
+        body = {"subject": "Hi", "body": "Hi", "students": [str(s.public_id) for s in xyz_people]}
 
         responses = [
             intruder.get("/api/messages/bulk/"),
-            intruder.get("/api/messages/bulk/", {"batch": xyz_batch.pk}),
-            intruder.post("/api/messages/bulk/", {**body, "students": {}}, format="json"),
-            intruder.post("/api/messages/bulk/", {**body, "batch": xyz_batch.pk}, format="json"),
+            intruder.get("/api/messages/bulk/", {"batch": str(xyz_batch.public_id)}),
+            intruder.post("/api/messages/bulk/", body, format="json"),
+        ]
+
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 3
+        assert mail.outbox == []
+
+
+class TestReadyMadeEmailIsolation:
+    """Ticket 09: a ready-made email is filled in only from this office's own records."""
+
+    def _office(
+        self, make_consultancy: ConsultancyFactory, name: str, subdomain: str, records: int
+    ) -> tuple[ConsultancyContext, Student, dict[str, list[int | str]]]:
+        """An office (Admin in) with one Student who has `records` of each record kind."""
+        office = make_consultancy(name, subdomain)
+        switch_modules(office.consultancy, {Module.COMMUNICATION, Module.ACCOUNTS, Module.BATCHES})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
+        admin = office.log_in_as(Role.ADMIN)
+        teacher = office.add_staff(Role.TEACHER)
+        # Payments, Offers, Visas and classes, each by UUID (ADR 0027).
+        ids: dict[str, list[int | str]] = {"payment": [], "offer": [], "visa": [], "batch": []}
+        with tenant_context(office.consultancy):
+            student = Student.objects.create(
+                name=f"{name} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
+            )
+            university = University.objects.create(name=f"{name} University", country="uk")
+            for n in range(records):
+                ids["payment"].append(
+                    str(
+                        Payment.objects.create(
+                            student=student,
+                            amount=1000,
+                            paid_on=timezone.localdate(),
+                            method="cash",
+                            fee_type=FeeType.objects.get(name="Visa fee"),
+                            recorded_by=admin,
+                            recorded_by_name=admin.name,
+                        ).public_id
+                    )
+                )
+                course = Course.objects.create(university=university, name=f"{name} course {n}")
+                offer = Application.objects.create(
+                    student=student, course=course, intake="2027-02", status="offer"
+                )
+                ids["offer"].append(str(offer.public_id))
+                ids["visa"].append(
+                    str(
+                        Visa.objects.create(
+                            student=student, application=offer, status="granted"
+                        ).public_id
+                    )
+                )
+                batch = Batch.objects.create(
+                    name=f"{name} class {n}",
+                    test_type="ielts",
+                    teacher=teacher,
+                    time_slot="7 AM",
+                    starts_on=timezone.localdate(),
+                    ends_on=timezone.localdate(),
+                )
+                BatchMembership.objects.create(batch=batch, student=student)
+                ids["batch"].append(str(batch.public_id))
+        activate_public_schema()
+        return office, student, ids
+
+    def test_another_offices_records_are_never_offered_or_filled_in(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, _, abc_ids = self._office(make_consultancy, "ABC Education", "abcedu", records=3)
+        xyz, xyz_student, xyz_ids = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", records=1
+        )
+        menu_url = f"/api/students/{xyz_student.public_id}/emails/ready-made/"
+        draft_url = f"/api/students/{xyz_student.public_id}/emails/draft/"
+        kinds = {
+            "payment": "payment_received",
+            "offer": "offer_received",
+            "visa": "visa_result",
+            "batch": "class_details",
+        }
+
+        menu = {entry["kind"]: entry for entry in xyz.client.get(menu_url).json()["kinds"]}
+
+        for record, kind in kinds.items():
+            assert [r["id"] for r in menu[kind]["records"]] == xyz_ids[record]
+            assert "ABC" not in str(menu[kind]["records"])
+            theirs = xyz.client.get(draft_url, {"kind": kind, "record": str(abc_ids[record][-1])})
+            assert theirs.status_code == status.HTTP_400_BAD_REQUEST, kind
+            assert list(theirs.json()) == ["record"]
+        many = xyz.client.get("/api/messages/bulk/ready-made/").json()["kinds"][0]
+        assert [r["id"] for r in many["records"]] == xyz_ids["batch"]
+        other_class = xyz.client.get(
+            "/api/messages/bulk/draft/",
+            {"kind": "class_details", "record": str(abc_ids["batch"][-1])},
+        )
+        assert other_class.status_code == status.HTTP_400_BAD_REQUEST
+        signed = xyz.client.get(draft_url, {"kind": "plain"}).json()["body"]
+        assert signed.endswith("XYZ Overseas")
+        unknown = xyz.client.get(f"/api/students/{uuid.uuid4()}/emails/ready-made/")
+        assert unknown.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_a_token_from_one_consultancy_is_refused_on_every_ready_made_endpoint(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, _, _ = self._office(make_consultancy, "ABC Education", "abcedu", records=1)
+        xyz, xyz_student, _ = self._office(
+            make_consultancy, "XYZ Overseas", "xyzoverseas", records=1
+        )
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+        student = f"/api/students/{xyz_student.public_id}/emails"
+
+        responses = [
+            intruder.get(f"{student}/ready-made/"),
+            intruder.get(f"{student}/draft/", {"kind": "plain"}),
+            intruder.get("/api/messages/bulk/ready-made/"),
+            intruder.get("/api/messages/bulk/draft/", {"kind": "plain"}),
         ]
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
-        assert FakeSmsGateway.sent == []
-        with tenant_context(xyz.consultancy):
-            assert Message.objects.count() == 0
 
 
 class TestHomeIsolation:
@@ -3309,7 +3647,7 @@ class TestVisitIsolation:
         xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas", "XYZ")
 
         today = xyz.client.get("/api/visits/today/").json()
-        visits = xyz.client.get(f"/api/students/{xyz_student.pk}/visits/").json()
+        visits = xyz.client.get(f"/api/students/{xyz_student.public_id}/visits/").json()
 
         assert [row["student"]["name"] for row in today["results"]] == ["XYZ Student"]
         assert [row["purpose"] for row in visits["results"]] == ["XYZ first"]
@@ -3327,13 +3665,13 @@ class TestVisitIsolation:
         activate_public_schema()
 
         responses = [
-            xyz.client.get(f"/api/students/{only_in_abc.pk}/visits/"),
+            xyz.client.get(f"/api/students/{only_in_abc.public_id}/visits/"),
             xyz.client.post(
-                f"/api/students/{only_in_abc.pk}/visits/", {"reason": "other"}, format="json"
+                f"/api/students/{only_in_abc.public_id}/visits/", {"reason": "other"}, format="json"
             ),
-            xyz.client.get(f"/api/students/{only_in_abc.pk}/progress/"),
+            xyz.client.get(f"/api/students/{only_in_abc.public_id}/progress/"),
         ]
-        own = xyz.client.get(f"/api/students/{xyz_student.pk}/visits/").json()
+        own = xyz.client.get(f"/api/students/{xyz_student.public_id}/visits/").json()
 
         assert {response.status_code for response in responses} == {status.HTTP_404_NOT_FOUND}
         assert [row["purpose"] for row in own["results"]] == ["XYZ first"]
@@ -3351,11 +3689,11 @@ class TestVisitIsolation:
 
         responses = [
             intruder.get("/api/visits/today/"),
-            intruder.get(f"/api/students/{xyz_student.pk}/visits/"),
+            intruder.get(f"/api/students/{xyz_student.public_id}/visits/"),
             intruder.post(
-                f"/api/students/{xyz_student.pk}/visits/", {"reason": "other"}, format="json"
+                f"/api/students/{xyz_student.public_id}/visits/", {"reason": "other"}, format="json"
             ),
-            intruder.get(f"/api/students/{xyz_student.pk}/progress/"),
+            intruder.get(f"/api/students/{xyz_student.public_id}/progress/"),
         ]
 
         assert {response.status_code for response in responses} == {status.HTTP_401_UNAUTHORIZED}
@@ -3555,12 +3893,12 @@ class TestClassReportIsolation:
         assert "XYZ" not in response.content.decode()
 
 
-def _student_with_fee(office: ConsultancyContext, name: str) -> tuple[int, int]:
+def _student_with_fee(office: ConsultancyContext, name: str) -> tuple[str, str]:
     """A new Student of the office's logged-in Admin with one NPR 40,000 Fee: (student, fee) ids."""
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()
     fees = office.client.post(
         f"/api/students/{student['id']}/fees/",
-        {"purpose": "Visa processing", "amount": 40000},
+        {"fee_type": _fee_type_id(office), "amount": 40000},
         format="json",
     ).json()
     return student["id"], fees["fees"][0]["id"]
@@ -3598,7 +3936,7 @@ class TestFeeIsolation:
     ) -> None:
         abc, xyz = self._two_offices(make_consultancy)
         abc_student, abc_fee = _student_with_fee(abc, "Sita Karki")
-        body = {"purpose": "Changed", "amount": 1}
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
 
         responses = [
             xyz.client.get(f"/api/students/{abc_student}/fees/"),
@@ -3609,8 +3947,8 @@ class TestFeeIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_404_NOT_FOUND] * 4
         with tenant_context(abc.consultancy):
-            assert list(Fee.objects.values_list("purpose", "amount")) == [
-                ("Visa processing", 40000)
+            assert list(Fee.objects.values_list("fee_type__name", "amount")) == [
+                ("Visa fee", 40000)
             ]
 
     def test_the_same_ids_change_only_this_consultancys_fee(
@@ -3620,12 +3958,15 @@ class TestFeeIsolation:
         abc_student, abc_fee = _student_with_fee(abc, "Sita Karki")
         xyz_student, xyz_fee = _student_with_fee(xyz, "Ram Thapa")
 
-        xyz.client.put(f"/api/fees/{xyz_fee}/", {"purpose": "X", "amount": 1}, format="json")
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
+        xyz.client.put(f"/api/fees/{xyz_fee}/", body, format="json")
         xyz.client.delete(f"/api/fees/{xyz_fee}/")
 
-        assert (abc_student, abc_fee) == (xyz_student, xyz_fee)
+        assert (abc_student, abc_fee) != (xyz_student, xyz_fee)
+        theirs = xyz.client.put(f"/api/fees/{abc_fee}/", body, format="json")
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            assert Fee.objects.get(pk=abc_fee).amount == 40000
+            assert Fee.objects.get(public_id=abc_fee).amount == 40000
             assert not HistoryEntry.objects.filter(kind=HistoryKind.FEE_DELETED).exists()
         with tenant_context(xyz.consultancy):
             assert Fee.objects.count() == 0
@@ -3638,7 +3979,7 @@ class TestFeeIsolation:
         intruder = api_client(xyz.host)
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abcedu.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
-        body = {"purpose": "X", "amount": 1}
+        body = {"fee_type": _fee_type_id(xyz), "amount": 1}
 
         responses = [
             intruder.get("/api/accounts/student-fees/"),
@@ -3650,7 +3991,104 @@ class TestFeeIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 5
         with tenant_context(xyz.consultancy):
-            assert Fee.objects.get(pk=fee).amount == 40000
+            assert Fee.objects.get(public_id=fee).amount == 40000
+
+
+class TestFeeTypeIsolation:
+    """Issue 06: Fee Types never cross Consultancies; an id is always this office's own."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext, str]:
+        """Both offices with an Admin in; ABC has one more Fee Type than XYZ: (abc, xyz, its id)."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            switch_modules(office.consultancy, {Module.ACCOUNTS})
+            office.log_in_as(Role.ADMIN)
+        added = abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json").json()
+        return abc, xyz, str(added["id"])
+
+    def test_each_office_lists_only_its_own(self, make_consultancy: ConsultancyFactory) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+
+        names = [row["name"] for row in xyz.client.get("/api/fee-types/").json()["results"]]
+
+        assert "ABC only" not in names
+        assert "ABC only" in abc.client.get("/api/fee-types/").content.decode()
+
+    def test_another_offices_fee_type_cannot_be_picked(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, xyz, abc_only = self._two_offices(make_consultancy)
+        student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+
+        payment = xyz.client.post(
+            f"/api/students/{student['id']}/payments/",
+            _visit_body(xyz, _fee_type_id(xyz), abc_only),
+            format="json",
+        )
+        fee = xyz.client.post(
+            f"/api/students/{student['id']}/fees/",
+            {"fee_type": abc_only, "amount": 1},
+            format="json",
+        )
+
+        assert payment.json() == {"lines": [{}, {"fee_type": ["Choose a Fee Type."]}]}
+        assert fee.json() == {"fee_type": ["Choose a Fee Type."]}
+        with tenant_context(xyz.consultancy):
+            assert not Payment.objects.exists()
+            assert not Fee.objects.exists()
+
+    def test_another_offices_fee_type_cannot_be_changed_deleted_or_ordered(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, abc_only = self._two_offices(make_consultancy)
+        xyz_ids = [row["id"] for row in xyz.client.get("/api/fee-types/").json()["results"]]
+
+        renamed = xyz.client.patch(f"/api/fee-types/{abc_only}/", {"name": "X"}, format="json")
+        deleted = xyz.client.delete(f"/api/fee-types/{abc_only}/")
+        ordered = xyz.client.put(
+            "/api/fee-types/order/", {"order": [abc_only, *xyz_ids]}, format="json"
+        )
+
+        assert (renamed.status_code, deleted.status_code, ordered.status_code) == (404, 404, 400)
+        with tenant_context(abc.consultancy):
+            assert FeeType.objects.filter(public_id=abc_only, name="ABC only").exists()
+
+    def test_the_same_id_changes_only_this_offices_fee_type(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        visa = _fee_type_id(xyz)
+
+        xyz.client.patch(f"/api/fee-types/{visa}/", {"name": "Visa (XYZ)"}, format="json")
+
+        assert visa != _fee_type_id(abc)  # Each office's Fee Types have their own UUIDs.
+        with tenant_context(abc.consultancy):
+            assert FeeType.objects.filter(public_id=_fee_type_id(abc), name="Visa fee").exists()
+
+    def test_a_token_from_one_office_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abcedu.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+        visa = _fee_type_id(xyz)
+
+        responses = [
+            intruder.get("/api/fee-types/"),
+            intruder.post("/api/fee-types/", {"name": "Intruder"}, format="json"),
+            intruder.patch(f"/api/fee-types/{visa}/", {"hidden": True}, format="json"),
+            intruder.delete(f"/api/fee-types/{visa}/"),
+            intruder.put("/api/fee-types/order/", {"order": [visa]}, format="json"),
+        ]
+
+        assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 5
+        with tenant_context(xyz.consultancy):
+            assert not FeeType.objects.filter(name="Intruder").exists()
+            assert FeeType.objects.get(public_id=visa).hidden is False
 
 
 _EXPENSE_BODY = {
@@ -3662,11 +4100,11 @@ _EXPENSE_BODY = {
 }
 
 
-def _expense(office: ConsultancyContext, paid_to: str) -> int:
+def _expense(office: ConsultancyContext, paid_to: str) -> str:
     """A new Expense added by the office's logged-in Admin: its id."""
     body = {**_EXPENSE_BODY, "paid_to": paid_to}
     response = office.client.post("/api/accounts/expenses/", body, format="json")
-    expense_id: int = response.json()["id"]
+    expense_id: str = response.json()["id"]
     return expense_id
 
 
@@ -3724,9 +4162,9 @@ class TestExpenseIsolation:
         xyz.client.put(f"/api/accounts/expenses/{xyz_expense}/", changed, format="json")
         xyz.client.delete(f"/api/accounts/expenses/{xyz_expense}/")
 
-        assert abc_expense == xyz_expense
+        assert abc_expense != xyz_expense  # Each Expense has its own UUID (ADR 0027).
         with tenant_context(abc.consultancy):
-            assert Expense.objects.get(pk=abc_expense).amount == 85000
+            assert Expense.objects.get(public_id=abc_expense).amount == 85000
         with tenant_context(xyz.consultancy):
             assert Expense.objects.count() == 0
 
@@ -3748,11 +4186,11 @@ class TestExpenseIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
         with tenant_context(xyz.consultancy):
-            assert Expense.objects.get(pk=expense).paid_to == "XYZ landlord"
+            assert Expense.objects.get(public_id=expense).paid_to == "XYZ landlord"
 
 
-def _commission(office: ConsultancyContext, name: str) -> tuple[int, int, int]:
-    """A Student, a University and a Commission added by the office's logged-in Admin: ids."""
+def _commission(office: ConsultancyContext, name: str) -> tuple[str, str, str]:
+    """A Student (UUID), a University and a Commission added by the office's Admin: ids."""
     student = office.client.post(STUDENTS_URL, _lead_body(name), format="json").json()["id"]
     university = office.client.post(
         "/api/catalogue/universities/",
@@ -3803,14 +4241,15 @@ class TestCommissionIsolation:
         abc, xyz = self._two_offices(make_consultancy)
         abc_student, abc_university, _ = _commission(abc, "Sita Karki")
         xyz_student, xyz_university, _ = _commission(xyz, "Ram Thapa")
-        assert (abc_student, abc_university) == (xyz_student, xyz_university)
-        _commission(abc, "Hari Lama")
+        assert abc_student != xyz_student  # Every Student has their own UUID.
+        assert abc_university != xyz_university  # Every University has its own UUID.
+        hari, hari_university, _ = _commission(abc, "Hari Lama")
 
         response = xyz.client.post(
             "/api/accounts/commission/",
             {
-                "student": abc_student + 1,
-                "university": abc_university + 1,
+                "student": hari,
+                "university": hari_university,
                 "intake": "2027-02",
                 "amount": 1,
             },
@@ -3835,7 +4274,9 @@ class TestCommissionIsolation:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
-            assert Commission.objects.get(pk=abc_commission).status == "waiting_for_enrolment"
+            assert (
+                Commission.objects.get(public_id=abc_commission).status == "waiting_for_enrolment"
+            )
 
     def test_a_token_from_one_consultancy_is_refused_on_another(
         self, make_consultancy: ConsultancyFactory
@@ -3860,7 +4301,7 @@ class TestCommissionIsolation:
 
         assert [r.status_code for r in responses] == [status.HTTP_401_UNAUTHORIZED] * 4
         with tenant_context(xyz.consultancy):
-            assert Commission.objects.get(pk=commission).status == "waiting_for_enrolment"
+            assert Commission.objects.get(public_id=commission).status == "waiting_for_enrolment"
 
 
 class TestMoneyReportIsolation:
@@ -3884,7 +4325,11 @@ class TestMoneyReportIsolation:
             university = University.objects.create(name=f"{name} University", country="australia")
             recorded = {"recorded_by": admin, "recorded_by_name": admin.name, "amount": amount}
             Payment.objects.create(
-                student=student, paid_on=today, method="cash", purpose="Fee", **recorded
+                student=student,
+                paid_on=today,
+                method="cash",
+                fee_type=FeeType.objects.get(name="Visa fee"),
+                **recorded,
             )
             Commission.objects.create(
                 student=student,
@@ -3992,7 +4437,7 @@ class TestMySettingsIsolation:
         assert xyz.client.get(ME_URL).status_code == status.HTTP_200_OK
         with tenant_context(xyz.consultancy):
             kept = Staff.objects.get(pk=xyz_staff.pk)
-        assert (kept.name, kept.colour_mode) == (xyz_staff.name, "device")
+        assert (kept.name, kept.colour_mode) == (xyz_staff.name, "light")
         assert kept.check_password(TEST_PASSWORD)
 
     def test_signed_in_devices_never_include_another_consultancys(
@@ -4062,12 +4507,12 @@ class TestConsultancyStatusIsolation:
         if value in {"past_due", "suspended"}:
             paid_until = (timezone.localdate() + timedelta(days=30)).isoformat()
             platform_site.client.post(
-                f"/api/platform/consultancies/{abc.consultancy.pk}/status/",
+                f"/api/platform/consultancies/{abc.consultancy.public_id}/status/",
                 {"status": "active", "paid_until": paid_until},
                 format="json",
             )
         reply = platform_site.client.post(
-            f"/api/platform/consultancies/{abc.consultancy.pk}/status/",
+            f"/api/platform/consultancies/{abc.consultancy.public_id}/status/",
             {"status": value, "reason": "Unpaid"},
             format="json",
         )
@@ -4116,8 +4561,8 @@ class TestSupportAccessIsolation:
             client.get("/api/students/"),
             client.patch(ME_URL, {"name": "x"}, format="json"),
             client.put("/api/support-access/modules/", {}, format="json"),
-            client.post(f"/api/support-access/staff/{theirs.pk}/reset-code/", format="json"),
-            client.post(f"/api/support-access/staff/{theirs.pk}/sign-out/", format="json"),
+            client.post(f"/api/support-access/staff/{theirs.public_id}/reset-code/", format="json"),
+            client.post(f"/api/support-access/staff/{theirs.public_id}/sign-out/", format="json"),
             client.post("/api/support-access/export/", format="json"),
         ):
             assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -4153,8 +4598,8 @@ class TestSupportAccessIsolation:
 
         for response in (
             client.put("/api/support-access/modules/", {}, format="json"),
-            client.post(f"/api/support-access/staff/{ours.pk}/reset-code/", format="json"),
-            client.post(f"/api/support-access/staff/{ours.pk}/sign-out/", format="json"),
+            client.post(f"/api/support-access/staff/{ours.public_id}/reset-code/", format="json"),
+            client.post(f"/api/support-access/staff/{ours.public_id}/sign-out/", format="json"),
             client.post("/api/support-access/export/", format="json"),
         ):
             assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -4189,7 +4634,7 @@ class TestCentralLoginIsolation:
         leaver = abc.add_staff(Role.COUNSELLOR, email="sita@example.com")
         xyz.add_staff(Role.COUNSELLOR, email="sita@example.com")
 
-        response = abc.client.post(f"/api/staff/{leaver.pk}/deactivate/", format="json")
+        response = abc.client.post(f"/api/staff/{leaver.public_id}/deactivate/", format="json")
 
         assert response.status_code == status.HTTP_200_OK
         activate_public_schema()
@@ -4204,7 +4649,7 @@ class TestCentralLoginIsolation:
         abc.log_in_as(Role.ADMIN)
         theirs = xyz.add_staff(Role.COUNSELLOR, email="hari@example.com")
 
-        abc.client.post(f"/api/staff/{theirs.pk}/deactivate/", format="json")
+        abc.client.post(f"/api/staff/{theirs.public_id}/deactivate/", format="json")
 
         activate_public_schema()
         offices = [office.schema_name for office in offices_for("hari@example.com")]
@@ -4455,14 +4900,12 @@ class TestClockInIsolation:
 
         team = xyz.client.get("/api/clock/team/").json()["rows"]
         now = xyz.client.get("/api/clock/team/now/").json()["people"]
-        month = xyz.client.get("/api/clock/month/", {"staff": abc_person.pk})
+        month = xyz.client.get("/api/clock/month/", {"staff": str(abc_person.public_id)})
 
         assert [row["staff"]["name"] for row in team] == ["Test Admin"]
         assert team[0]["missing_clock_outs"] == 0
         assert all(person["state"] == "not_in" for person in now)
-        assert month.status_code in {status.HTTP_200_OK, status.HTTP_404_NOT_FOUND}
-        if month.status_code == status.HTTP_200_OK:  # the same id is someone else in XYZ
-            assert month.json()["figures"]["missing_clock_outs"] == 0
+        assert month.status_code == status.HTTP_404_NOT_FOUND  # ABC's person is unknown in XYZ
 
     def test_another_office_cant_correct_a_session_or_a_person_by_id(
         self, make_consultancy: ConsultancyFactory
@@ -4472,12 +4915,12 @@ class TestClockInIsolation:
         xyz.log_in_as(Role.ADMIN)
 
         set_out = xyz.client.post(
-            f"/api/clock/sessions/{abc_session.pk}/clock-out/",
+            f"/api/clock/sessions/{abc_session.public_id}/clock-out/",
             {"clocked_out_at": "17:00", "reason": "Intruder"},
             format="json",
         )
         added = xyz.client.post(
-            f"/api/clock/staff/{abc_person.pk + 1000}/missed-time/",
+            f"/api/clock/staff/{abc_person.public_id}/missed-time/",
             {"day": "2026-01-05", "from": "09:00", "to": "10:00", "reason": "Intruder"},
             format="json",
         )
@@ -4603,7 +5046,7 @@ class TestHolidayIsolation:
         with tenant_context(abc.consultancy):
             dashain = Holiday.objects.create(day=timezone.localdate(), name="Dashain")
 
-        response = xyz.client.delete(f"/api/clock/holidays/{dashain.pk}/")
+        response = xyz.client.delete(f"/api/clock/holidays/{dashain.public_id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(abc.consultancy):
@@ -4663,9 +5106,11 @@ class TestWorkFromHomeIsolation:
         abc_person, waiting = self._dates(abc, "waiting")
         xyz.log_in_as(Role.ADMIN)
 
-        seen = xyz.client.get(f"/api/clock/staff/{abc_person.pk + 1000}/work-from-home/")
+        seen = xyz.client.get(f"/api/clock/staff/{abc_person.public_id}/work-from-home/")
         answers = [
-            xyz.client.post(f"/api/clock/work-from-home/{waiting.pk}/{action}/", format="json")
+            xyz.client.post(
+                f"/api/clock/work-from-home/{waiting.public_id}/{action}/", format="json"
+            )
             for action in ("approve", "decline", "end", "cancel")
         ]
         mine = xyz.client.get("/api/clock/work-from-home/").json()
@@ -4777,7 +5222,7 @@ class TestTransferRequestIsolation:
 
         for action in ("approve", "decline", "cancel"):
             response = xyz.client.post(
-                f"/api/transfer-requests/{waiting.pk}/{action}/", {}, format="json"
+                f"/api/transfer-requests/{waiting.public_id}/{action}/", {}, format="json"
             )
             assert response.status_code == status.HTTP_404_NOT_FOUND
         with tenant_context(_abc.consultancy):
@@ -4793,7 +5238,7 @@ class TestTransferRequestIsolation:
         xyz.log_in_as(Role.COUNSELLOR)
 
         response = xyz.client.post(
-            f"/api/students/{student.pk}/transfer-requests/",
+            f"/api/students/{student.public_id}/transfer-requests/",
             {"reason": "Intruder"},
             format="json",
         )
@@ -4817,7 +5262,7 @@ class TestTransferRequestIsolation:
         use_access_token(xyz.client, xyz.tokens_for(xyz_mine).access)
 
         response = xyz.client.post(
-            f"/api/transfer-requests/{xyz_waiting.pk}/approve/", {}, format="json"
+            f"/api/transfer-requests/{xyz_waiting.public_id}/approve/", {}, format="json"
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -4837,7 +5282,7 @@ class TestTransferRequestIsolation:
 
         listed = intruder.get("/api/transfer-requests/")
         approved = intruder.post(
-            f"/api/transfer-requests/{xyz_waiting.pk}/approve/", {}, format="json"
+            f"/api/transfer-requests/{xyz_waiting.public_id}/approve/", {}, format="json"
         )
 
         assert listed.status_code == approved.status_code == status.HTTP_401_UNAUTHORIZED
@@ -4980,11 +5425,13 @@ class TestStaffTwoFactorIsolation:
         use_access_token(xyz_with_a_token, abc.tokens_for(admin).access)
 
         switch = xyz_with_a_token.patch(
-            f"/api/staff/{target.pk}/two-factor/", {"required": True}, format="json"
+            f"/api/staff/{target.public_id}/two-factor/", {"required": True}, format="json"
         )
-        reset = xyz_with_a_token.post(f"/api/staff/{target.pk}/two-factor/reset/", format="json")
+        reset = xyz_with_a_token.post(
+            f"/api/staff/{target.public_id}/two-factor/reset/", format="json"
+        )
         on_own_host = abc.client.patch(
-            f"/api/staff/{target.pk}/two-factor/", {"required": True}, format="json"
+            f"/api/staff/{target.public_id}/two-factor/", {"required": True}, format="json"
         )
 
         assert switch.status_code == status.HTTP_401_UNAUTHORIZED
@@ -5027,7 +5474,11 @@ class TestConsultancySetupIsolation:
         abc = make_consultancy("ABC Education", "abcedu")
         abc_admin = abc.add_staff(Role.ADMIN)
         platform_site.log_in()
-        body = {"name": "Everest Education", "subdomain": "everest"}
+        body = {
+            "name": "Everest Education",
+            "subdomain": "everest",
+            "contact_email": "info@everest.test",
+        }
 
         created = platform_site.client.post(self.CREATE, body, format="json").json()
         run_queued_jobs()
@@ -5054,14 +5505,14 @@ class TestConsultancySetupIsolation:
         abc = make_consultancy("ABC Education", "abcedu")
         xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
         access = abc.tokens_for(abc.add_staff(Role.ADMIN)).access
-        body = {"name": "X", "subdomain": "everest"}
+        body = {"name": "X", "subdomain": "everest", "contact_email": "info@everest.test"}
 
         for client in (abc.new_client(), xyz.new_client(), platform_site.new_client()):
             use_access_token(client, access)
             assert client.post(self.CREATE, body, format="json").status_code in {401, 403, 404}
-            retry = f"{self.CREATE}{xyz.consultancy.pk}/retry-setup/"
+            retry = f"{self.CREATE}{xyz.consultancy.public_id}/retry-setup/"
             assert client.post(retry).status_code in {401, 403, 404}
-            add_admin = f"{self.CREATE}{xyz.consultancy.pk}/admins/"
+            add_admin = f"{self.CREATE}{xyz.consultancy.public_id}/admins/"
             admin_body = {"name": "Intruder", "email": "intruder@x.test"}
             assert client.post(add_admin, admin_body, format="json").status_code in {
                 401,
@@ -5083,7 +5534,7 @@ class TestStageChangesIsolation:
         xyz.log_in_as(Role.ADMIN)
         sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()["id"]
         ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
-        assert sita == ram  # Each schema numbers its own Students.
+        assert sita != ram  # Every Student has their own UUID.
         abc.client.post(f"{STUDENTS_URL}{sita}/stage/", {"stage": "counselling"}, format="json")
         abc.client.post(
             f"{STUDENTS_URL}{sita}/stage/",
@@ -5124,7 +5575,7 @@ class TestWhoDidEachActionIsolation:
         xyz.log_in_as(Role.ADMIN)
         sita = abc.client.post(STUDENTS_URL, _lead_body("Sita Karki"), format="json").json()["id"]
         ram = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()["id"]
-        assert sita == ram  # Each schema numbers its own Students.
+        assert sita != ram  # Every Student has their own UUID.
         with tenant_context(abc.consultancy):
             task = Task.objects.create(
                 title="Only ABC knows this",
@@ -5132,9 +5583,9 @@ class TestWhoDidEachActionIsolation:
                 assignee=abc_admin,
                 created_by=abc_admin,
                 created_by_name=abc_admin.name,
-                student_id=sita,
+                student=Student.objects.get(public_id=sita),
             )
-        response = abc.client.patch(f"/api/tasks/{task.pk}/", {"done": True}, format="json")
+        response = abc.client.patch(f"/api/tasks/{task.public_id}/", {"done": True}, format="json")
         assert response.status_code == status.HTTP_200_OK
 
         xyz_history = xyz.client.get(f"{STUDENTS_URL}{ram}/history/").json()["results"]
@@ -5165,7 +5616,7 @@ class TestWhoDidEachActionIsolation:
         intruder = xyz.new_client()
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
 
-        response = intruder.patch(f"/api/tasks/{task.pk}/", {"done": True}, format="json")
+        response = intruder.patch(f"/api/tasks/{task.public_id}/", {"done": True}, format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         with tenant_context(abc.consultancy):
@@ -5188,8 +5639,8 @@ class TestStaffProgressIsolation:
         today = timezone.localdate().isoformat()
         period = {"from": today, "to": today}
 
-        abc_answer = abc.client.get(f"/api/staff/{abc_admin.pk}/progress/", period).json()
-        xyz_answer = xyz.client.get(f"/api/staff/{xyz_admin.pk}/progress/", period).json()
+        abc_answer = abc.client.get(f"/api/staff/{abc_admin.public_id}/progress/", period).json()
+        xyz_answer = xyz.client.get(f"/api/staff/{xyz_admin.public_id}/progress/", period).json()
 
         abc_counts = {card["count"]: card["value"] for card in abc_answer["cards"]}
         xyz_counts = {card["count"]: card["value"] for card in xyz_answer["cards"]}
@@ -5210,7 +5661,7 @@ class TestStaffProgressIsolation:
         today = timezone.localdate().isoformat()
 
         response = intruder.get(
-            f"/api/staff/{abc_admin.pk}/progress/", {"from": today, "to": today}
+            f"/api/staff/{abc_admin.public_id}/progress/", {"from": today, "to": today}
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -5244,12 +5695,14 @@ class TestInboxIsolation:
 
         listed = xyz.client.get("/api/inbox/").json()
         checked = xyz.client.get("/api/inbox/check/").json()
-        thread = xyz.client.get(f"/api/inbox/{abc_counsellor.pk}/").json()
+        thread = xyz.client.get(f"/api/inbox/{abc_counsellor.public_id}/").json()
+        own_number = xyz.client.get(f"/api/inbox/{xyz_counsellor.public_id}/").json()
 
         assert listed == {"conversations": []}
         assert checked == {"unread": 0, "latest": None}
-        assert thread["messages"] == []
-        assert "ABC" not in str(thread)
+        assert own_number["messages"] == []
+        assert "ABC" not in str(own_number)
+        assert thread == {"detail": "Not found."}  # ABC's person is unknown in XYZ
 
     def test_writing_reaches_only_the_same_office(
         self, make_consultancy: ConsultancyFactory
@@ -5260,7 +5713,7 @@ class TestInboxIsolation:
         use_access_token(xyz.client, xyz.tokens_for(xyz_admin).access)
 
         response = xyz.client.post(
-            f"/api/inbox/{abc_counsellor.pk}/", {"text": "Hello"}, format="json"
+            f"/api/inbox/{abc_counsellor.public_id}/", {"text": "Hello"}, format="json"
         )
 
         # The id names nobody in XYZ (only its Admin exists there), so nothing is sent anywhere.
@@ -5279,10 +5732,10 @@ class TestInboxIsolation:
         intruder = xyz.new_client()
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
 
-        for url in ("/api/inbox/", "/api/inbox/check/", f"/api/inbox/{abc_counsellor.pk}/"):
+        for url in ("/api/inbox/", "/api/inbox/check/", f"/api/inbox/{abc_counsellor.public_id}/"):
             assert intruder.get(url).status_code == status.HTTP_401_UNAUTHORIZED
         response = intruder.post(
-            f"/api/inbox/{abc_counsellor.pk}/", {"text": "Hello"}, format="json"
+            f"/api/inbox/{abc_counsellor.public_id}/", {"text": "Hello"}, format="json"
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -5317,3 +5770,551 @@ class TestPageSwipeIsolation:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         xyz.log_in_as(Role.ADMIN)
         assert xyz.client.get("/api/context/").json()["page_swipe"] is False
+
+
+class TestFeesByTypeIsolation:
+    """Ticket 08: Fees by type adds up only this office's money, and its Fee Types only."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext, str]:
+        """Both offices with an Admin in; ABC has a Fee Type XYZ hasn't, with money on it."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            switch_modules(office.consultancy, {Module.ACCOUNTS})
+            office.log_in_as(Role.ADMIN)
+        abc_only = str(
+            abc.client.post("/api/fee-types/", {"name": "ABC only"}, format="json").json()["id"]
+        )
+        student = abc.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        for fee_type in (abc_only, _fee_type_id(abc)):
+            created = abc.client.post(
+                f"/api/students/{student['id']}/fees/",
+                {"fee_type": fee_type, "amount": 40000},
+                format="json",
+            )
+            assert created.status_code == status.HTTP_201_CREATED
+        return abc, xyz, abc_only
+
+    def test_each_office_adds_up_only_its_own_money(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+
+        mine = abc.client.get("/api/accounts/fees-by-type/").json()
+        theirs = xyz.client.get("/api/accounts/fees-by-type/").json()
+
+        assert mine["totals"]["remaining"] == 80000
+        assert theirs == {
+            "totals": {
+                "to_collect": 0,
+                "received": 0,
+                "remaining": 0,
+                "lost_not_counted": 0,
+                "owing": 0,
+            },
+            "fee_types": [],
+        }
+
+    def test_another_offices_fee_type_is_not_found(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        _, xyz, abc_only = self._two_offices(make_consultancy)
+
+        response = xyz.client.get(f"/api/accounts/fees-by-type/{abc_only}/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_each_offices_own_fee_type_lists_only_its_students(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        xyz_url = f"/api/accounts/fees-by-type/{_fee_type_id(xyz)}/"
+        abc_url = f"/api/accounts/fees-by-type/{_fee_type_id(abc)}/"
+
+        assert xyz.client.get(xyz_url).json()["results"] == []
+        assert abc.client.get(xyz_url).status_code == status.HTTP_404_NOT_FOUND
+        assert [row["student"]["name"] for row in abc.client.get(abc_url).json()["results"]] == [
+            "Ram Thapa"
+        ]
+
+    def test_a_token_from_one_consultancy_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz, _ = self._two_offices(make_consultancy)
+        intruder = api_client(xyz.host)
+        abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
+        use_access_token(intruder, abc.tokens_for(abc_admin).access)
+
+        answers = [
+            intruder.get("/api/accounts/fees-by-type/"),
+            intruder.get(f"/api/accounts/fees-by-type/{_fee_type_id(xyz)}/"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401, 401]
+
+
+_COURSE_PDF = b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n"
+
+
+def _course_with_file(office: ConsultancyContext, name: str) -> tuple[str, str]:
+    """A Course in `office` with one Course File uploaded by its Admin: (course id, file id)."""
+    university = office.client.post(
+        "/api/catalogue/universities/",
+        {"name": f"{name} University", "country": "australia"},
+        format="json",
+    ).json()
+    year = timezone.localdate().year + 1
+    course = office.client.post(
+        f"/api/catalogue/universities/{university['id']}/courses/",
+        {"name": f"{name} course", "level": "master", "intakes": [f"{year}-03"]},
+        format="json",
+    ).json()
+    upload = SimpleUploadedFile("brochure.pdf", _COURSE_PDF, content_type="application/pdf")
+    file = office.client.post(
+        f"/api/catalogue/courses/{course['id']}/files/",
+        {"file": upload, "name": f"{name} brochure"},
+        format="multipart",
+    )
+    assert file.status_code == status.HTTP_201_CREATED
+    return str(course["id"]), str(file.json()["id"])
+
+
+class TestCourseFileIsolation:
+    """Ticket 10: Course Files are kept, listed, opened and binned only in their own office."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext]:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        return abc, xyz
+
+    def test_files_are_kept_under_each_offices_own_prefix(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+
+        _course_with_file(abc, "ABC")
+        _course_with_file(xyz, "XYZ")
+
+        keys = sorted(FakeDocumentStorage.files)
+        assert [key.split("/", 2)[:2] for key in keys] == [
+            ["abcedu", "course-files"],
+            ["xyzoverseas", "course-files"],
+        ]
+
+    def test_another_offices_course_file_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        course_id, file_id = _course_with_file(abc, "ABC")
+        with tenant_context(xyz.consultancy):
+            assert not Course.objects.filter(public_id=course_id).exists()
+
+        answers = [
+            xyz.client.get(f"/api/catalogue/course-files/{file_id}/link/"),
+            xyz.client.patch(
+                f"/api/catalogue/course-files/{file_id}/", {"name": "Mine"}, format="json"
+            ),
+            xyz.client.delete(f"/api/catalogue/course-files/{file_id}/"),
+            xyz.client.post(
+                f"/api/catalogue/courses/{course_id}/files/",
+                {
+                    "file": SimpleUploadedFile("x.pdf", _COURSE_PDF, "application/pdf"),
+                    "name": "Intruder",
+                },
+                format="multipart",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 4
+        mine = abc.client.get(f"/api/catalogue/course-files/{file_id}/link/")
+        assert mine.status_code == status.HTTP_200_OK
+
+    def test_the_same_id_changes_only_its_own_office(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, abc_file = _course_with_file(abc, "ABC")
+        _, xyz_file = _course_with_file(xyz, "XYZ")
+        assert abc_file != xyz_file  # Each Course File has its own UUID (ADR 0027).
+
+        xyz.client.patch(
+            f"/api/catalogue/course-files/{xyz_file}/", {"name": "Renamed"}, format="json"
+        )
+        xyz.client.delete(f"/api/catalogue/course-files/{xyz_file}/")
+
+        abc_bin = abc.client.get("/api/documents/bin/").json()
+        xyz_bin = xyz.client.get("/api/documents/bin/").json()
+        assert abc_bin["count"] == 0
+        assert [row["course_file"]["name"] for row in xyz_bin["results"]] == ["Renamed"]
+        abc_course = abc.client.get("/api/catalogue/universities/").json()["results"][0]
+        assert abc_course["courses"][0]["files"][0]["name"] == "ABC brochure"
+
+    def test_another_offices_bin_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, file_id = _course_with_file(abc, "ABC")
+        abc.client.delete(f"/api/catalogue/course-files/{file_id}/")
+        bin_url = f"/api/documents/bin/course-files/{file_id}/"
+
+        answers = [
+            xyz.client.get(f"{bin_url}link/"),
+            xyz.client.post(f"{bin_url}restore/", {}, format="json"),
+            xyz.client.delete(bin_url),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 1
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        course_id, file_id = _course_with_file(abc, "ABC")
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+
+        answers = [
+            intruder.get(f"/api/catalogue/course-files/{file_id}/link/"),
+            intruder.delete(f"/api/catalogue/course-files/{file_id}/"),
+            intruder.post(f"/api/documents/bin/course-files/{file_id}/restore/", {}, format="json"),
+            intruder.post(f"/api/catalogue/courses/{course_id}/files/", {}, format="multipart"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 4
+
+
+def _type_with_example(office: ConsultancyContext, name: str = "Bank Statement") -> tuple[str, str]:
+    """A Document Type of `office` with one example uploaded by its Admin: (type id, example id)."""
+    types = office.client.get("/api/configuration/document-types/").json()["results"]
+    type_id = next(str(t["id"]) for t in types if t["name"] == name)
+    upload = SimpleUploadedFile("sample.pdf", _COURSE_PDF, content_type="application/pdf")
+    example = office.client.post(
+        f"/api/configuration/document-types/{type_id}/examples/",
+        {"file": upload},
+        format="multipart",
+    )
+    assert example.status_code == status.HTTP_201_CREATED
+    return type_id, str(example.json()["id"])
+
+
+class TestDocumentExampleIsolation:
+    """Ticket 11: Document Examples are kept, opened and binned only in their own office."""
+
+    def _two_offices(
+        self, make_consultancy: ConsultancyFactory
+    ) -> tuple[ConsultancyContext, ConsultancyContext]:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        for office in (abc, xyz):
+            office.log_in_as(Role.ADMIN)
+        return abc, xyz
+
+    def test_examples_are_kept_under_each_offices_own_prefix(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+
+        _type_with_example(abc)
+        _type_with_example(xyz)
+
+        keys = sorted(FakeDocumentStorage.files)
+        assert [key.split("/", 2)[:2] for key in keys] == [
+            ["abcedu", "document-examples"],
+            ["xyzoverseas", "document-examples"],
+        ]
+
+    def test_another_offices_example_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, example_id = _type_with_example(abc)
+        one = f"/api/configuration/document-examples/{example_id}/"
+
+        answers = [
+            xyz.client.get(f"/api/documents/examples/{example_id}/link/"),
+            xyz.client.delete(one),
+            xyz.client.post(
+                f"{one}replace/",
+                {"file": SimpleUploadedFile("x.pdf", _COURSE_PDF, "application/pdf")},
+                format="multipart",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        mine = abc.client.get(f"/api/documents/examples/{example_id}/link/")
+        assert mine.status_code == status.HTTP_200_OK
+
+    def test_the_same_ids_change_only_their_own_office(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        abc_type, abc_example = _type_with_example(abc)
+        xyz_type, xyz_example = _type_with_example(xyz)
+        assert abc_type != xyz_type and abc_example != xyz_example  # their own UUIDs
+
+        xyz.client.put(
+            f"/api/configuration/document-types/{xyz_type}/instruction/",
+            {"instruction": "XYZ only"},
+            format="json",
+        )
+        xyz.client.delete(f"/api/configuration/document-examples/{xyz_example}/")
+
+        abc_types = abc.client.get("/api/configuration/document-types/").json()["results"]
+        [abc_statement] = [t for t in abc_types if t["id"] == abc_type]
+        assert abc_statement["instruction"] == ""
+        assert [e["id"] for e in abc_statement["examples"]] == [abc_example]
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 0
+        xyz_bin = xyz.client.get("/api/documents/bin/").json()
+        assert [row["kind"] for row in xyz_bin["results"]] == ["document_example"]
+
+    def test_another_offices_bin_is_never_reached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        _, example_id = _type_with_example(abc)
+        abc.client.delete(f"/api/configuration/document-examples/{example_id}/")
+        bin_url = f"/api/documents/bin/document-examples/{example_id}/"
+
+        answers = [
+            xyz.client.get(f"{bin_url}link/"),
+            xyz.client.post(f"{bin_url}restore/", {}, format="json"),
+            xyz.client.delete(bin_url),
+        ]
+
+        assert [answer.status_code for answer in answers] == [404] * 3
+        assert abc.client.get("/api/documents/bin/").json()["count"] == 1
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._two_offices(make_consultancy)
+        type_id, example_id = _type_with_example(abc)
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+        bin_url = f"/api/documents/bin/document-examples/{example_id}/"
+
+        answers = [
+            intruder.put(
+                f"/api/configuration/document-types/{type_id}/instruction/",
+                {"instruction": "x"},
+                format="json",
+            ),
+            intruder.post(
+                f"/api/configuration/document-types/{type_id}/examples/", {}, format="multipart"
+            ),
+            intruder.delete(f"/api/configuration/document-examples/{example_id}/"),
+            intruder.get(f"/api/documents/examples/{example_id}/link/"),
+            intruder.post(f"{bin_url}restore/", {}, format="json"),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 5
+
+
+_OTHER_PDF = b"%PDF-1.7\n% from the other office\n%%EOF\n"
+
+
+class TestEmailAttachmentIsolation:
+    """Ticket 12: an email carries only this office's files, and only that Student's Documents."""
+
+    def _office(
+        self, make_consultancy: ConsultancyFactory, name: str, subdomain: str
+    ) -> tuple[ConsultancyContext, Student]:
+        """An office (Admin in, Email on, a contact email) with one Student who has an email."""
+        office = make_consultancy(name, subdomain)
+        switch_modules(office.consultancy, {Module.COMMUNICATION})
+        set_office_details(
+            office.consultancy, OfficeDetails(contact_email=f"info@{subdomain}.test")
+        )
+        office.log_in_as(Role.ADMIN)
+        with tenant_context(office.consultancy):
+            student = Student.objects.create(
+                name=f"{name} Student",
+                phone="9841000001",
+                email=f"student@{subdomain}.test",
+                country="australia",
+                source="walk_in",
+            )
+        return office, student
+
+    def _passport_file(self, office: ConsultancyContext, student: Student, content: bytes) -> str:
+        """A file of the Student's Passport, with its bytes in storage: its id."""
+        with tenant_context(office.consultancy):
+            document = Document.objects.create(
+                student=student, document_type=DocumentType.objects.get(name="Passport")
+            )
+            file = DocumentFile.objects.create(
+                document=document,
+                file_name="passport.pdf",
+                content_type="application/pdf",
+                size=len(content),
+                storage_key=f"{office.consultancy.schema_name}/documents/{student.public_id}/p.pdf",
+            )
+        FakeDocumentStorage.files[file.storage_key] = StoredFile(content, "application/pdf")
+        return str(file.public_id)
+
+    def _send(
+        self, office: ConsultancyContext, student_id: object, attachments: list[dict[str, object]]
+    ) -> int:
+        body = {"subject": "Files", "body": "Dear Student,\n\nHere.", "attachments": attachments}
+        response = office.client.post(f"{STUDENTS_URL}{student_id}/messages/", body, format="json")
+        return int(response.status_code)
+
+    def test_another_offices_files_are_never_attached(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _, file_id = _course_with_file(abc, "Deakin")
+        _, example_id = _type_with_example(abc)
+        document_file = self._passport_file(abc, abc_student, _COURSE_PDF)
+
+        statuses = [
+            self._send(xyz, xyz_student.public_id, [{"kind": "course_file", "id": file_id}]),
+            self._send(
+                xyz, xyz_student.public_id, [{"kind": "document_example", "id": example_id}]
+            ),
+            self._send(
+                xyz, xyz_student.public_id, [{"kind": "document_file", "id": document_file}]
+            ),
+        ]
+
+        assert statuses == [400] * 3
+        assert mail.outbox == []
+        with tenant_context(xyz.consultancy):
+            assert not Message.objects.exists()
+
+    def test_the_same_ids_attach_only_this_offices_own_files(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        abc_file = self._passport_file(abc, abc_student, _COURSE_PDF)
+        xyz_file = self._passport_file(xyz, xyz_student, _OTHER_PDF)
+        assert abc_file != xyz_file
+
+        theirs = self._send(xyz, xyz_student.public_id, [{"kind": "document_file", "id": abc_file}])
+        status_code = self._send(
+            xyz, xyz_student.public_id, [{"kind": "document_file", "id": xyz_file}]
+        )
+
+        assert theirs == status.HTTP_400_BAD_REQUEST
+        assert status_code == status.HTTP_201_CREATED
+        [sent] = mail.outbox
+        [part] = [p for p in sent.message().walk() if p.get_content_disposition() == "attachment"]
+        assert part.get_payload(decode=True) == _OTHER_PDF
+
+    def test_each_office_lists_only_its_own_files(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, xyz_student = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _course_with_file(abc, "Deakin")
+        _type_with_example(abc)
+        self._passport_file(abc, abc_student, _COURSE_PDF)
+
+        mine = xyz.client.get(f"{STUDENTS_URL}{xyz_student.public_id}/emails/attachable/").json()
+        many = xyz.client.get("/api/messages/bulk/attachable/").json()
+        theirs = xyz.client.get(f"{STUDENTS_URL}{abc_student.public_id}/emails/attachable/")
+
+        assert (mine["course_files"], mine["document_examples"], mine["documents"]) == ([], [], [])
+        assert (many["course_files"], many["document_examples"]) == ([], [])
+        assert theirs.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_a_token_from_another_office_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, abc_student = self._office(make_consultancy, "ABC Education", "abcedu")
+        xyz, _ = self._office(make_consultancy, "XYZ Overseas", "xyzoverseas")
+        _, file_id = _course_with_file(abc, "Deakin")
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN, "a2@abc.test")).access)
+
+        answers = [
+            intruder.get(f"{STUDENTS_URL}{abc_student.public_id}/emails/attachable/"),
+            intruder.get("/api/messages/bulk/attachable/"),
+            intruder.post(
+                f"{STUDENTS_URL}{abc_student.public_id}/messages/",
+                {
+                    "subject": "x",
+                    "body": "y",
+                    "attachments": [{"kind": "course_file", "id": file_id}],
+                },
+                format="json",
+            ),
+        ]
+
+        assert [answer.status_code for answer in answers] == [401] * 3
+        assert mail.outbox == []
+
+
+class TestOfficeRecordIdIsolation:
+    """Ticket 18: employees and the office's records are found by UUID only in their own office.
+
+    For every address that names one of them: office A's UUID is not found at B, B's own UUID
+    works there, and A's record is unchanged (ADR 0027).
+    """
+
+    def test_every_address_finds_only_its_own_offices_records(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        theirs = office_with_every_record(abc)
+        ours = office_with_every_record(xyz)  # its Admin is logged in
+
+        for their_url, our_url in zip(
+            record_addresses(theirs), record_addresses(ours), strict=True
+        ):
+            if "?" in their_url:
+                continue  # filters: a UUID from elsewhere matches nothing (below)
+            assert xyz.client.get(their_url).status_code == status.HTTP_404_NOT_FOUND, their_url
+            assert xyz.client.get(our_url).status_code == status.HTTP_200_OK, our_url
+
+    def test_changes_by_uuid_never_reach_another_office(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        theirs = office_with_every_record(abc)
+        office_with_every_record(xyz)  # its Admin is logged in
+        client = xyz.client
+
+        refused = [
+            client.patch(
+                f"/api/staff/{theirs.counsellor.public_id}/", {"role": "admin"}, format="json"
+            ),
+            client.delete(f"/api/clock/holidays/{theirs.holiday.public_id}/"),
+            client.delete(f"/api/accounts/expenses/{theirs.expense.public_id}/"),
+            client.delete(f"/api/office-networks/{theirs.network.public_id}/"),
+            client.patch(f"/api/tasks/{theirs.task.public_id}/", {"done": True}, format="json"),
+            client.post(
+                f"/api/clock/work-from-home/{theirs.dates.public_id}/approve/", {}, format="json"
+            ),
+            client.patch(
+                f"/api/fee-types/{theirs.fee_type.public_id}/", {"hidden": True}, format="json"
+            ),
+        ]
+        given = client.post(
+            "/api/tasks/",
+            {"title": "Call", "due_on": "2030-01-01", "assignee": str(theirs.counsellor.public_id)},
+            format="json",
+        )
+        filtered = client.get(f"/api/students/?counsellor={theirs.counsellor.public_id}")
+
+        assert [r.status_code for r in refused] == [status.HTTP_404_NOT_FOUND] * len(refused)
+        assert given.status_code == status.HTTP_400_BAD_REQUEST
+        assert filtered.json()["count"] == 0
+        with tenant_context(abc.consultancy):
+            assert Holiday.objects.filter(pk=theirs.holiday.pk).exists()
+            assert Expense.objects.filter(pk=theirs.expense.pk).exists()
+            assert OfficeNetwork.objects.filter(pk=theirs.network.pk).exists()
+            assert Staff.objects.get(pk=theirs.counsellor.pk).role == Role.COUNSELLOR
+            assert not Task.objects.get(pk=theirs.task.pk).is_done
+            assert FeeType.objects.get(pk=theirs.fee_type.pk).hidden is False

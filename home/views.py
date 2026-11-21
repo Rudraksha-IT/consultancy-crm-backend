@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.request import Request
@@ -104,11 +106,11 @@ class StudentProgressView(APIView):
 
     permission_classes = (IsAuthenticated, CanSeeStudents)
 
-    def get(self, request: Request, student_id: int) -> Response:
+    def get(self, request: Request, student_id: UUID) -> Response:
         """Return the Student's Stage, how far along they are, and their next step."""
         NoQuerySerializer(data=request.query_params).is_valid(raise_exception=True)
         try:
-            student = Student.objects.get(pk=student_id)
+            student = Student.objects.get(public_id=student_id)
         except Student.DoesNotExist as error:
             raise NotFound from error
         progress = progress_of_student(student)

@@ -12,6 +12,7 @@ import calendar
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from uuid import UUID
 
 from django.utils import timezone
 
@@ -49,6 +50,8 @@ class SessionTimes:
     """One Work Session's times, as the rules need them."""
 
     id: int
+    # Its id outside the server (ADR 0027), for the screens.
+    public_id: UUID
     clocked_in_at: datetime
     clocked_out_at: datetime | None
     not_clocked_out: bool

@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from documents.exceptions import DocumentStorageError
 from documents.storage import document_storage
+from emails.types import OfficeDetails
 from tenancy.exceptions import InvalidStatusChangeError, NoLogoError
 from tenancy.logo import CheckedLogo
 from tenancy.models import (
@@ -37,6 +38,7 @@ from tenancy.types import ConsultancyAccess, DateDisplay, OfficeLogo, StatusChan
 if TYPE_CHECKING:
     from platform_admin.models import PlatformAdmin
 
+OFFICE_DETAILS_FIELDS = ("contact_email", "phone", "address_line1", "address_line2", "website")
 # Where the frontend loads the logo from; each upload has its own version, so its own address.
 LOGO_URL = "/api/consultancy/logo/{version}/"
 _LOGO_FIELDS = ["logo_key", "logo_content_type", "logo_version"]
@@ -429,6 +431,28 @@ def set_date_display(consultancy: Consultancy, date_display: DateDisplay) -> Non
     """Show the Consultancy's dates in AD or BS from now on; stored dates stay in AD."""
     consultancy.date_display = date_display.value
     consultancy.save(update_fields=["date_display"])
+
+
+def get_office_details(consultancy: Consultancy) -> OfficeDetails:
+    """Return the office's contact email, phone, address and website (empty when not set)."""
+    return OfficeDetails(
+        contact_email=consultancy.contact_email,
+        phone=consultancy.phone,
+        address_line1=consultancy.address_line1,
+        address_line2=consultancy.address_line2,
+        website=consultancy.website,
+    )
+
+
+def set_office_details(consultancy: Consultancy, details: OfficeDetails) -> OfficeDetails:
+    """Store the office's details (already checked) in place of the old ones, and return them."""
+    consultancy.contact_email = details.contact_email
+    consultancy.phone = details.phone
+    consultancy.address_line1 = details.address_line1
+    consultancy.address_line2 = details.address_line2
+    consultancy.website = details.website
+    consultancy.save(update_fields=list(OFFICE_DETAILS_FIELDS))
+    return get_office_details(consultancy)
 
 
 def get_theme(consultancy: Consultancy) -> ThemeConfig:

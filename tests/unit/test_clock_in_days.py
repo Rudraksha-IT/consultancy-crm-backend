@@ -6,6 +6,7 @@ Days split at midnight in the Consultancy's time zone (Asia/Kathmandu, UTC+5:45)
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -55,6 +56,7 @@ def session(
     """One Work Session's times."""
     return SessionTimes(
         id=pk,
+        public_id=UUID(int=pk),
         clocked_in_at=start,
         clocked_out_at=end,
         not_clocked_out=not_clocked_out,

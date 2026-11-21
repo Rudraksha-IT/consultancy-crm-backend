@@ -110,7 +110,7 @@ class TestAddLead:
         student_id = add_lead(abc.client).json()["id"]
 
         with tenant_context(abc.consultancy):
-            stored = Student.objects.get(pk=student_id)
+            stored = Student.objects.get(public_id=student_id)
         assert stored.stage == Stage.LEAD
         assert stored.phone == "9819988776"
         assert stored.email == "anish@gmail.test"
@@ -180,10 +180,10 @@ class TestAddLead:
         abc.log_in_as(Role.FRONT_DESK)
         counsellor = add_counsellor(abc, "bikash@abc.test")
 
-        response = add_lead(abc.client, assigned_counsellor=counsellor.pk)
+        response = add_lead(abc.client, assigned_counsellor=str(counsellor.public_id))
 
         assert response.json()["assigned_counsellor"] == {
-            "id": counsellor.pk,
+            "id": str(counsellor.public_id),
             "name": counsellor.name,
         }
 
@@ -191,10 +191,10 @@ class TestAddLead:
         abc.log_in_as(Role.FRONT_DESK)
         admin = abc.add_staff(Role.ADMIN)
 
-        response = add_lead(abc.client, assigned_counsellor=admin.pk)
+        response = add_lead(abc.client, assigned_counsellor=str(admin.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.json()["assigned_counsellor"]["id"] == admin.pk
+        assert response.json()["assigned_counsellor"]["id"] == str(admin.public_id)
 
     def test_no_counsellor_can_be_sent_as_null(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
@@ -209,7 +209,9 @@ class TestAddLead:
     ) -> None:
         desk = abc.log_in_as(Role.FRONT_DESK)
 
-        student_id = add_lead(abc.client).json()["id"]
+        public_id = add_lead(abc.client).json()["id"]
+        with tenant_context(abc.consultancy):
+            student_id = Student.objects.get(public_id=public_id).pk
 
         line = json_logs.only(f"Student added: student_id={student_id}, by_staff_id={desk.pk}")
         assert line["level"] == "INFO"
@@ -476,7 +478,7 @@ class TestAssignedCounsellorChoice:
         abc.log_in_as(Role.ADMIN)
         not_a_counsellor = abc.add_staff(role, email=f"other-{role.value}@abc.test")
 
-        response = add_lead(abc.client, assigned_counsellor=not_a_counsellor.pk)
+        response = add_lead(abc.client, assigned_counsellor=str(not_a_counsellor.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "assigned_counsellor" in response.json()
@@ -490,7 +492,7 @@ class TestAssignedCounsellorChoice:
         with tenant_context(abc.consultancy):
             Staff.objects.filter(pk=counsellor.pk).update(status=status_)
 
-        response = add_lead(abc.client, assigned_counsellor=counsellor.pk)
+        response = add_lead(abc.client, assigned_counsellor=str(counsellor.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "assigned_counsellor" in response.json()
@@ -580,14 +582,14 @@ class TestStudentList:
         row = abc.client.get(STUDENTS_URL).json()["results"][0]
 
         assert row == {
-            "id": student.pk,
+            "id": str(student.public_id),
             "name": "Sita Karki",
             "phone": "9841234567",
             "email": "sita@x.test",
             "country": "australia",
             "source": "walk_in",
             "stage": "lead",
-            "assigned_counsellor": {"id": counsellor.pk, "name": counsellor.name},
+            "assigned_counsellor": {"id": str(counsellor.public_id), "name": counsellor.name},
         }
 
     def test_the_list_is_paginated(self, abc: ConsultancyContext) -> None:
@@ -698,7 +700,7 @@ class TestFilters:
         make_student(abc, "Bikash's", counsellor=bikash)
         make_student(abc, "Anjali's", counsellor=anjali)
 
-        response = abc.client.get(STUDENTS_URL, {"counsellor": str(anjali.pk)})
+        response = abc.client.get(STUDENTS_URL, {"counsellor": str(anjali.public_id)})
 
         assert names_in(response) == ["Anjali's"]
 
@@ -711,7 +713,7 @@ class TestFilters:
         with tenant_context(abc.consultancy):
             Staff.objects.filter(pk=gone.pk).update(status=StaffStatus.DEACTIVATED)
 
-        response = abc.client.get(STUDENTS_URL, {"counsellor": str(gone.pk)})
+        response = abc.client.get(STUDENTS_URL, {"counsellor": str(gone.public_id)})
 
         assert names_in(response) == ["Left behind"]
 
@@ -788,7 +790,9 @@ class TestFilters:
         abc.log_in_as(Role.ADMIN)
         make_student(abc, "Someone")
 
-        response = abc.client.get(STUDENTS_URL, {"counsellor": "99999"})
+        response = abc.client.get(
+            STUDENTS_URL, {"counsellor": "00000000-0000-4000-8000-000000000001"}
+        )
 
         assert response.status_code == status.HTTP_200_OK
         assert names_in(response) == []

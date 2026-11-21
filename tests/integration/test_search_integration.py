@@ -143,11 +143,11 @@ class TestFindingStudents:
         assert rows == [
             {
                 "kind": "student",
-                "id": sita.pk,
+                "id": str(sita.public_id),
                 "name": "Sita Karki",
                 "phone": "9841000001",
                 "stage": "counselling",
-                "assigned_counsellor": {"id": counsellor.pk, "name": "Ram Shrestha"},
+                "assigned_counsellor": {"id": str(counsellor.public_id), "name": "Ram Shrestha"},
             },
             {
                 "kind": "student",
@@ -193,7 +193,7 @@ class TestFindingClasses:
         body = searched(abc, {"q": "ielts"}).json()
 
         assert body["batches"] == [
-            {"id": morning.pk, "name": "IELTS Morning", "time_slot": "7:00-8:30 AM"}
+            {"id": str(morning.public_id), "name": "IELTS Morning", "time_slot": "7:00-8:30 AM"}
         ]
 
     def test_at_most_five_classes(self, abc: ConsultancyContext) -> None:
@@ -259,9 +259,9 @@ class TestTeachers:
         assert rows == [
             {
                 "kind": "class_student",
-                "id": mine.pk,
+                "id": str(mine.public_id),
                 "name": "Sita Mine",
-                "batch": {"id": first.pk, "name": "IELTS Morning"},
+                "batch": {"id": str(first.public_id), "name": "IELTS Morning"},
             }
         ]
 

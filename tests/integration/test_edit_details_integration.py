@@ -73,7 +73,7 @@ def body(office: ConsultancyContext, student: Student, **changes: object) -> dic
         stored = Student.objects.get(pk=student.pk)
         records = [
             {
-                "id": r.pk,
+                "id": str(r.public_id),
                 "level": r.level,
                 "institution": r.institution,
                 "finished_year": r.finished_year,
@@ -83,7 +83,7 @@ def body(office: ConsultancyContext, student: Student, **changes: object) -> dic
         ]
         scores = [
             {
-                "id": s.pk,
+                "id": str(s.public_id),
                 "test": s.test,
                 "overall": str(s.overall),
                 "taken_on": None if s.taken_on is None else s.taken_on.isoformat(),
@@ -93,7 +93,7 @@ def body(office: ConsultancyContext, student: Student, **changes: object) -> dic
         ]
         jobs = [
             {
-                "id": j.pk,
+                "id": str(j.public_id),
                 "employer": j.employer,
                 "job_title": j.job_title,
                 "started_on": j.started_on.strftime("%Y-%m"),
@@ -119,7 +119,7 @@ def save(
     return office.client.put(details_url(student), payload, format="json")
 
 
-def add_rows(office: ConsultancyContext, student: Student) -> tuple[int, int, int]:
+def add_rows(office: ConsultancyContext, student: Student) -> tuple[str, str, str]:
     """Give the Student one qualification, one test score and one job; return their ids."""
     with tenant_context(office.consultancy):
         record = AcademicRecord.objects.create(
@@ -129,7 +129,7 @@ def add_rows(office: ConsultancyContext, student: Student) -> tuple[int, int, in
         job = WorkExperience.objects.create(
             student=student, employer="Bir Hospital", job_title="Nurse", started_on=date(2023, 1, 1)
         )
-    return record.pk, score.pk, job.pk
+    return str(record.public_id), str(score.public_id), str(job.public_id)
 
 
 def a_record(**changes: object) -> dict[str, object]:
@@ -212,7 +212,7 @@ class TestSavingEverythingTogether:
         assert job_id in [j["id"] for j in answer["work_experience"]]
         assert answer["details_version"] == 2
         with tenant_context(abc.consultancy):
-            assert not StoredScore.objects.filter(pk=score_id).exists()
+            assert not StoredScore.objects.filter(public_id=score_id).exists()
 
     def test_a_save_with_nothing_changed_is_fine(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -247,7 +247,7 @@ class TestSavingEverythingTogether:
             stored = Student.objects.get(pk=student.pk)
             assert stored.name == "Sita Gurung"
             assert stored.details_version == 1
-            assert AcademicRecord.objects.filter(pk=record_id).exists()
+            assert AcademicRecord.objects.filter(public_id=record_id).exists()
             assert stored.work_experience.count() == 1
 
     def test_a_refused_row_is_reported_beside_that_row_and_saves_nothing(
@@ -614,7 +614,7 @@ class TestRefusedInput:
             "academic_records": ["A row here isn't one of this Student's. Refresh the page."]
         }
         with tenant_context(abc.consultancy):
-            assert AcademicRecord.objects.get(pk=record_id).institution == "Trinity College"
+            assert AcademicRecord.objects.get(public_id=record_id).institution == "Trinity College"
 
     def test_the_same_row_cannot_be_sent_twice(
         self, abc: ConsultancyContext, student: Student

@@ -41,10 +41,13 @@ PLATFORM_REFUSED = {
 PRIVATE_TEXT = "Sita's visa interview is moved to Thursday 10am"
 
 
-def conversation_url(person: Staff | int) -> str:
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
+
+def conversation_url(person: Staff | str) -> str:
     """Where the conversation with `person` is read and written."""
-    pk = person if isinstance(person, int) else person.pk
-    return f"/api/inbox/{pk}/"
+    person_id = person if isinstance(person, str) else person.public_id
+    return f"/api/inbox/{person_id}/"
 
 
 @pytest.fixture
@@ -138,7 +141,7 @@ class TestSending:
 
     def test_an_unknown_person_is_not_found(self, people: Office) -> None:
         response = people.as_(people.sita).client.post(
-            conversation_url(99999), {"text": "Hi"}, format="json"
+            conversation_url(SOME_UUID), {"text": "Hi"}, format="json"
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -269,7 +272,7 @@ class TestConversations:
         [conversation] = people.as_(people.sita).client.get(INBOX_URL).json()["conversations"]
 
         assert conversation["person"] == {
-            "id": people.admin.pk,
+            "id": str(people.admin.public_id),
             "name": "Nabin Adhikari",
             "job_title": "",
             "has_left": False,
@@ -342,7 +345,7 @@ class TestConversations:
     def test_an_unknown_or_own_conversation_is_not_found(self, people: Office) -> None:
         client = people.as_(people.sita).client
 
-        assert client.get(conversation_url(99999)).status_code == status.HTTP_404_NOT_FOUND
+        assert client.get(conversation_url(SOME_UUID)).status_code == status.HTTP_404_NOT_FOUND
         assert client.get(conversation_url(people.sita)).status_code == status.HTTP_404_NOT_FOUND
 
     def test_logged_out_is_refused(self, people: Office) -> None:
@@ -363,14 +366,14 @@ class TestCheck:
         answer = people.as_(people.sita).client.get(CHECK_URL).json()
 
         assert answer["unread"] == 2
-        assert answer["latest"] == people.messages()[-1].pk
+        assert answer["latest"] == str(people.messages()[-1].public_id)
 
     def test_my_own_messages_are_not_unread_for_me(self, people: Office) -> None:
         people.send(people.sita, people.admin)
 
         answer = people.as_(people.sita).client.get(CHECK_URL).json()
 
-        assert answer == {"unread": 0, "latest": people.messages()[0].pk}
+        assert answer == {"unread": 0, "latest": str(people.messages()[0].public_id)}
 
     def test_nothing_yet(self, people: Office) -> None:
         assert people.as_(people.sita).client.get(CHECK_URL).json() == {
@@ -429,9 +432,7 @@ class TestPrivacy:
 
         assert people.as_(people.bikash).client.get(CHECK_URL).json()["unread"] == 1
 
-    @pytest.mark.parametrize(
-        "url", [INBOX_URL, CHECK_URL, PEOPLE_URL, conversation_url(1), conversation_url(2)]
-    )
+    @pytest.mark.parametrize("url", [INBOX_URL, CHECK_URL, PEOPLE_URL, conversation_url(SOME_UUID)])
     def test_a_platform_admin_in_support_access_is_refused(
         self, people: Office, platform_site: PlatformContext, url: str
     ) -> None:

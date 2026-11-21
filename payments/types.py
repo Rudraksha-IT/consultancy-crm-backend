@@ -2,18 +2,42 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from uuid import UUID
 
+from fee_types.models import FeeType
 from payments.models import PaymentMethod
 
 
 @dataclass(frozen=True)
 class NewPayment:
-    """A Payment to record: whole NPR, the day it was paid (AD), how, and what it was for."""
+    """A Payment to record: whole NPR, the day it was paid (AD), how, its Fee Type and note."""
 
     amount: int
     paid_on: date
     method: PaymentMethod
-    purpose: str
+    fee_type: FeeType
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class PaymentLine:
+    """One line of a visit's Payments: whole NPR for one Fee Type, with its note."""
+
+    fee_type: FeeType
+    amount: int
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class NewPayments:
+    """One visit's money (spec 73): the day it was paid (AD), how, and a Payment per line.
+
+    The lines are saved together, all or none, and share one receipt.
+    """
+
+    paid_on: date
+    method: PaymentMethod
+    lines: tuple[PaymentLine, ...]
 
 
 @dataclass(frozen=True)
@@ -22,6 +46,6 @@ class PaymentFilters:
 
     paid_from: date | None = None
     paid_to: date | None = None
-    student_id: int | None = None
-    purpose: str = ""
+    student_id: UUID | None = None  # the Student's public id (ADR 0027)
+    fee_type_id: UUID | None = None  # the Fee Type's public id
     query: str = ""

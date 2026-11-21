@@ -95,7 +95,7 @@ class SupportResetCodeView(_PlatformVisitorView):
     def post(self, request: Request, staff_id: int) -> Response:
         """Send the Code, or 400 when they haven't joined or too many were sent."""
         staff = get_object_or_404(Staff, pk=staff_id)
-        office = str(get_request_consultancy(request).name)
+        office = get_request_consultancy(request)
         try:
             send_reset_code_to(staff, office, by=get_request_platform_visitor(request))
         except EmployeeChangeRefusedError as error:

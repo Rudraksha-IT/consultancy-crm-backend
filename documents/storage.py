@@ -1,4 +1,4 @@
-"""Where Document files are kept: private S3 (MinIO locally), behind one small interface.
+"""Where Document files are kept: private S3-compatible storage (R2; MinIO locally).
 
 Nothing is public. A file is reached only through a signed link that expires in minutes, issued
 by `documents.services` after a permission check (spec 70). Tests swap the storage for a fake by
@@ -87,9 +87,9 @@ def content_disposition(file_name: str, *, as_attachment: bool) -> str:
 class S3DocumentStorage:
     """Private S3 storage.
 
-    Locally the S3 endpoint is MinIO, with a second, public endpoint for signing links the
-    browser can reach; in AWS both are S3 itself and the server's IAM role gives the access (no
-    keys in settings).
+    In production both endpoints are Cloudflare R2 with an R2 token's keys from the env file
+    (ADR 0025); locally the endpoint is MinIO, with a second, public endpoint for signing links
+    the browser can reach.
     """
 
     def __init__(self) -> None:

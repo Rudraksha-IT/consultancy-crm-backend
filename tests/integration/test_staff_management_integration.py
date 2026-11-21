@@ -44,17 +44,17 @@ INJECTION_STRINGS = [
 ]
 
 
-def staff_url(staff_id: int) -> str:
+def staff_url(staff_id: object) -> str:
     """One employee."""
     return f"{STAFF_URL}{staff_id}/"
 
 
-def deactivate_url(staff_id: int) -> str:
+def deactivate_url(staff_id: object) -> str:
     """Deactivate one employee."""
     return f"{STAFF_URL}{staff_id}/deactivate/"
 
 
-def invite_url(staff_id: int) -> str:
+def invite_url(staff_id: object) -> str:
     """Send again or cancel one employee's invite."""
     return f"{STAFF_URL}{staff_id}/invite/"
 
@@ -96,10 +96,10 @@ def emailed_code(index: int = -1) -> str:
     return found.group(1)
 
 
-def stored(consultancy: ConsultancyContext, staff_id: int) -> Staff | None:
+def stored(consultancy: ConsultancyContext, staff_id: str) -> Staff | None:
     """The Staff member as stored, or None if removed."""
     with tenant_context(consultancy.consultancy):
-        return Staff.objects.filter(pk=staff_id).first()
+        return Staff.objects.filter(public_id=staff_id).first()
 
 
 def logged_in_client(consultancy: ConsultancyContext, staff: Staff) -> APIClient:
@@ -136,11 +136,13 @@ class TestList:
 
     def test_shows_who_has_left(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
         rows = abc.client.get(STAFF_URL).json()
 
-        assert [r["status"] for r in rows if r["id"] == counsellor.pk] == ["deactivated"]
+        assert [r["status"] for r in rows if r["id"] == str(counsellor.public_id)] == [
+            "deactivated"
+        ]
 
     def test_platform_admins_never_appear(
         self, abc: ConsultancyContext, platform_site: PlatformContext
@@ -169,17 +171,17 @@ class TestPermissions:
         answers = [
             abc.client.get(STAFF_URL),
             invite(abc.client),
-            abc.client.patch(staff_url(other.pk), {"role": "admin"}, format="json"),
-            abc.client.post(deactivate_url(other.pk)),
-            abc.client.post(invite_url(other.pk)),
-            abc.client.delete(invite_url(other.pk)),
+            abc.client.patch(staff_url(other.public_id), {"role": "admin"}, format="json"),
+            abc.client.post(deactivate_url(other.public_id)),
+            abc.client.post(invite_url(other.public_id)),
+            abc.client.delete(invite_url(other.public_id)),
         ]
 
         assert [a.status_code for a in answers] == [status.HTTP_403_FORBIDDEN] * len(answers)
         assert answers[0].json() == ONLY_ADMIN
         assert mail.outbox == []
-        assert stored(abc, other.pk) is not None
-        assert stored(abc, other.pk).role == Role.COUNSELLOR  # type: ignore[union-attr]
+        assert stored(abc, str(other.public_id)) is not None
+        assert stored(abc, str(other.public_id)).role == Role.COUNSELLOR  # type: ignore[union-attr]
 
     def test_logged_out_callers_are_refused(self, abc: ConsultancyContext) -> None:
         client = abc.new_client()
@@ -287,7 +289,8 @@ class TestInvite:
     def test_the_invite_is_logged_with_ids_only(
         self, abc: ConsultancyContext, admin: Staff, json_logs: JsonLogs
     ) -> None:
-        staff_id = invite(abc.client).json()["id"]
+        with tenant_context(abc.consultancy):  # logs keep the number
+            staff_id = Staff.objects.get(public_id=invite(abc.client).json()["id"]).pk
 
         entry = json_logs.only(f"Employee invited: staff_id={staff_id}, by_staff_id={admin.pk}")
         assert entry["level"] == "INFO"
@@ -354,13 +357,13 @@ class TestResendAndCancelInvite:
     ) -> None:
         joined = abc.add_staff(Role.COUNSELLOR)
 
-        resend = abc.client.post(invite_url(joined.pk))
-        cancel = abc.client.delete(invite_url(joined.pk))
+        resend = abc.client.post(invite_url(joined.public_id))
+        cancel = abc.client.delete(invite_url(joined.public_id))
 
         assert resend.status_code == status.HTTP_400_BAD_REQUEST
         assert cancel.status_code == status.HTTP_400_BAD_REQUEST
         assert resend.json() == {"detail": "Only someone who hasn't joined yet has an invite."}
-        assert stored(abc, joined.pk) is not None
+        assert stored(abc, str(joined.public_id)) is not None
         assert mail.outbox == []
 
     def test_unknown_ids_are_not_found(self, abc: ConsultancyContext) -> None:
@@ -374,7 +377,9 @@ class TestChangeRole:
         counsellor = abc.add_staff(Role.COUNSELLOR)
         their_client = logged_in_client(abc, counsellor)
 
-        response = abc.client.patch(staff_url(counsellor.pk), {"role": "admin"}, format="json")
+        response = abc.client.patch(
+            staff_url(counsellor.public_id), {"role": "admin"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["role"] == "admin"
@@ -391,17 +396,21 @@ class TestChangeRole:
     def test_an_admin_cannot_change_their_own_role(
         self, abc: ConsultancyContext, admin: Staff
     ) -> None:
-        response = abc.client.patch(staff_url(admin.pk), {"role": "counsellor"}, format="json")
+        response = abc.client.patch(
+            staff_url(admin.public_id), {"role": "counsellor"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "You can't change your own Role or account."}
-        assert stored(abc, admin.pk).role == Role.ADMIN  # type: ignore[union-attr]
+        assert stored(abc, str(admin.public_id)).role == Role.ADMIN  # type: ignore[union-attr]
 
     def test_someone_who_has_left_cannot_be_changed(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
-        response = abc.client.patch(staff_url(counsellor.pk), {"role": "admin"}, format="json")
+        response = abc.client.patch(
+            staff_url(counsellor.public_id), {"role": "admin"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "This person has left the office."}
@@ -409,7 +418,9 @@ class TestChangeRole:
     def test_teacher_is_refused_while_classes_are_off(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.patch(staff_url(counsellor.pk), {"role": "teacher"}, format="json")
+        response = abc.client.patch(
+            staff_url(counsellor.public_id), {"role": "teacher"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"role": ["Teachers need the test-prep classes feature."]}
@@ -419,7 +430,9 @@ class TestChangeRole:
     ) -> None:
         teacher = abc.add_staff(Role.TEACHER)
 
-        response = abc.client.patch(staff_url(teacher.pk), {"role": "teacher"}, format="json")
+        response = abc.client.patch(
+            staff_url(teacher.public_id), {"role": "teacher"}, format="json"
+        )
 
         assert response.status_code == status.HTTP_200_OK
 
@@ -428,7 +441,7 @@ class TestChangeRole:
     ) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        abc.client.patch(staff_url(counsellor.pk), {"role": "admin"}, format="json")
+        abc.client.patch(staff_url(counsellor.public_id), {"role": "admin"}, format="json")
 
         json_logs.only(
             f"Employee role changed: staff_id={counsellor.pk}, role=admin, by_staff_id={admin.pk}"
@@ -445,7 +458,7 @@ class TestDeactivate:
     def test_deactivated_staff_cannot_log_in(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.post(deactivate_url(counsellor.pk))
+        response = abc.client.post(deactivate_url(counsellor.public_id))
         login = abc.new_client().post(
             LOGIN_URL, {"email": counsellor.email, "password": TEST_PASSWORD}, format="json"
         )
@@ -459,7 +472,7 @@ class TestDeactivate:
         tokens = abc.tokens_for(counsellor)
         their_client = logged_in_client(abc, counsellor)
 
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
         assert their_client.get(CONTEXT_URL).status_code == status.HTTP_401_UNAUTHORIZED
         refresh = abc.new_client().post(REFRESH_URL, {"refresh": tokens.refresh}, format="json")
@@ -468,9 +481,9 @@ class TestDeactivate:
     def test_their_name_and_record_are_kept(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
-        kept = stored(abc, counsellor.pk)
+        kept = stored(abc, str(counsellor.public_id))
         assert kept is not None
         assert kept.name == counsellor.name
         assert kept.status == StaffStatus.DEACTIVATED
@@ -478,7 +491,7 @@ class TestDeactivate:
     def test_an_admin_cannot_deactivate_themselves(
         self, abc: ConsultancyContext, admin: Staff
     ) -> None:
-        response = abc.client.post(deactivate_url(admin.pk))
+        response = abc.client.post(deactivate_url(admin.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert abc.client.get(CONTEXT_URL).status_code == status.HTTP_200_OK
@@ -495,15 +508,15 @@ class TestDeactivate:
         self, abc: ConsultancyContext
     ) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
-        response = abc.client.post(deactivate_url(counsellor.pk))
+        response = abc.client.post(deactivate_url(counsellor.public_id))
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_they_get_no_password_reset_code(self, abc: ConsultancyContext) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
         abc.new_client().post("/api/auth/password-reset/", {"email": counsellor.email})
 
@@ -514,7 +527,7 @@ class TestDeactivate:
     ) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        abc.client.post(deactivate_url(counsellor.pk))
+        abc.client.post(deactivate_url(counsellor.public_id))
 
         json_logs.only(f"Employee deactivated: staff_id={counsellor.pk}, by_staff_id={admin.pk}")
 
@@ -536,8 +549,8 @@ class TestCounsellorChoices:
 
         assert response.status_code == status.HTTP_200_OK
         ids = {row["id"] for row in response.json()}
-        assert {admin.pk, counsellor.pk} <= ids
-        assert left.pk not in ids
+        assert {str(admin.public_id), str(counsellor.public_id)} <= ids
+        assert str(left.public_id) not in ids
         assert all(set(row) == {"id", "name", "role"} for row in response.json())
         assert all(row["role"] in {"admin", "counsellor"} for row in response.json())
 
@@ -573,9 +586,9 @@ class TestRefusedInput:
     ) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
         path = {
-            "staff": staff_url(counsellor.pk),
-            "deactivate": deactivate_url(counsellor.pk),
-            "invite": invite_url(counsellor.pk),
+            "staff": staff_url(counsellor.public_id),
+            "deactivate": deactivate_url(counsellor.public_id),
+            "invite": invite_url(counsellor.public_id),
         }.get(url, url)
 
         response = getattr(abc.client, method)(path)
@@ -659,12 +672,12 @@ class TestRefusedInput:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
         response = abc.client.patch(
-            staff_url(counsellor.pk), {"role": "admin", "email": "x@y.test"}, format="json"
+            staff_url(counsellor.public_id), {"role": "admin", "email": "x@y.test"}, format="json"
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": ["Unknown field."]}
-        assert stored(abc, counsellor.pk).role == Role.COUNSELLOR  # type: ignore[union-attr]
+        assert stored(abc, str(counsellor.public_id)).role == Role.COUNSELLOR  # type: ignore[union-attr]
 
     @pytest.mark.parametrize("body", [[], "admin", None, {"role": None}, {}])
     def test_bad_role_change_bodies_are_refused(
@@ -672,7 +685,7 @@ class TestRefusedInput:
     ) -> None:
         counsellor = abc.add_staff(Role.COUNSELLOR)
 
-        response = abc.client.patch(staff_url(counsellor.pk), body, format="json")
+        response = abc.client.patch(staff_url(counsellor.public_id), body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 

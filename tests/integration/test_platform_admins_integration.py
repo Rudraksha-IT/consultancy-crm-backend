@@ -8,6 +8,7 @@ login then follows the usual rules.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -112,7 +113,7 @@ class TestList:
 
         assert rows == [
             {
-                "id": me.pk,
+                "id": str(me.public_id),
                 "name": me.name,
                 "email": me.email,
                 "status": "active",
@@ -121,7 +122,7 @@ class TestList:
                 "is_me": True,
             },
             {
-                "id": stored(NEW_EMAIL).pk,
+                "id": str(stored(NEW_EMAIL).public_id),
                 "name": NEW_NAME,
                 "email": NEW_EMAIL,
                 "status": "invited",
@@ -355,7 +356,7 @@ class TestResend:
         invite(platform_site.client)
         admin = stored(NEW_EMAIL)
 
-        response = post(platform_site.client, f"{ADMINS_URL}{admin.pk}/resend/")
+        response = post(platform_site.client, f"{ADMINS_URL}{admin.public_id}/resend/")
 
         assert response.status_code == status.HTTP_200_OK
         assert len(mail.outbox) == 2
@@ -363,13 +364,13 @@ class TestResend:
     def test_refused_for_someone_who_has_joined(
         self, platform_site: PlatformContext, me: PlatformAdmin
     ) -> None:
-        response = post(platform_site.client, f"{ADMINS_URL}{me.pk}/resend/")
+        response = post(platform_site.client, f"{ADMINS_URL}{me.public_id}/resend/")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert mail.outbox == []
 
     def test_unknown_is_not_found(self, platform_site: PlatformContext, me: PlatformAdmin) -> None:
-        assert post(platform_site.client, f"{ADMINS_URL}99999/resend/").status_code == 404
+        assert post(platform_site.client, f"{ADMINS_URL}{uuid.uuid4()}/resend/").status_code == 404
 
 
 class TestDeactivate:
@@ -380,7 +381,7 @@ class TestDeactivate:
         session = platform_site.new_client()
         use_access_token(session, platform_site.tokens_for(other).access)
 
-        response = post(platform_site.client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        response = post(platform_site.client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "deactivated"
@@ -397,14 +398,14 @@ class TestDeactivate:
         invite(platform_site.client)
         code = emailed_code()
 
-        post(platform_site.client, f"{ADMINS_URL}{stored(NEW_EMAIL).pk}/deactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{stored(NEW_EMAIL).public_id}/deactivate/")
 
         assert join(platform_site, code).json() == CODE_REFUSED
 
     def test_never_yourself(self, platform_site: PlatformContext, me: PlatformAdmin) -> None:
         platform_site.add_admin(email="other@platform.test")
 
-        response = post(platform_site.client, f"{ADMINS_URL}{me.pk}/deactivate/")
+        response = post(platform_site.client, f"{ADMINS_URL}{me.public_id}/deactivate/")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "You can't deactivate yourself."}
@@ -419,7 +420,7 @@ class TestDeactivate:
         client = platform_site.new_client()
         use_access_token(client, platform_site.tokens_for(other).access)
 
-        response = post(client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        response = post(client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert stored(other.email).is_active
@@ -428,9 +429,9 @@ class TestDeactivate:
         self, platform_site: PlatformContext, me: PlatformAdmin
     ) -> None:
         other = platform_site.add_admin(email="other@platform.test")
-        post(platform_site.client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
-        response = post(platform_site.client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        response = post(platform_site.client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -460,7 +461,7 @@ class TestWhoCan:
         client = platform_site.client
         assert client.put(ADMINS_URL, {}, format="json").status_code == 405
         assert client.delete(ADMINS_URL).status_code == 405
-        assert client.get(f"{ADMINS_URL}{me.pk}/deactivate/").status_code == 405
+        assert client.get(f"{ADMINS_URL}{me.public_id}/deactivate/").status_code == 405
         assert client.get(JOIN_COMPLETE_URL).status_code == 405
 
 
@@ -471,9 +472,9 @@ class TestReactivate:
         self, platform_site: PlatformContext, me: PlatformAdmin
     ) -> None:
         other = platform_site.add_admin(email="other@platform.test")
-        post(platform_site.client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
-        response = post(platform_site.client, f"{ADMINS_URL}{other.pk}/reactivate/")
+        response = post(platform_site.client, f"{ADMINS_URL}{other.public_id}/reactivate/")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "active"
@@ -490,9 +491,9 @@ class TestReactivate:
         invite(platform_site.client)
         old = emailed_code()
         rita = stored(NEW_EMAIL)
-        post(platform_site.client, f"{ADMINS_URL}{rita.pk}/deactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{rita.public_id}/deactivate/")
 
-        response = post(platform_site.client, f"{ADMINS_URL}{rita.pk}/reactivate/")
+        response = post(platform_site.client, f"{ADMINS_URL}{rita.public_id}/reactivate/")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["status"] == "invited"
@@ -507,12 +508,12 @@ class TestReactivate:
         self, platform_site: PlatformContext, me: PlatformAdmin, who: str
     ) -> None:
         if who == "me":
-            target = me.pk
+            target = me.public_id
         elif who == "active":
-            target = platform_site.add_admin(email="other@platform.test").pk
+            target = platform_site.add_admin(email="other@platform.test").public_id
         else:
             invite(platform_site.client)
-            target = stored(NEW_EMAIL).pk
+            target = stored(NEW_EMAIL).public_id
         mail.outbox.clear()
 
         response = post(platform_site.client, f"{ADMINS_URL}{target}/reactivate/")
@@ -526,8 +527,12 @@ class TestReactivate:
     def test_unknown_is_not_found_and_only_post(
         self, platform_site: PlatformContext, me: PlatformAdmin
     ) -> None:
-        assert post(platform_site.client, f"{ADMINS_URL}99999/reactivate/").status_code == 404
-        assert platform_site.client.get(f"{ADMINS_URL}{me.pk}/reactivate/").status_code == 405
+        assert (
+            post(platform_site.client, f"{ADMINS_URL}{uuid.uuid4()}/reactivate/").status_code == 404
+        )
+        assert (
+            platform_site.client.get(f"{ADMINS_URL}{me.public_id}/reactivate/").status_code == 405
+        )
 
     def test_nobody_logged_in_and_staff_are_refused(
         self, platform_site: PlatformContext, make_consultancy: ConsultancyFactory
@@ -541,7 +546,7 @@ class TestReactivate:
         use_access_token(staff_on_platform, access)
 
         for client in (platform_site.new_client(), staff_on_platform, abc.client):
-            assert post(client, f"{ADMINS_URL}{admin.pk}/reactivate/").status_code in {
+            assert post(client, f"{ADMINS_URL}{admin.public_id}/reactivate/").status_code in {
                 401,
                 403,
                 404,
@@ -552,9 +557,9 @@ class TestReactivate:
         self, platform_site: PlatformContext, me: PlatformAdmin, json_logs: JsonLogs
     ) -> None:
         other = platform_site.add_admin(email="other@platform.test")
-        post(platform_site.client, f"{ADMINS_URL}{other.pk}/deactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{other.public_id}/deactivate/")
 
-        post(platform_site.client, f"{ADMINS_URL}{other.pk}/reactivate/")
+        post(platform_site.client, f"{ADMINS_URL}{other.public_id}/reactivate/")
 
         assert json_logs.with_message(
             f"Platform Admin reactivated: platform_admin_id={other.pk}, "

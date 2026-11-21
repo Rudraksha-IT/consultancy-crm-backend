@@ -9,19 +9,18 @@ from typing import Any
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.serializers import StrictSerializer
-from payments.models import MAX_AMOUNT, PURPOSE_MAX_LENGTH, PaymentMethod
+from config.serializers import RecordIdField, StrictSerializer
+from fee_types.serializers import FeeTypeField, NoteField, check_fee_type_and_note
+from payments.models import MAX_AMOUNT, MAX_RECEIPT_LINES, PaymentMethod
 from payments.money import format_npr
-from payments.types import NewPayment, PaymentFilters
-from staff.serializers import PlainTextField
+from payments.types import NewPayment, NewPayments, PaymentFilters, PaymentLine
 from students.serializers import StrictChoiceField
 
 AMOUNT_MESSAGE = f"Enter a whole amount from NPR 1 to {format_npr(MAX_AMOUNT)}."
 EARLIEST_PAID_ON = date(2000, 1, 1)
 PAID_ON_MESSAGE = "Enter a date from 1 Jan 2000 to today."
 METHOD_MESSAGE = "Choose how they paid."
-PURPOSE_MESSAGE = "Say what the payment is for."
-PURPOSE_LENGTH_MESSAGE = f"Use at most {PURPOSE_MAX_LENGTH} characters."
+LINES_MESSAGE = f"Add 1 to {MAX_RECEIPT_LINES} lines, each with a Fee Type and an amount."
 FILTER_DATE_MESSAGE = "Enter a date as YYYY-MM-DD."
 DATE_ORDER_MESSAGE = "Choose an end date on or after the start date."
 # The longest search the Payments list takes (a name, a phone or a receipt number).
@@ -75,31 +74,29 @@ class PaidOnField(serializers.Field[date, str, str, Any]):
         return value.isoformat()
 
 
-class PurposeField(PlainTextField):
-    """What the Payment was for: one line of text, up to `PURPOSE_MAX_LENGTH` characters."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            max_length=PURPOSE_MAX_LENGTH,
-            error_messages={**_same_message(PURPOSE_MESSAGE), "max_length": PURPOSE_LENGTH_MESSAGE},
-        )
-
-    def to_internal_value(self, data: object) -> str:
-        """Refuse anything that isn't text with the same message as a missing purpose."""
-        if not isinstance(data, str):
-            self.fail("invalid")
-        return super().to_internal_value(data)
-
-
 class NewPaymentSerializer(StrictSerializer[None]):
-    """A Payment to record (spec 71). Who received it and when are never taken from the body."""
+    """A Payment to record, or its new details (spec 71, 75). Who and when never come from it.
+
+    The Fee Type must be offered (not hidden), unless an edit keeps the one the Payment has
+    (`kept_type_id`); Other needs a note.
+    """
 
     amount = AmountField()
     paid_on = PaidOnField()
     method = StrictChoiceField(
         choices=PaymentMethod.choices, error_messages=_same_message(METHOD_MESSAGE)
     )
-    purpose = PurposeField()
+    fee_type = FeeTypeField()
+    note = NoteField()
+
+    def __init__(self, *, data: object, kept_type_id: int | None = None) -> None:
+        super().__init__(data=data)
+        self.kept_type_id = kept_type_id
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Refuse a hidden Fee Type, and Other without a note."""
+        check_fee_type_and_note(attrs, kept_type_id=self.kept_type_id)
+        return attrs
 
     def to_new_payment(self) -> NewPayment:
         """Return the validated Payment."""
@@ -108,7 +105,77 @@ class NewPaymentSerializer(StrictSerializer[None]):
             amount=data["amount"],
             paid_on=data["paid_on"],
             method=PaymentMethod(data["method"]),
-            purpose=data["purpose"],
+            fee_type=data["fee_type"],
+            note=data.get("note", ""),
+        )
+
+
+class PaymentLineSerializer(StrictSerializer[None]):
+    """One line of a visit's Payments: its Fee Type (offered, not hidden), note and amount."""
+
+    amount = AmountField()
+    fee_type = FeeTypeField()
+    note = NoteField()
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Refuse a hidden Fee Type, and Other without a note."""
+        check_fee_type_and_note(attrs, kept_type_id=None)
+        return attrs
+
+
+class PaymentLinesField(serializers.Field[list[PaymentLine], object, object, Any]):
+    """1 to `MAX_RECEIPT_LINES` lines. A refused line's errors sit in its place (`{}` if fine)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            error_messages=dict.fromkeys(("required", "null", "invalid"), LINES_MESSAGE)
+        )
+
+    def to_internal_value(self, data: object) -> list[PaymentLine]:
+        """Return every line, or refuse them all when any one is wrong."""
+        if (
+            not isinstance(data, list)
+            or not 1 <= len(data) <= MAX_RECEIPT_LINES
+            or not all(isinstance(line, dict) for line in data)
+        ):
+            self.fail("invalid")
+        checked = [PaymentLineSerializer(data=line) for line in data]
+        valid = [line.is_valid() for line in checked]  # every line, so each error is named
+        if not all(valid):
+            raise serializers.ValidationError([line.errors for line in checked])
+        return [
+            PaymentLine(
+                fee_type=line.validated_data["fee_type"],
+                amount=line.validated_data["amount"],
+                note=line.validated_data.get("note", ""),
+            )
+            for line in checked
+        ]
+
+    def to_representation(self, value: list[PaymentLine]) -> object:
+        """Unused: answers are built by hand."""
+        raise NotImplementedError
+
+
+class NewPaymentsSerializer(StrictSerializer[None]):
+    """One visit's Payments (spec 73): its date and method, then lines.
+
+    Each line has a Fee Type, note and amount. Who and when never come from it.
+    """
+
+    paid_on = PaidOnField()
+    method = StrictChoiceField(
+        choices=PaymentMethod.choices, error_messages=_same_message(METHOD_MESSAGE)
+    )
+    lines = PaymentLinesField()
+
+    def to_new_payments(self) -> NewPayments:
+        """Return the validated visit."""
+        data = self.validated_data
+        return NewPayments(
+            paid_on=data["paid_on"],
+            method=PaymentMethod(data["method"]),
+            lines=tuple(data["lines"]),
         )
 
 
@@ -138,8 +205,8 @@ class PaymentListQuerySerializer(StrictSerializer[None]):
 
     to = FilterDateField()
     q = serializers.CharField(max_length=SEARCH_MAX_LENGTH, required=False, allow_blank=True)
-    student = serializers.IntegerField(min_value=1, max_value=2**31 - 1, required=False)
-    purpose = serializers.CharField(max_length=PURPOSE_MAX_LENGTH, required=False, allow_blank=True)
+    student = RecordIdField(required=False)
+    fee_type = RecordIdField(required=False)
     page = serializers.IntegerField(min_value=1, max_value=1_000_000, required=False)
 
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
@@ -160,7 +227,7 @@ class PaymentListQuerySerializer(StrictSerializer[None]):
             paid_from=data.get("from"),
             paid_to=data.get("to"),
             student_id=data.get("student"),
-            purpose=data.get("purpose", ""),
+            fee_type_id=data.get("fee_type"),
             query=data.get("q", ""),
         )
 

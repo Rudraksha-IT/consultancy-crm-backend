@@ -22,6 +22,9 @@ from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs, Pla
 from tests.integration.test_stage_and_counsellor_integration import INJECTION_STRINGS
 from tests.support_access import open_as_platform_admin
 
+# A record UUID that no office has (ADR 0027).
+SOME_UUID = "00000000-0000-4000-8000-000000000001"
+
 if TYPE_CHECKING:
     from rest_framework.response import _MonkeyPatchedResponse
     from rest_framework.test import APIClient
@@ -51,7 +54,7 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return office
 
 
-def network_url(pk: int) -> str:
+def network_url(pk: object) -> str:
     """One Office Network."""
     return f"{LIST_URL}{pk}/"
 
@@ -345,7 +348,7 @@ class TestRefused:
 
     def test_only_the_methods_needed_are_allowed(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
-        pk = add_stored(abc, "110.44.115.82/32").pk
+        pk = str(add_stored(abc, "110.44.115.82/32").public_id)
 
         assert abc.client.put(LIST_URL, GOOD_BODY, format="json").status_code == 405
         assert abc.client.delete(LIST_URL).status_code == 405
@@ -446,7 +449,7 @@ ENDPOINTS = [
     ("get", LIST_URL),
     ("post", LIST_URL),
     ("get", CURRENT_URL),
-    ("delete", network_url(1)),
+    ("delete", network_url(SOME_UUID)),
 ]
 
 

@@ -43,7 +43,7 @@ def add_office_admin(
     """
     if get_status(consultancy) == ConsultancyStatus.TERMINATED:
         raise AddAdminRefusedError(TERMINATED_IS_FINAL_MESSAGE)
-    office = Office(name=str(consultancy.name), join_link=join_link)
+    office = Office(consultancy=consultancy, join_link=join_link)
     with office_context(consultancy):
         staff = invite(NewStaff(name=name, email=email, role=Role.ADMIN), office)
     logger.info(

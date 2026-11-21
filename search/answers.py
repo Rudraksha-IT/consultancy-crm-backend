@@ -12,12 +12,12 @@ def student_result(student: Student) -> dict[str, object]:
     counsellor: Staff | None = student.assigned_counsellor
     return {
         "kind": "student",
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "phone": student.phone,
         "stage": student.stage,
         "assigned_counsellor": (
-            None if counsellor is None else {"id": counsellor.pk, "name": counsellor.name}
+            None if counsellor is None else {"id": counsellor.public_id, "name": counsellor.name}
         ),
     }
 
@@ -26,7 +26,7 @@ def class_student_result(student: Student) -> dict[str, object]:
     """A Student for their Teacher: only their name and the class they're in (spec 22)."""
     return {
         "kind": "class_student",
-        "id": student.pk,
+        "id": student.public_id,
         "name": student.name,
         "batch": {
             "id": getattr(student, "class_id", None),
@@ -37,4 +37,4 @@ def class_student_result(student: Student) -> dict[str, object]:
 
 def batch_result(batch: Batch) -> dict[str, object]:
     """A class by name with its time slot."""
-    return {"id": batch.pk, "name": batch.name, "time_slot": batch.time_slot}
+    return {"id": batch.public_id, "name": batch.name, "time_slot": batch.time_slot}

@@ -111,7 +111,7 @@ class TestSeeMyAccount:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {
-            "platform_admin": {"id": admin.pk, "name": admin.name, "email": admin.email}
+            "platform_admin": {"id": str(admin.public_id), "name": admin.name, "email": admin.email}
         }
 
 
@@ -127,7 +127,11 @@ class TestChangeName:
 
         assert response.status_code == status.HTTP_200_OK
         body = response.json()
-        assert body["platform_admin"] == {"id": admin.pk, "name": "Ramesh", "email": admin.email}
+        assert body["platform_admin"] == {
+            "id": str(admin.public_id),
+            "name": "Ramesh",
+            "email": admin.email,
+        }
         assert {"access", "refresh"} <= body.keys()
         assert stored(admin).name == "Ramesh"
         # A name change signs nobody out.

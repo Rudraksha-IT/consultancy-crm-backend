@@ -31,16 +31,18 @@ from batches.models import Attendance, Batch, BatchMembership, Mark, TestType
 from catalogue.models import Course, CourseLevel, Intake, University
 from commission.services import add_commission
 from commission.types import NewCommission
-from communication.models import Message, ProviderSettings
+from communication.models import Message
 from documents.files import PDF
 from documents.models import Document, DocumentFile, DocumentType
 from documents.services import add_document_type, check_document, upload_document
 from documents.types import NewDocument, NewDocumentType, NewFile
 from documents.verification import Verification
 from documents.visa_letters import NewVisaLetter, add_visa_letter
+from emails.types import OfficeDetails
 from expenses.models import ExpenseCategory, ExpenseMethod
 from expenses.services import add_expense
 from expenses.types import NewExpense
+from fee_types.models import FeeType
 from fees.models import Fee
 from fees.services import add_fee, change_fee, delete_fee
 from fees.types import NewFee
@@ -59,6 +61,7 @@ from staff.types import NewStaff, Office
 from students.journey import set_stage_by_hand, transfer_student
 from students.models import Source, Stage, Student
 from tasks.models import Task
+from tenancy.services import set_office_details
 from tests.conftest import ConsultancyContext, ConsultancyFactory, PlatformContext
 from tests.support_access import Visit, open_as_platform_admin
 from visits.models import Visit as OfficeVisit
@@ -68,16 +71,6 @@ from visits.services import log_follow_up
 NAME = "Platform Ops"
 MARKED_NAME = "Platform Ops (Platform Admin)"
 PDF_BYTES = b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n"
-SMS_SETTINGS = {
-    "sms_provider": "sparrow",
-    "sms_sender": "ABCEDU",
-    "sms_token": "v2_sparrow-secret-token-7Kq",
-    "email_host": "",
-    "email_port": 587,
-    "email_username": "",
-    "email_password": "",
-    "email_from": "",
-}
 
 
 @pytest.fixture
@@ -234,7 +227,7 @@ class TestMoney:
             amount=5000,
             paid_on=timezone.localdate(),
             method=PaymentMethod.CASH,
-            purpose="PTE class fee",
+            fee_type=FeeType.objects.get(name="PTE class"),
         )
         payment = record_payment(student, details, by=visitor)
         assert payment.recorded_by_id is None
@@ -254,10 +247,11 @@ class TestMoney:
         self, abc: ConsultancyContext, visitor: PlatformVisitor, inside: None
     ) -> None:
         student = make_student(abc)
-        fee = add_fee(student, NewFee(purpose="Visa processing", amount=40000), by=visitor)
+        visa = FeeType.objects.get(name="Visa fee")
+        fee = add_fee(student, NewFee(fee_type=visa, amount=40000), by=visitor)
         assert fee.added_by_id is None
         assert fee.added_by_name == MARKED_NAME
-        change_fee(fee.pk, NewFee(purpose="Visa processing", amount=45000), by=visitor)
+        change_fee(fee.pk, NewFee(fee_type=visa, amount=45000), by=visitor)
         delete_fee(fee.pk, by=visitor)
         entries = history(student)
         assert [entry.kind for entry in entries] == [
@@ -298,13 +292,14 @@ class TestMoney:
         self, abc: ConsultancyContext, visit: Visit
     ) -> None:
         student = make_student(abc)
+        with tenant_context(abc.consultancy):
+            pte = str(FeeType.objects.get(name="PTE class").public_id)
         response = visit.client.post(
-            f"/api/students/{student.pk}/payments/",
+            f"/api/students/{student.public_id}/payments/",
             {
-                "amount": 5000,
                 "paid_on": timezone.localdate().isoformat(),
                 "method": "cash",
-                "purpose": "PTE class fee",
+                "lines": [{"amount": 5000, "fee_type": pte}],
             },
             format="json",
         )
@@ -322,7 +317,7 @@ class TestTasks:
             {
                 "title": "Call Sita",
                 "due_on": (timezone.localdate() + timedelta(days=1)).isoformat(),
-                "assignee": counsellor.pk,
+                "assignee": str(counsellor.public_id),
             },
             format="json",
         )
@@ -348,7 +343,7 @@ class TestTasks:
             {
                 "title": "Own task",
                 "due_on": timezone.localdate().isoformat(),
-                "assignee": counsellor.pk,
+                "assignee": str(counsellor.public_id),
             },
             format="json",
         )
@@ -418,9 +413,9 @@ class TestDocuments:
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
         response = visit.client.post(
-            f"/api/students/{student.pk}/documents/",
+            f"/api/students/{student.public_id}/documents/",
             {
-                "document_type": str(passport.pk),
+                "document_type": str(passport.public_id),
                 "file": SimpleUploadedFile("passport.pdf", PDF_BYTES, "application/pdf"),
             },
             format="multipart",
@@ -430,7 +425,7 @@ class TestDocuments:
             document = Document.objects.get()
         assert document.uploaded_by_id is None
         assert document.uploaded_by_name == MARKED_NAME
-        checklist = visit.client.get(f"/api/students/{student.pk}/documents/").json()
+        checklist = visit.client.get(f"/api/students/{student.public_id}/documents/").json()
         held = [item["document"] for item in checklist["items"] if item["document"]]
         assert held[0]["uploaded_by"] == {"id": None, "name": MARKED_NAME}
         assert held[0]["files"][0]["uploaded_by"] == {"id": None, "name": MARKED_NAME}
@@ -439,11 +434,11 @@ class TestDocuments:
         student = make_student(abc)
         with tenant_context(abc.consultancy):
             passport = DocumentType.objects.get(name="Passport")
-        url = f"/api/students/{student.pk}/documents/"
+        url = f"/api/students/{student.public_id}/documents/"
         visit.client.post(
             url,
             {
-                "document_type": str(passport.pk),
+                "document_type": str(passport.public_id),
                 "file": SimpleUploadedFile("front.pdf", PDF_BYTES, "application/pdf"),
             },
             format="multipart",
@@ -452,7 +447,7 @@ class TestDocuments:
             document = Document.objects.get()
 
         response = visit.client.post(
-            f"{url}{document.pk}/files/",
+            f"{url}{document.public_id}/files/",
             {"file": SimpleUploadedFile("back.pdf", PDF_BYTES, "application/pdf")},
             format="multipart",
         )
@@ -483,15 +478,12 @@ class TestDocuments:
 
 
 class TestCommunication:
-    def test_settings_and_a_message(self, abc: ConsultancyContext, visit: Visit) -> None:
-        saved = visit.client.put("/api/communication/settings/", SMS_SETTINGS, format="json")
-        assert saved.status_code == 200, saved.content
-        with tenant_context(abc.consultancy):
-            assert ProviderSettings.objects.get().updated_by_id is None
+    def test_an_email(self, abc: ConsultancyContext, visit: Visit) -> None:
+        set_office_details(abc.consultancy, OfficeDetails(contact_email="info@abcedu.test"))
         student = make_student(abc)
         sent = visit.client.post(
-            f"/api/students/{student.pk}/messages/",
-            {"channel": "sms", "body": "Your class starts tomorrow."},
+            f"/api/students/{student.public_id}/messages/",
+            {"subject": "Your class", "body": "Your class starts tomorrow."},
             format="json",
         )
         assert sent.status_code == 201, sent.content
@@ -528,7 +520,7 @@ class TestEmployees:
         self, abc: ConsultancyContext, visitor: PlatformVisitor
     ) -> None:
         admin = abc.add_staff(Role.ADMIN)
-        office = Office(name="ABC Education", join_link="https://abcedu.example/join")
+        office = Office(consultancy=abc.consultancy, join_link="https://abcedu.example/join")
         with tenant_context(abc.consultancy):
             invited = invite_employee(
                 NewStaff(name="Mina Rai", email="mina@abc.test", role=Role.COUNSELLOR),

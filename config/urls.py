@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from django.urls import URLPattern, URLResolver, include, path
 
+import config.record_addresses  # noqa: F401  # registers `<staff:…>` and the rest first
+
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/", include("tenancy.urls")),
     path("api/", include("staff.urls")),
@@ -12,6 +14,9 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/", include("catalogue.urls")),
     path("api/", include("applications.urls")),
     path("api/", include("documents.urls")),
+    path("api/", include("course_files.urls")),
+    path("api/", include("document_examples.urls")),
+    path("api/", include("fee_types.urls")),
     path("api/", include("payments.urls")),
     path("api/", include("fees.urls")),
     path("api/", include("expenses.urls")),

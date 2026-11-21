@@ -12,7 +12,7 @@ from staff.models import Staff
 def person_answer(person: Staff) -> dict[str, Any]:
     """Who the conversation is with."""
     return {
-        "id": person.pk,
+        "id": person.public_id,
         "name": person.name,
         "job_title": person.job_title,
         "has_left": not can_write_to(person),
@@ -22,7 +22,7 @@ def person_answer(person: Staff) -> dict[str, Any]:
 def message_answer(message: InboxMessage, me: Staff) -> dict[str, Any]:
     """One message, as `me` sees it."""
     return {
-        "id": message.pk,
+        "id": message.public_id,
         "text": message.text,
         "from_me": message.sender_id == me.pk,
         "sent_at": message.sent_at.isoformat(),
@@ -66,7 +66,7 @@ def people_answer(people: list[Staff]) -> dict[str, Any]:
     """Who I can start a conversation with."""
     return {
         "people": [
-            {"id": person.pk, "name": person.name, "job_title": person.job_title}
+            {"id": person.public_id, "name": person.name, "job_title": person.job_title}
             for person in people
         ]
     }

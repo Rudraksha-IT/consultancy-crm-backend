@@ -91,7 +91,7 @@ def entries() -> list[tuple[str, str]]:
 
 def office(context: ConsultancyContext) -> Office:
     """What an invite email names: the office and its sign-up page."""
-    return Office(name=str(context.consultancy.name), join_link=f"https://{context.host}/join")
+    return Office(consultancy=context.consultancy, join_link=f"https://{context.host}/join")
 
 
 def move_to(
@@ -203,16 +203,16 @@ class TestEmailedLinks:
         ask(local, {"email": SHARED_EMAIL})
         assert f"http://{abc.host}:8080/login?email=sita%40example.com" in mail.outbox[0].body
 
-    def test_email_is_plain_text_and_names_no_one_else(
-        self, central: APIClient, abc: ConsultancyContext
-    ) -> None:
+    def test_email_names_no_one_else(self, central: APIClient, abc: ConsultancyContext) -> None:
         abc.add_staff(Role.COUNSELLOR, email=SHARED_EMAIL)
         abc.add_staff(Role.ADMIN, email="boss@example.com")
         ask(central, {"email": SHARED_EMAIL})
         sent = mail.outbox[0]
         assert isinstance(sent, EmailMultiAlternatives)
-        assert sent.alternatives == []
+        [(html, kind)] = sent.alternatives
+        assert kind == "text/html"
         assert "boss@example.com" not in sent.body
+        assert "boss@example.com" not in str(html)
 
     def test_a_mail_failure_still_answers_the_same(
         self, central: APIClient, abc: ConsultancyContext, settings: Settings, json_logs: JsonLogs
@@ -337,6 +337,7 @@ class TestWhereItWorks:
             {
                 "name": "Login Ltd",
                 "subdomain": "login",
+                "contact_email": "info@login.test",
             },
             format="json",
         )
@@ -386,7 +387,7 @@ class TestDirectoryKeptInStep:
     def test_deactivating_through_the_api_removes_it(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         leaver = abc.add_staff(Role.COUNSELLOR, email=SHARED_EMAIL)
-        response = abc.client.post(f"/api/staff/{leaver.pk}/deactivate/", format="json")
+        response = abc.client.post(f"/api/staff/{leaver.public_id}/deactivate/", format="json")
         assert response.status_code == status.HTTP_200_OK
         assert (email_hash(SHARED_EMAIL), "abcedu") not in entries()
 
@@ -418,7 +419,7 @@ class TestDirectoryKeptInStep:
         platform_site.log_in()
         response = platform_site.client.post(
             "/api/platform/consultancies/",
-            {"name": "Delta Study", "subdomain": "beta"},
+            {"name": "Delta Study", "subdomain": "beta", "contact_email": "info@delta.test"},
             format="json",
         )
         assert response.status_code == status.HTTP_202_ACCEPTED

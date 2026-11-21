@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from django.conf import settings as django_settings
 from django.db import connection
+from django.http import HttpResponseBase
 from django_tenants.utils import schema_context, tenant_context
 from pytest_django import DjangoDbBlocker
 from pytest_django.fixtures import Settings
@@ -33,7 +34,8 @@ from tenancy.context import activate_public_schema
 from tenancy.models import Consultancy
 from tenancy.services import create_consultancy
 from tenancy.subdomains import build_host, get_platform_host
-from tests.fakes import FakeDocumentStorage, FakeEmailGateway, FakeSmsGateway
+from tests.fakes import FakeDocumentStorage
+from tests.record_ids import record_numbers_in_response
 
 __all__ = ["build_host"]
 
@@ -45,7 +47,6 @@ TEST_INTERNAL_API_TOKEN = "test-internal-api-token-0123456789abcdef"  # noqa: S1
 # What Django signs login tokens with (ADR 0003); test-only.
 TEST_JWT_SIGNING_KEY = "test-jwt-signing-key-0123456789abcdefghij"
 # What Django seals SMS and email provider secrets with (issue 25); test-only.
-TEST_PROVIDER_SECRETS_KEY = "test-provider-secrets-key-0123456789abcdef"
 # What the Central login's index of Staff emails is hashed with (issue 44); test-only.
 TEST_STAFF_DIRECTORY_KEY = "test-staff-directory-key-0123456789abcdef"
 # A Fernet key that seals authenticator secrets (issue 61); test-only.
@@ -227,6 +228,24 @@ def json_logs_at() -> Iterator[LogsAt]:
     restore_logging()
 
 
+_ORIGINAL_REQUEST = APIClient.request
+
+
+def _guarded_request(self: APIClient, **request: object) -> HttpResponseBase:
+    """Send the request, then fail if the JSON answer names a record by number (ADR 0027)."""
+    response = _ORIGINAL_REQUEST(self, **request)
+    found = record_numbers_in_response(response)
+    where = f"{request.get('REQUEST_METHOD', '?')} {request.get('PATH_INFO', '?')}"
+    assert not found, f"{where} answered record numbers at {found}"
+    return response
+
+
+@pytest.fixture(autouse=True)
+def no_record_numbers_in_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every API answer in the suite names records only by UUID (the guard; issue 19)."""
+    monkeypatch.setattr(APIClient, "request", _guarded_request)
+
+
 @pytest.fixture(autouse=True)
 def fast_password_hashing(settings: Settings) -> None:
     """Use a cheap password hasher so tests that create Staff stay fast."""
@@ -263,31 +282,9 @@ def fake_document_storage(settings: Settings) -> Iterator[type[FakeDocumentStora
 
 
 @pytest.fixture(autouse=True)
-def provider_secrets_key(settings: Settings) -> None:
-    """Give Django the key it seals SMS and email provider secrets with."""
-    settings.PROVIDER_SECRETS_KEY = TEST_PROVIDER_SECRETS_KEY
-
-
-@pytest.fixture(autouse=True)
 def two_factor_secrets_key(settings: Settings) -> None:
     """Give Django the key it seals authenticator secrets with (issue 61)."""
     settings.TWO_FACTOR_SECRETS_KEY = TEST_TWO_FACTOR_SECRETS_KEY
-
-
-@pytest.fixture(autouse=True)
-def fake_gateways(settings: Settings) -> Iterator[None]:
-    """Send SMS and email to fakes in memory, never to a real company, empty for every test."""
-    settings.SMS_GATEWAY = "tests.fakes.FakeSmsGateway"
-    settings.EMAIL_GATEWAY = "tests.fakes.FakeEmailGateway"
-    for gateway in (FakeSmsGateway, FakeEmailGateway):
-        gateway.sent.clear()
-        gateway.failure = None
-    FakeSmsGateway.refused_numbers.clear()
-    yield
-    for gateway in (FakeSmsGateway, FakeEmailGateway):
-        gateway.sent.clear()
-        gateway.failure = None
-    FakeSmsGateway.refused_numbers.clear()
 
 
 # The offices the tests use. Their schemas are built and migrated once per test run.

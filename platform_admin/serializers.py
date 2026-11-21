@@ -12,7 +12,7 @@ from platform_admin.types import ConsultancyOnboarding
 from staff.models import STAFF_NAME_MAX_LENGTH
 from staff.serializers import EMAIL_MAX_LENGTH, PASSWORD_MAX_LENGTH, ResetCodeSerializer
 from tenancy.models import CONSULTANCY_NAME_MAX_LENGTH, STATUS_REASON_MAX_LENGTH
-from tenancy.serializers import ThemeSerializer
+from tenancy.serializers import ContactEmailField, ThemeSerializer
 from tenancy.services import DATE_NOT_IN_FUTURE_MESSAGE, is_subdomain_taken
 from tenancy.status import ConsultancyStatus
 from tenancy.subdomains import find_subdomain_problem
@@ -63,6 +63,8 @@ class ConsultancyOnboardingSerializer(StrictSerializer[None]):
     """A new Consultancy and its starting Status, as entered by a Platform Admin.
 
     The starting Status is Evaluation (14 days) unless it is Active with a paid-until date.
+    `contact_email` (required, ticket 20) becomes the office's contact email, where replies to
+    every office email go.
     `subdomain` is only the front part of the address; the rest is PRODUCT_DOMAIN. No Admin:
     Admins are added once the office is set up (issue 64), so `admin_name`, `admin_email` and
     `admin_password` are refused as unknown fields.
@@ -70,6 +72,7 @@ class ConsultancyOnboardingSerializer(StrictSerializer[None]):
 
     name = StrictCharField(max_length=CONSULTANCY_NAME_MAX_LENGTH)
     subdomain = StrictCharField(max_length=SUBDOMAIN_MAX_INPUT_LENGTH)
+    contact_email = ContactEmailField()
     theme = ThemeSerializer(required=False)
     status = serializers.ChoiceField(choices=STARTING_STATUSES, required=False)
     paid_until = FutureDateField(required=False)
@@ -99,6 +102,7 @@ class ConsultancyOnboardingSerializer(StrictSerializer[None]):
             name=data["name"],
             subdomain=data["subdomain"],
             theme=theme_from_stored(data["theme"]) if "theme" in data else DEFAULT_THEME,
+            contact_email=data["contact_email"],
             status=ConsultancyStatus(data.get("status", ConsultancyStatus.EVALUATION.value)),
             paid_until=data.get("paid_until"),
         )

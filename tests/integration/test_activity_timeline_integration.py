@@ -50,9 +50,9 @@ def make_student(
         )
 
 
-def profile(office: ConsultancyContext, student: Student | int) -> dict[str, object]:
+def profile(office: ConsultancyContext, student: Student | int | str) -> dict[str, object]:
     """GET the Student's profile, which must answer 200."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     response = office.client.get(f"/api/students/{pk}/")
     assert response.status_code == status.HTTP_200_OK
     body: dict[str, object] = response.json()
@@ -61,7 +61,7 @@ def profile(office: ConsultancyContext, student: Student | int) -> dict[str, obj
 
 def set_stage(office: ConsultancyContext, student: Student, **body: object) -> None:
     """POST a Stage change, which must succeed."""
-    response = office.client.post(f"/api/students/{student.pk}/stage/", body, format="json")
+    response = office.client.post(f"/api/students/{student.public_id}/stage/", body, format="json")
     assert response.status_code == status.HTTP_200_OK, response.json()
 
 
@@ -116,7 +116,7 @@ class TestTheProfileCarriesEveryStageChange:
         me = abc.log_in_as(Role.COUNSELLOR)
         student = make_student(abc, me)
         abc.client.put(
-            f"/api/students/{student.pk}/note/", {"note": "Likes Sydney."}, format="json"
+            f"/api/students/{student.public_id}/note/", {"note": "Likes Sydney."}, format="json"
         )
         set_stage(abc, student, stage="counselling")
 
@@ -192,7 +192,7 @@ class TestTheProfileCarriesEveryStageChange:
         student = make_student(abc)
         abc.log_in_as(Role.TEACHER)
 
-        response = abc.client.get(f"/api/students/{student.pk}/")
+        response = abc.client.get(f"/api/students/{student.public_id}/")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "stage_changes" not in response.json()
@@ -200,7 +200,7 @@ class TestTheProfileCarriesEveryStageChange:
     def test_logged_out_gets_nothing(self, abc: ConsultancyContext) -> None:
         student = make_student(abc)
 
-        response = abc.new_client().get(f"/api/students/{student.pk}/")
+        response = abc.new_client().get(f"/api/students/{student.public_id}/")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 

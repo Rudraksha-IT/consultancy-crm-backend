@@ -1,0 +1,9 @@
+Hello {{ name }},
+
+Use this code to choose a new password for the Platform at {{ address }}:
+
+{{ code }}
+
+It works for {{ minutes }} minutes, once. Enter it on the Platform's Forgot password page.
+
+If you didn't ask for it, you can ignore this email. Your password stays the same.

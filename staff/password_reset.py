@@ -7,6 +7,7 @@ the same to the caller.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from django.db import transaction
 
@@ -20,10 +21,13 @@ from staff.models import Staff
 from staff.passwords import unmet_password_rules
 from staff.services import normalize_email
 
+if TYPE_CHECKING:
+    from tenancy.models import Consultancy
+
 logger = logging.getLogger(__name__)
 
 
-def send_reset_code(email: str, office: str) -> None:
+def send_reset_code(email: str, office: Consultancy) -> None:
     """Email a new reset Code if `email` is an active Staff member's; otherwise do nothing."""
     staff = _active_staff(email)
     if staff is None:

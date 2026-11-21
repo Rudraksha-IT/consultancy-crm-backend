@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -21,7 +23,7 @@ from students.permissions import CanSeeStudents
 from students.profile import profile_of
 
 
-def _student(student_id: int) -> Student:
+def _student(student_id: UUID) -> Student:
     try:
         return profile_of(student_id)
     except Student.DoesNotExist as error:
@@ -33,7 +35,7 @@ class StudentEditDetailsView(APIView):
 
     permission_classes = (IsAuthenticated, CanSeeStudents)
 
-    def put(self, request: Request, student_id: int) -> Response:
+    def put(self, request: Request, student_id: UUID) -> Response:
         """Save the page and return the profile as stored; 409 if it changed meanwhile."""
         staff = get_request_staff(request)
         student = _student(student_id)

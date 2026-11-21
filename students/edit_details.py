@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from uuid import UUID
 
 from django.db import models, transaction
 
@@ -89,17 +90,25 @@ def _sync_jobs(student: Student, rows: Sequence[Row]) -> None:
     _sync(stored, lambda: WorkExperience(student=student), rows, WORK_EXPERIENCE_FIELDS)
 
 
-def _sync[Entry: models.Model](
+def _row_id(row: Row) -> UUID:
+    """A stored row's UUID, as the serializer checked it."""
+    row_id = row["id"]
+    if not isinstance(row_id, UUID):  # pragma: no cover - the serializer only gives UUIDs
+        raise TypeError(row_id)
+    return row_id
+
+
+def _sync[Entry: (AcademicRecord, TestScore, WorkExperience)](
     stored: models.QuerySet[Entry],
     new: Callable[[], Entry],
     rows: Sequence[Row],
     fields: frozenset[str],
 ) -> None:
     """Make the Student's `stored` rows exactly `rows`: change, add and remove."""
-    kept = [row["id"] for row in rows if "id" in row]
-    stored.exclude(pk__in=kept).delete()
-    by_id = {entry.pk: entry for entry in stored.filter(pk__in=kept)}
+    kept = [_row_id(row) for row in rows if "id" in row]
+    stored.exclude(public_id__in=kept).delete()
+    by_id = {entry.public_id: entry for entry in stored.filter(public_id__in=kept)}
     for row in rows:
-        entry = by_id[row["id"]] if "id" in row else new()
+        entry = by_id[_row_id(row)] if "id" in row else new()
         apply_changes(entry, {key: value for key, value in row.items() if key != "id"}, fields)
         entry.save()

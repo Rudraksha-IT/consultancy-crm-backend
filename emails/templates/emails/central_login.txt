@@ -1,0 +1,10 @@
+Hello,
+
+You asked for the login pages of the offices this email belongs to:
+{% for office in offices %}
+{{ office.name }}
+{{ office.link }}
+{% endfor %}
+Open the one you want; your email will already be filled in.
+
+If you didn't ask for this, you can ignore this email.

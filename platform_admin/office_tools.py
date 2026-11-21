@@ -14,6 +14,7 @@ import zipfile
 from collections.abc import Iterable, Iterator
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 from django.apps import apps
 from django.db import models
@@ -22,8 +23,13 @@ from auth_tokens.services import sign_out_everywhere
 from codes.emails import send_code_email
 from codes.services import issue_code
 from codes.types import CodePurpose
+from config.public_ids import PUBLIC_ID
 from staff.exceptions import EmployeeChangeRefusedError
 from staff.models import PlatformVisitor, Staff, StaffStatus
+from tenancy.models import Consultancy
+
+if TYPE_CHECKING:
+    from django.db.models import Field
 
 # Each Consultancy's own apps whose data the download holds (spec Implementation: Platform).
 EXPORTED_APPS = (
@@ -44,7 +50,7 @@ EXPORTED_APPS = (
     "visits",
 )
 # Secrets never leave the server, not even in the office's own download.
-SECRET_FIELDS = frozenset({"password", "sms_token_sealed", "email_password_sealed"})
+SECRET_FIELDS = frozenset({"password"})
 # A cell starting with one of these could run as a formula in a spreadsheet.
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
@@ -55,7 +61,7 @@ NOT_JOINED_MESSAGE = (
 logger = logging.getLogger(__name__)
 
 
-def send_reset_code_to(staff: Staff, office: str, by: PlatformVisitor) -> None:
+def send_reset_code_to(staff: Staff, office: Consultancy, by: PlatformVisitor) -> None:
     """Email `staff` a password reset Code, whatever their Role (Admins included).
 
     Raises:
@@ -103,6 +109,26 @@ def exported_models() -> Iterator[type[models.Model]]:
                 yield model
 
 
+def _column(field: Field[Any, Any]) -> tuple[str, str] | None:
+    """A column's heading and what fills it; a record and its links by UUID (ADR 0027).
+
+    `id` holds the record's own UUID (so `public_id` is not repeated) and a link such as
+    `student_id` the linked record's; None for the `public_id` field itself.
+    """
+    if field.name == PUBLIC_ID:
+        return None
+    if field.primary_key:
+        return field.attname, PUBLIC_ID
+    if field.is_relation and _has_public_id(field.related_model):
+        return field.attname, f"{field.name}__{PUBLIC_ID}"
+    return field.attname, field.attname
+
+
+def _has_public_id(model: object) -> bool:
+    meta = getattr(model, "_meta", None)
+    return meta is not None and any(field.name == PUBLIC_ID for field in meta.concrete_fields)
+
+
 def spreadsheet_safe(text: str) -> str:
     """Return `text` so a spreadsheet shows it as text and never runs it as a formula."""
     return f"'{text}" if text.startswith(FORMULA_STARTS) else text
@@ -110,13 +136,16 @@ def spreadsheet_safe(text: str) -> str:
 
 def _csv_of(model: type[models.Model]) -> str:
     columns = [
-        field.attname for field in model._meta.concrete_fields if field.name not in SECRET_FIELDS
+        column
+        for field in model._meta.concrete_fields
+        if field.name not in SECRET_FIELDS and (column := _column(field)) is not None
     ]
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(columns)
+    writer.writerow([heading for heading, _ in columns])
+    lookups = [lookup for _, lookup in columns]
     rows: Iterable[tuple[object, ...]] = (
-        model._default_manager.order_by("pk").values_list(*columns).iterator()
+        model._default_manager.order_by("pk").values_list(*lookups).iterator()
     )
     for row in rows:
         writer.writerow([_cell(value) for value in row])

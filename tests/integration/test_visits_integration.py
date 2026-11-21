@@ -35,15 +35,15 @@ NEW_VISITOR = {
 }
 
 
-def visits_url(student: Student | int) -> str:
+def visits_url(student: Student | int | str) -> str:
     """The Student's Visits endpoint."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/visits/"
 
 
-def progress_url(student: Student | int) -> str:
+def progress_url(student: Student | int | str) -> str:
     """The Student's progress endpoint."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/progress/"
 
 
@@ -73,7 +73,7 @@ def visit_at(
         )
 
 
-def log_visit(office: ConsultancyContext, student: Student | int, **body: object) -> Any:  # noqa: ANN401
+def log_visit(office: ConsultancyContext, student: Student | int | str, **body: object) -> Any:  # noqa: ANN401
     """POST a follow-up Visit."""
     return office.client.post(visits_url(student), body, format="json")
 
@@ -91,7 +91,7 @@ class TestNewVisitor:
         visit = visits["results"][0]
         assert visit["kind"] == "new"
         assert visit["purpose"] == "First visit"
-        assert visit["recorded_by"] == {"id": desk.pk, "name": "Ramesh KC"}
+        assert visit["recorded_by"] == {"id": str(desk.public_id), "name": "Ramesh KC"}
 
     def test_a_refused_visitor_logs_no_visit(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.FRONT_DESK)
@@ -118,7 +118,7 @@ class TestLogVisit:
         body = response.json()
         assert body["kind"] == "follow_up"
         assert body["purpose"] == "Bringing documents: Passport copy"
-        assert body["recorded_by"] == {"id": staff.pk, "name": staff.name}
+        assert body["recorded_by"] == {"id": str(staff.public_id), "name": staff.name}
         [visit] = stored_visits(abc, student)
         assert visit.purpose == "Bringing documents: Passport copy"
         assert visit.recorded_by_id == staff.pk
@@ -243,7 +243,9 @@ class TestLogVisit:
         student = make_student(abc, name="Secret Name")
         staff = abc.log_in_as(Role.FRONT_DESK)
 
-        visit_id = log_visit(abc, student, reason="other", details="Secret detail").json()["id"]
+        public_id = log_visit(abc, student, reason="other", details="Secret detail").json()["id"]
+        with tenant_context(abc.consultancy):
+            visit_id = Visit.objects.get(public_id=public_id).pk
 
         [line] = json_logs.with_message("Visit logged")
         assert line["message"] == (
@@ -263,9 +265,12 @@ class TestStudentVisits:
 
         body = abc.client.get(visits_url(student)).json()
 
-        assert [row["id"] for row in body["results"]] == [newer.pk, older.pk]
+        assert [row["id"] for row in body["results"]] == [
+            str(newer.public_id),
+            str(older.public_id),
+        ]
         assert body["results"][1] == {
-            "id": older.pk,
+            "id": str(older.public_id),
             "kind": "new",
             "purpose": "First visit",
             "at": older.at.isoformat(),
@@ -329,9 +334,12 @@ class TestTodaysVisits:
         body = abc.client.get(TODAY_URL).json()
 
         assert body["count"] == 2
-        assert [row["id"] for row in body["results"]] == [second.pk, first.pk]
+        assert [row["id"] for row in body["results"]] == [
+            str(second.public_id),
+            str(first.public_id),
+        ]
         assert body["results"][1]["student"] == {
-            "id": sita.pk,
+            "id": str(sita.public_id),
             "name": "Sita Gurung",
             "note_first_line": "Wants Sydney",
         }

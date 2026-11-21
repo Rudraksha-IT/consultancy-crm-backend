@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from django.urls import URLPattern, URLResolver, include, path
 
+import config.record_addresses  # noqa: F401  # registers `<consultancy:…>` and the rest first
+
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/platform/", include("platform_admin.urls")),
 ]

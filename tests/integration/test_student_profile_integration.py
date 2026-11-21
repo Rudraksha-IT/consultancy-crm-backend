@@ -39,9 +39,9 @@ INJECTION_STRINGS = [
 WORKS_WITH_STUDENTS = (Role.ADMIN, Role.COUNSELLOR, Role.FRONT_DESK)
 
 
-def profile_url(student: Student | int) -> str:
+def profile_url(student: Student | int | str) -> str:
     """The Student's profile endpoint."""
-    pk = student if isinstance(student, int) else student.pk
+    pk = student if isinstance(student, int | str) else student.public_id
     return f"/api/students/{pk}/"
 
 

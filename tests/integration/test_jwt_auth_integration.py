@@ -77,7 +77,7 @@ def staff_claims(abc: ConsultancyContext, staff: Staff) -> dict[str, Any]:
     return {
         "tenant_schema": abc.consultancy.schema_name,
         "kind": "staff",
-        "user_id": staff.pk,
+        "user_id": str(staff.public_id),
         "auth_version": 0,
         "device": uuid.uuid4().hex,
     }
@@ -125,7 +125,7 @@ class TestStaffLogin:
             assert claims["tenant_schema"] == "abcedu"
             assert claims["kind"] == "staff"
             assert claims["auth_version"] == 0
-            assert claims["user_id"] == counsellor.pk
+            assert claims["user_id"] == str(counsellor.public_id)
             assert claims["jti"]
         assert claims_of(body["access"])["device"] == claims_of(body["refresh"])["device"]
 
@@ -324,7 +324,7 @@ class TestAccessToken:
         admin = abc.add_staff(Role.ADMIN)
         header, payload, signature = abc.tokens_for(counsellor).access.split(".")
         claims = json.loads(base64.urlsafe_b64decode(payload + "=="))
-        claims["user_id"] = admin.pk
+        claims["user_id"] = str(admin.public_id)
         forged = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
 
         status_code = context_status(abc.client, f"{header}.{forged}.{signature}")
@@ -371,6 +371,9 @@ class TestAccessToken:
             ("kind", None),
             ("user_id", "1"),
             ("user_id", True),
+            ("user_id", 1),
+            ("user_id", "not-a-uuid"),
+            ("user_id", None),
             ("auth_version", "0"),
             ("jti", 5),
             ("device", 5),
@@ -383,6 +386,38 @@ class TestAccessToken:
         abc = make_consultancy("ABC Education", "abcedu")
         counsellor = abc.add_staff(Role.COUNSELLOR)
         claims = {**staff_claims(abc, counsellor), claim: value}
+
+        assert context_status(abc.client, forge(claims)) == status.HTTP_401_UNAUTHORIZED
+
+    def test_a_token_naming_the_person_by_number_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        """Tokens from before ADR 0027 carried the number: they log out once (issue 19)."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        counsellor = abc.add_staff(Role.COUNSELLOR)
+        claims = {**staff_claims(abc, counsellor), "user_id": counsellor.pk}
+
+        response_status = context_status(abc.client, forge(claims))
+
+        assert response_status == status.HTTP_401_UNAUTHORIZED
+
+    def test_a_token_naming_an_unknown_person_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        counsellor = abc.add_staff(Role.COUNSELLOR)
+        claims = {**staff_claims(abc, counsellor), "user_id": str(uuid.uuid4())}
+
+        assert context_status(abc.client, forge(claims)) == status.HTTP_401_UNAUTHORIZED
+
+    def test_a_token_naming_another_offices_staff_is_refused(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        theirs = xyz.add_staff(Role.ADMIN)
+        claims = {**staff_claims(abc, abc.add_staff(Role.COUNSELLOR))}
+        claims["user_id"] = str(theirs.public_id)
 
         assert context_status(abc.client, forge(claims)) == status.HTTP_401_UNAUTHORIZED
 
@@ -661,7 +696,7 @@ class TestRefusedInput:
         )
 
         assert claims_of(response.json()["access"])["kind"] == "staff"
-        assert claims_of(response.json()["access"])["user_id"] == counsellor.pk
+        assert claims_of(response.json()["access"])["user_id"] == str(counsellor.public_id)
 
     @pytest.mark.parametrize("url", [LOGIN_URL, REFRESH_URL, LOGOUT_URL])
     def test_only_post_is_allowed(self, make_consultancy: ConsultancyFactory, url: str) -> None:

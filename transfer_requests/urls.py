@@ -11,7 +11,7 @@ from transfer_requests.views import (
     TransferRequestListView,
 )
 
-ONE = "transfer-requests/<int:request_id>/"
+ONE = "transfer-requests/<transfer_request:request_id>/"
 
 urlpatterns: list[URLPattern] = [
     path("transfer-requests/", TransferRequestListView.as_view(), name="transfer-requests"),
@@ -24,7 +24,7 @@ urlpatterns: list[URLPattern] = [
     path(f"{ONE}decline/", DeclineView.as_view(), name="transfer-request-decline"),
     path(f"{ONE}cancel/", CancelView.as_view(), name="transfer-request-cancel"),
     path(
-        "students/<int:student_id>/transfer-requests/",
+        "students/<uuid:student_id>/transfer-requests/",
         StudentTransferRequestView.as_view(),
         name="student-transfer-requests",
     ),

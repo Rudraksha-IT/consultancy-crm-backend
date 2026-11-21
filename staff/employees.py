@@ -180,7 +180,7 @@ def find_invited(email: str) -> Staff | None:
 
 def _send_join_code(staff: Staff, office: Office) -> None:
     code = issue_code(staff, CodePurpose.JOIN)
-    send_code_email(staff, code, CodePurpose.JOIN, office.name, link=office.join_link)
+    send_code_email(staff, code, CodePurpose.JOIN, office.consultancy, link=office.join_link)
 
 
 def _check_role(role: Role, consultancy: Consultancy) -> None:

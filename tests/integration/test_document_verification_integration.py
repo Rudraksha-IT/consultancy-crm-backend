@@ -59,15 +59,18 @@ def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
     return make_consultancy("ABC Education", "abcedu")
 
 
-def verification_url(student: Student | int, document: Document | int) -> str:
+def verification_url(student: Student | int | str, document: Document | int | str) -> str:
     """Where a Document is marked correct or rejected."""
-    pk = student if isinstance(student, int) else student.pk
-    document_pk = document if isinstance(document, int) else document.pk
+    pk = student if isinstance(student, int | str) else str(student.public_id)
+    document_pk = document if isinstance(document, int | str) else document.public_id
     return f"{documents_url(pk)}{document_pk}/verification/"
 
 
 def judge(
-    office: ConsultancyContext, student: Student | int, document: Document | int, **body: object
+    office: ConsultancyContext,
+    student: Student | int | str,
+    document: Document | int | str,
+    **body: object,
 ) -> _MonkeyPatchedResponse:
     """POST a Verification."""
     return office.client.post(verification_url(student, document), body, format="json")
@@ -90,7 +93,7 @@ def passport_item(body: dict[str, Any]) -> dict[str, Any]:
 
 def profile(office: ConsultancyContext, student: Student) -> dict[str, Any]:
     """GET the Student's profile."""
-    body: dict[str, Any] = office.client.get(f"/api/students/{student.pk}/").json()
+    body: dict[str, Any] = office.client.get(f"/api/students/{student.public_id}/").json()
     return body
 
 
@@ -157,7 +160,7 @@ class TestVerifying:
             Verification.REJECTED,
             Verification.PENDING,
         )
-        assert passport_item(body)["document"]["id"] == new.pk
+        assert passport_item(body)["document"]["id"] == str(new.public_id)
         assert passport_item(body)["state"] == "waiting"
         assert body["done"] == 1
 
@@ -384,14 +387,14 @@ class TestLinking:
         student = own_student(abc)
         application = make_application(abc, student, make_course(abc, "Federation University"))
 
-        response = upload(abc, student, application=str(application.pk))
+        response = upload(abc, student, application=str(application.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         [document] = stored_documents(abc, student)
         assert (document.application_id, document.visa_id) == (application.pk, None)
         assert passport_item(response.json())["document"]["link"] == {
             "kind": "application",
-            "id": application.pk,
+            "id": str(application.public_id),
             "university": "Federation University",
         }
 
@@ -401,14 +404,14 @@ class TestLinking:
         student = own_student(abc)
         visa = make_visa(abc, student, offer_application(abc, student, "Deakin University"))
 
-        response = upload(abc, student, visa=str(visa.pk))
+        response = upload(abc, student, visa=str(visa.public_id))
 
         assert response.status_code == status.HTTP_201_CREATED
         [document] = stored_documents(abc, student)
         assert (document.application_id, document.visa_id) == (None, visa.pk)
         assert passport_item(response.json())["document"]["link"] == {
             "kind": "visa",
-            "id": visa.pk,
+            "id": str(visa.public_id),
             "university": "Deakin University",
         }
 
@@ -426,8 +429,8 @@ class TestLinking:
         their_visa = make_visa(abc, theirs, their_application)
 
         responses = [
-            upload(abc, mine, application=str(their_application.pk)),
-            upload(abc, mine, visa=str(their_visa.pk)),
+            upload(abc, mine, application=str(their_application.public_id)),
+            upload(abc, mine, visa=str(their_visa.public_id)),
         ]
 
         assert [r.json() for r in responses] == [CHOOSE_APPLICATION, CHOOSE_VISA]
@@ -456,7 +459,9 @@ class TestLinking:
         application = offer_application(abc, student)
         visa = make_visa(abc, student, application)
 
-        response = upload(abc, student, application=str(application.pk), visa=str(visa.pk))
+        response = upload(
+            abc, student, application=str(application.public_id), visa=str(visa.public_id)
+        )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == ONE_LINK
@@ -469,7 +474,7 @@ class TestLinking:
         response = abc.client.post(
             documents_url(student),
             {
-                "document_type": str(type_named(abc, "Passport").pk),
+                "document_type": str(type_named(abc, "Passport").public_id),
                 "file": a_file(),
                 "application": [str(application.pk), str(application.pk)],
             },
@@ -482,7 +487,7 @@ class TestLinking:
     def test_the_application_shows_its_documents(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
         application = make_application(abc, student, make_course(abc), ApplicationStatus.OFFER)
-        upload(abc, student, application=str(application.pk))
+        upload(abc, student, application=str(application.public_id))
         upload(abc, student)
         [linked, _] = stored_documents(abc, student)
 
@@ -492,9 +497,9 @@ class TestLinking:
         [file] = files_of(abc, linked)
         assert shown["documents"] == [
             {
-                "id": linked.pk,
-                "document_type": {"id": linked.document_type_id, "name": "Passport"},
-                "files": [{"id": file.pk, "file_name": "passport.pdf"}],
+                "id": str(linked.public_id),
+                "document_type": {"id": str(linked.document_type.public_id), "name": "Passport"},
+                "files": [{"id": str(file.public_id), "file_name": "passport.pdf"}],
                 "verification": "pending",
             }
         ]
@@ -503,7 +508,7 @@ class TestLinking:
         student = own_student(abc)
         application = offer_application(abc, student)
         visa = make_visa(abc, student, application)
-        upload(abc, student, visa=str(visa.pk))
+        upload(abc, student, visa=str(visa.public_id))
         [linked] = stored_documents(abc, student)
         judge(abc, student, linked, verification="verified")
 
@@ -511,14 +516,14 @@ class TestLinking:
 
         [shown_visa] = body["visas"]
         [shown_application] = body["applications"]
-        assert [d["id"] for d in shown_visa["documents"]] == [linked.pk]
+        assert [d["id"] for d in shown_visa["documents"]] == [str(linked.public_id)]
         assert shown_visa["documents"][0]["verification"] == "verified"
         assert shown_application["documents"] == []
 
     def test_every_student_role_sees_the_links(self, abc: ConsultancyContext) -> None:
         student = own_student(abc)
         application = make_application(abc, student, make_course(abc))
-        upload(abc, student, application=str(application.pk))
+        upload(abc, student, application=str(application.public_id))
         abc.log_in_as(Role.FRONT_DESK)
 
         body = profile(abc, student)
@@ -558,7 +563,7 @@ class TestLinkSerializer:
         with tenant_context(abc.consultancy):
             field = DocumentUploadSerializer(context={"student": student}).fields["application"]
 
-            assert field.to_representation(application) == application.pk
+            assert field.to_representation(application) == str(application.public_id)
 
 
 class TestModels:

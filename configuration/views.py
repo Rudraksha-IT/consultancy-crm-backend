@@ -19,12 +19,14 @@ from tenancy.exceptions import NoLogoError
 from tenancy.serializers import (
     DateDisplaySerializer,
     LogoUploadSerializer,
+    OfficeDetailsSerializer,
     ShowNameSerializer,
 )
 from tenancy.services import (
     remove_logo,
     set_date_display,
     set_logo,
+    set_office_details,
     set_show_name_beside_logo,
 )
 from tenancy.types import OfficeLogo
@@ -58,6 +60,33 @@ class DateDisplayView(APIView):
             date_display.value,
         )
         return Response({"date_display": date_display.value})
+
+
+class OfficeDetailsView(APIView):
+    """Configuration → General → Office details: the contact email, phone, address and website.
+
+    Printed at the bottom of every email from the office; Students' replies go to the contact
+    email. Every Role reads them from the context.
+    """
+
+    permission_classes = (IsAuthenticated, IsAdmin)
+
+    def put(self, request: Request) -> Response:
+        """Check and store every field (empty clears it), and return them as stored."""
+        serializer = OfficeDetailsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        consultancy = get_request_consultancy(request)
+        details = set_office_details(consultancy, serializer.to_office_details())
+        # Only which fields are set: the details themselves stay out of the logs.
+        logger.info(
+            "Office details changed: consultancy_id=%s, staff_id=%s, fields_set=%s",
+            consultancy.pk,
+            request.user.pk,
+            sum(1 for value in asdict(details).values() if value),
+        )
+        return Response(
+            {"office_details": asdict(details), "has_contact_email": bool(details.contact_email)}
+        )
 
 
 class OfficeLogoView(APIView):

@@ -5,6 +5,7 @@ from django.db.models.functions import Lower
 
 from applications.models import Application, Visa
 from catalogue.models import Course
+from config.public_ids import public_id_field
 from documents.groups import DocumentGroup
 from documents.verification import Verification
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
@@ -15,6 +16,8 @@ FILE_NAME_MAX_LENGTH = 150
 CONTENT_TYPE_MAX_LENGTH = 50
 STORAGE_KEY_MAX_LENGTH = 300
 REJECTION_REASON_MAX_LENGTH = 500
+# A Document Type's Document Example instruction (spec 62).
+INSTRUCTION_MAX_LENGTH = 500
 # Why a Document or a file was put in the Bin (a quick pick or a few words; issue 79).
 BIN_REASON_MAX_LENGTH = 200
 
@@ -52,11 +55,16 @@ class DocumentType(models.Model):
     in another.
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     name = models.CharField(max_length=DOCUMENT_TYPE_NAME_MAX_LENGTH)
     needed_by_everyone = models.BooleanField(default=False)
     usual_group = models.CharField(
         max_length=CHOICE_MAX_LENGTH, choices=DocumentGroup.choices, default=DocumentGroup.APPLYING
     )
+    # How the Document should look, for Students (Document Example, spec 62); empty when none.
+    instruction = models.CharField(max_length=INSTRUCTION_MAX_LENGTH, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -74,6 +82,9 @@ class Document(InTheBin):
     several of one type: the newest decides the checklist. It may be linked to one of the
     Student's Applications or Visas, never both (spec 66).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     student = models.ForeignKey(Student, on_delete=models.PROTECT, related_name="documents")
     document_type = models.ForeignKey(
@@ -120,6 +131,9 @@ class DocumentFile(InTheBin):
     is reached only through a short-lived signed link issued after a permission check (spec 70).
     """
 
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
+
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="files")
     # The name shown and used for downloads; its extension always matches the real file type.
     file_name = models.CharField(max_length=FILE_NAME_MAX_LENGTH)
@@ -146,6 +160,9 @@ class DocumentRequirement(models.Model):
     Group; a Course's or a Student's uses the type's usual group. University lists were removed
     (issue 80).
     """
+
+    # Its id outside the server (ADR 0027); the number never leaves it.
+    public_id = public_id_field()
 
     document_type = models.ForeignKey(
         DocumentType, on_delete=models.PROTECT, related_name="requirements"

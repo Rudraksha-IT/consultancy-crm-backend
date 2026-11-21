@@ -100,11 +100,14 @@ class TestProgress:
             "results": [
                 {
                     "student": {
-                        "id": student.pk,
+                        "id": str(student.public_id),
                         "name": "Sita Gurung",
                         "stage": "applying",
                         "country": "australia",
-                        "assigned_counsellor": {"id": counsellor.pk, "name": "Bikash Thapa"},
+                        "assigned_counsellor": {
+                            "id": str(counsellor.public_id),
+                            "name": "Bikash Thapa",
+                        },
                     },
                     "percent": 45,
                     "next_step": "Waiting for an offer, Deakin University",
@@ -133,7 +136,7 @@ class TestProgress:
             )
 
         row = abc.client.get(PROGRESS_URL).json()["results"][0]
-        profile = abc.client.get(f"/api/students/{student.pk}/").json()["progress"]
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()["progress"]
 
         assert (row["percent"], row["next_step"], row["is_done"]) == (
             88,

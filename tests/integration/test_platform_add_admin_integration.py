@@ -40,6 +40,7 @@ PRODUCT_DOMAIN_URL = "/api/platform/product-domain/"
 JOIN_COMPLETE_URL = "/api/auth/join/complete/"
 LOGIN_URL = "/api/auth/login/"
 EMAIL = "sita@everest.test"
+CONTACT_EMAIL = "info@everest.test"
 NAME = "Sita Sharma"
 NEW_PASSWORD = "Kathmandu!2026"  # noqa: S105  # test-only credential
 INJECTION_STRINGS = [
@@ -49,13 +50,13 @@ INJECTION_STRINGS = [
 ]
 
 
-def admins_url(consultancy_id: int) -> str:
+def admins_url(consultancy_id: object) -> str:
     """The Add admin endpoint of one Consultancy."""
     return f"{CONSULTANCIES_URL}{consultancy_id}/admins/"
 
 
 def add_admin(
-    client: APIClient, consultancy_id: int, body: object = None
+    client: APIClient, consultancy_id: object, body: object = None
 ) -> _MonkeyPatchedResponse:
     """POST an Admin to add; a valid one unless `body` is given."""
     sent = {"name": NAME, "email": EMAIL} if body is None else body
@@ -83,12 +84,14 @@ def everest(platform_site: PlatformContext) -> Consultancy:
     """A Consultancy created on the Platform and set up, with nobody in it yet."""
     platform_site.log_in()
     created = platform_site.client.post(
-        CONSULTANCIES_URL, {"name": "Everest Education", "subdomain": "everest"}, format="json"
+        CONSULTANCIES_URL,
+        {"name": "Everest Education", "subdomain": "everest", "contact_email": CONTACT_EMAIL},
+        format="json",
     )
     assert created.status_code == status.HTTP_202_ACCEPTED, created.content
     run_queued_jobs()
     with schema_context(PUBLIC_SCHEMA):
-        office: Consultancy = Consultancy.objects.get(pk=created.json()["id"])
+        office: Consultancy = Consultancy.objects.get(public_id=created.json()["id"])
     return office
 
 
@@ -119,10 +122,18 @@ class TestProductDomain:
 
 
 class TestAddAdmin:
+    def test_the_invite_has_replies_going_to_the_offices_contact_email(
+        self, platform_site: PlatformContext, everest: Consultancy
+    ) -> None:
+        """The contact email asked when the office was opened (ticket 20, spec 119)."""
+        add_admin(platform_site.client, everest.public_id)
+
+        assert mail.outbox[-1].reply_to == [CONTACT_EMAIL]
+
     def test_invites_an_admin_by_code_into_the_office(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        response = add_admin(platform_site.client, everest.pk)
+        response = add_admin(platform_site.client, everest.public_id)
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json() == {"name": NAME, "email": EMAIL, "status": "invited"}
@@ -137,7 +148,7 @@ class TestAddAdmin:
     def test_the_admin_joins_with_the_code_and_logs_in(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        add_admin(platform_site.client, everest.pk)
+        add_admin(platform_site.client, everest.public_id)
         office = api_client(build_host("everest"))
 
         joined = office.post(
@@ -154,10 +165,12 @@ class TestAddAdmin:
     def test_more_admins_can_be_added(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        add_admin(platform_site.client, everest.pk)
+        add_admin(platform_site.client, everest.public_id)
 
         response = add_admin(
-            platform_site.client, everest.pk, {"name": "Ram Thapa", "email": "Ram@Everest.test"}
+            platform_site.client,
+            everest.public_id,
+            {"name": "Ram Thapa", "email": "Ram@Everest.test"},
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -167,10 +180,12 @@ class TestAddAdmin:
     def test_an_email_already_used_in_the_office_is_refused(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        add_admin(platform_site.client, everest.pk)
+        add_admin(platform_site.client, everest.public_id)
 
         response = add_admin(
-            platform_site.client, everest.pk, {"name": "Other", "email": " SITA@everest.test "}
+            platform_site.client,
+            everest.public_id,
+            {"name": "Other", "email": " SITA@everest.test "},
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -184,7 +199,10 @@ class TestAddAdmin:
         with schema_context(PUBLIC_SCHEMA):
             Consultancy.objects.filter(pk=everest.pk).update(status=office_status)
 
-        assert add_admin(platform_site.client, everest.pk).status_code == status.HTTP_201_CREATED
+        assert (
+            add_admin(platform_site.client, everest.public_id).status_code
+            == status.HTTP_201_CREATED
+        )
 
     def test_refused_for_a_terminated_office(
         self, platform_site: PlatformContext, everest: Consultancy
@@ -192,7 +210,7 @@ class TestAddAdmin:
         with schema_context(PUBLIC_SCHEMA):
             Consultancy.objects.filter(pk=everest.pk).update(status="terminated")
 
-        response = add_admin(platform_site.client, everest.pk)
+        response = add_admin(platform_site.client, everest.public_id)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"detail": "A Terminated Consultancy can't be changed."}
@@ -206,7 +224,7 @@ class TestAddAdmin:
         with schema_context(PUBLIC_SCHEMA):
             Consultancy.objects.filter(pk=everest.pk).update(setup_state=state)
 
-        response = add_admin(platform_site.client, everest.pk)
+        response = add_admin(platform_site.client, everest.public_id)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
@@ -222,7 +240,7 @@ class TestAddAdmin:
     def test_logged_with_ids_only(
         self, platform_site: PlatformContext, everest: Consultancy, json_logs: JsonLogs
     ) -> None:
-        add_admin(platform_site.client, everest.pk)
+        add_admin(platform_site.client, everest.public_id)
 
         with tenant_context(everest):
             staff_id = Staff.objects.get().pk
@@ -238,7 +256,7 @@ class TestAddAdmin:
     def test_the_invite_is_marked_as_made_by_today(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        add_admin(platform_site.client, everest.pk)
+        add_admin(platform_site.client, everest.public_id)
 
         with tenant_context(everest):
             assert Staff.objects.get().joined_on == timezone.localdate()
@@ -248,7 +266,7 @@ class TestWhoCanAdd:
     def test_nobody_logged_in_is_refused(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:
-        response = add_admin(platform_site.new_client(), everest.pk)
+        response = add_admin(platform_site.new_client(), everest.public_id)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert staff_of(everest) == []
@@ -264,15 +282,15 @@ class TestWhoCanAdd:
 
         for client in (abc.new_client(), platform_site.new_client()):
             use_access_token(client, access)
-            assert add_admin(client, everest.pk).status_code in {401, 403, 404}
-            assert add_admin(client, abc.consultancy.pk).status_code in {401, 403, 404}
+            assert add_admin(client, everest.public_id).status_code in {401, 403, 404}
+            assert add_admin(client, abc.consultancy.public_id).status_code in {401, 403, 404}
 
         assert staff_of(everest) == []
         assert len(staff_of(abc.consultancy)) == 1
 
     def test_only_post(self, platform_site: PlatformContext, everest: Consultancy) -> None:
         for method in ("get", "put", "patch", "delete"):
-            response = getattr(platform_site.client, method)(admins_url(everest.pk))
+            response = getattr(platform_site.client, method)(admins_url(everest.public_id))
             assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
@@ -286,7 +304,7 @@ class TestIsolation:
         abc = make_consultancy("ABC Education", "abcedu")
         abc_admin = abc.add_staff(Role.ADMIN)
 
-        add_admin(platform_site.client, everest.pk, {"name": NAME, "email": abc_admin.email})
+        add_admin(platform_site.client, everest.public_id, {"name": NAME, "email": abc_admin.email})
 
         assert [row[1] for row in staff_of(everest)] == [abc_admin.email]
         assert [row[1] for row in staff_of(abc.consultancy)] == [abc_admin.email]
@@ -318,7 +336,7 @@ class TestRefusedInput:
     def test_bad_bodies_add_nobody(
         self, platform_site: PlatformContext, everest: Consultancy, body: object
     ) -> None:
-        response = add_admin(platform_site.client, everest.pk, body)
+        response = add_admin(platform_site.client, everest.public_id, body)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert staff_of(everest) == []
@@ -329,12 +347,14 @@ class TestRefusedInput:
         self, platform_site: PlatformContext, everest: Consultancy, value: str
     ) -> None:
         for body in ({"name": value, "email": EMAIL}, {"name": NAME, "email": value}):
-            response = add_admin(platform_site.client, everest.pk, body)
+            response = add_admin(platform_site.client, everest.public_id, body)
             assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert staff_of(everest) == []
 
     def test_only_json_is_taken(self, platform_site: PlatformContext, everest: Consultancy) -> None:
-        response = platform_site.client.post(admins_url(everest.pk), {"name": NAME, "email": EMAIL})
+        response = platform_site.client.post(
+            admins_url(everest.public_id), {"name": NAME, "email": EMAIL}
+        )
 
         assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
@@ -343,4 +363,4 @@ class TestRefusedInput:
     ) -> None:
         office = api_client(build_host("everest"))
 
-        assert add_admin(office, everest.pk).status_code == status.HTTP_404_NOT_FOUND
+        assert add_admin(office, everest.public_id).status_code == status.HTTP_404_NOT_FOUND

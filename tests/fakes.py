@@ -11,8 +11,6 @@ from urllib.parse import quote
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 
-from communication.exceptions import SendFailedError
-from communication.types import EmailAccount, SmsAccount
 from documents.exceptions import DocumentStorageError
 from documents.storage import SIGNED_LINK_SECONDS
 
@@ -60,61 +58,6 @@ class FakeDocumentStorage:
         if self.is_down:
             raise DocumentStorageError
         self.files.pop(key, None)
-
-
-# Why the fake SMS company refuses one of its `refused_numbers`.
-SMS_REFUSED_FOR_NUMBER = "The SMS company refused this number."
-
-
-@dataclass(frozen=True)
-class SentSms:
-    """One SMS the fake SMS company was asked to send."""
-
-    account: SmsAccount
-    to: str
-    text: str
-
-
-@dataclass(frozen=True)
-class SentEmail:
-    """One email the fake email server was asked to send."""
-
-    account: EmailAccount
-    to: str
-    subject: str
-    text: str
-
-
-class FakeSmsGateway:
-    """An SMS company in memory: it keeps what it's asked to send, or fails with `failure`.
-
-    `refused_numbers` fail with `SMS_REFUSED_FOR_NUMBER`, so one Student's SMS can fail alone.
-    """
-
-    sent: ClassVar[list[SentSms]] = []
-    failure: ClassVar[str | None] = None
-    refused_numbers: ClassVar[set[str]] = set()
-
-    def send(self, account: SmsAccount, to: str, text: str) -> None:
-        """Keep the SMS, or fail as told."""
-        if self.failure is not None:
-            raise SendFailedError(self.failure)
-        if to in self.refused_numbers:
-            raise SendFailedError(SMS_REFUSED_FOR_NUMBER)
-        self.sent.append(SentSms(account, to, text))
-
-
-class FakeEmailGateway:
-    """An email server in memory: it keeps what it's asked to send, or fails with `failure`."""
-
-    sent: ClassVar[list[SentEmail]] = []
-    failure: ClassVar[str | None] = None
-
-    def send(self, account: EmailAccount, to: str, subject: str, text: str) -> None:
-        """Keep the email, or fail as told."""
-        if self.failure is not None:
-            raise SendFailedError(self.failure)
-        self.sent.append(SentEmail(account, to, subject, text))
 
 
 class BrokenEmailBackend(BaseEmailBackend):

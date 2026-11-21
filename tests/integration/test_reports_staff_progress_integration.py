@@ -74,7 +74,9 @@ def report(office: ConsultancyContext, period: dict[str, str] | None = None) -> 
 
 def row_of(answer: dict[str, Any], table: str, staff: Staff) -> dict[str, Any]:
     """One person's row in one table."""
-    found: list[dict[str, Any]] = [row for row in answer[table] if row["id"] == staff.pk]
+    found: list[dict[str, Any]] = [
+        row for row in answer[table] if row["id"] == str(staff.public_id)
+    ]
     assert len(found) == 1, answer[table]
     return found[0]
 
@@ -110,7 +112,7 @@ class TestCounsellorsTable:
         bikash_row = row_of(answer, "counsellors", bikash)
         assert list(bikash_row) == ["id", "name", "is_active", *COUNSELLOR_COLUMNS]
         assert bikash_row == {
-            "id": bikash.pk,
+            "id": str(bikash.public_id),
             "name": "Bikash Thapa",
             "is_active": True,
             "students": 2,
@@ -178,7 +180,7 @@ class TestFrontDeskTable:
 
         assert names(answer, "front_desk") == [("Maya Gurung", True), ("Sunita Shrestha", True)]
         assert row_of(answer, "front_desk", desk) == {
-            "id": desk.pk,
+            "id": str(desk.public_id),
             "name": "Sunita Shrestha",
             "is_active": True,
             "visitors_registered": 2,
@@ -200,7 +202,7 @@ class TestTeachersTable:
         answer = report(abc)
 
         assert row_of(answer, "teachers", teacher) == {
-            "id": teacher.pk,
+            "id": str(teacher.public_id),
             "name": "Gita Lama",
             "is_active": True,
             "classes_taken": 2,
@@ -239,7 +241,7 @@ class TestSameAsTheProgressTab:
 
         answer = report(abc, period)
 
-        compared: set[tuple[str, int]] = set()
+        compared: set[tuple[str, str]] = set()
         for table in ("counsellors", "front_desk", "teachers"):
             for row in answer[table]:
                 progress = abc.client.get(f"/api/staff/{row['id']}/progress/", period).json()
@@ -247,8 +249,12 @@ class TestSameAsTheProgressTab:
                     if card["count"] in row:
                         assert row[card["count"]] == card["value"], (table, row, card)
                         compared.add((table, row["id"]))
-        assert {("counsellors", admin.pk), ("counsellors", bikash.pk)} <= compared
-        assert {("front_desk", desk.pk), ("teachers", teacher.pk)} <= compared
+        assert {("counsellors", str(admin.public_id)), ("counsellors", str(bikash.public_id))} <= (
+            compared
+        )
+        assert {("front_desk", str(desk.public_id)), ("teachers", str(teacher.public_id))} <= (
+            compared
+        )
         assert row_of(answer, "counsellors", admin)["applications_made"] == 1
         assert row_of(answer, "front_desk", desk)["new_leads"] == 0  # before the period
 
@@ -279,7 +285,7 @@ class TestPlatformAdminActions:
         for table in ("counsellors", "front_desk", "teachers"):
             for row in answer[table]:
                 counts = {k: v for k, v in row.items() if k not in {"id", "name", "is_active"}}
-                if row["id"] == bikash.pk:
+                if row["id"] == str(bikash.public_id):
                     counts.pop("students")
                 assert set(counts.values()) <= {0}, row
         assert row_of(answer, "counsellors", bikash)["students"] == 1

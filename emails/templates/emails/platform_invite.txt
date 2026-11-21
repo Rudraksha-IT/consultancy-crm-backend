@@ -1,0 +1,11 @@
+Hello {{ name }},
+
+You've been added to the Platform as a Platform Admin. Open the Join page, enter your email and this code, then choose your password:
+
+{{ code }}
+
+Join page: {{ link_text }}
+
+It works for {{ minutes }} minutes, once. After that, ask for a new one.
+
+If you weren't expecting it, you can ignore this email.

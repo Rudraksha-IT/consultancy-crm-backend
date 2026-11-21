@@ -20,6 +20,8 @@ from datetime import datetime
 from django.db import transaction
 from django.utils import timezone
 
+from course_files.models import CourseFile
+from document_examples.models import DocumentExample
 from documents.exceptions import (
     AlreadyInBinError,
     NotInBinError,
@@ -213,12 +215,17 @@ def bin_items() -> list[BinItem]:
 
 
 def count_in_bin() -> int:
-    """How many items wait in the Bin (Admin Home)."""
+    """How many items wait in the Bin (Admin Home).
+
+    Documents, their files, Course Files and Document Examples.
+    """
     whole = Document.objects.filter(binned_at__isnull=False).count()
     single = DocumentFile.objects.filter(
         binned_at__isnull=False, document__binned_at__isnull=True
     ).count()
-    return whole + single
+    course_files = CourseFile.objects.filter(binned_at__isnull=False).count()
+    examples = DocumentExample.objects.filter(binned_at__isnull=False).count()
+    return whole + single + course_files + examples
 
 
 def file_in_bin(file_id: int) -> DocumentFile:

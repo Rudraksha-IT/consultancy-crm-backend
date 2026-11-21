@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{ subject }}</title>
+<style>
+  @media (prefers-color-scheme: dark) {
+    .em-page { background: #121417 !important; }
+    .em-card, .em-text { background: #1c1f24 !important; }
+    .em-text, .em-text p, .em-text li, .em-text td { color: #e6e8eb !important; }
+    .em-muted { color: #aeb5bf !important; }
+    .em-foot { background: #16191d !important; color: #b4bac3 !important; border-top-color: #2a2f36 !important; }
+    .em-foot b, .em-foot p { color: #c9ced6 !important; }
+    .em-code { background: #24282e !important; color: #ffffff !important; border-color: #3a4048 !important; }
+  }
+  @media (max-width: 620px) {
+    .em-pad { padding-left: 20px !important; padding-right: 20px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#eef0f3;">
+<table role="presentation" class="em-page" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef0f3;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" class="em-card" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;border-top:4px solid {{ accent }};">
+<tr><td class="em-pad" style="padding:20px 28px 8px;background:#ffffff;border-radius:4px 4px 0 0;">{% if logo_cid %}<img src="cid:{{ logo_cid }}" alt="{{ brand }}" height="44" style="display:block;height:44px;width:auto;max-width:200px;border:0;">{% else %}<span style="font:700 19px/1.3 Arial,Helvetica,sans-serif;color:{{ accent }};">{{ brand }}</span>{% endif %}</td></tr>
+<tr><td class="em-pad em-text" style="padding:8px 28px 20px;background:#ffffff;font:15px/1.6 Arial,Helvetica,sans-serif;color:#1f2933;word-wrap:break-word;overflow-wrap:anywhere;">
+{% include body_template %}
+</td></tr>
+<tr><td class="em-pad em-foot" style="padding:16px 28px 22px;background:#f6f7f9;border-top:1px solid #e3e6ea;border-radius:0 0 8px 8px;font:13px/1.55 Arial,Helvetica,sans-serif;color:#4a5563;">
+<b style="color:#1f2933;">{{ brand }}</b>
+{% for line in footer_lines %}<div>{{ line }}</div>
+{% endfor %}<p style="margin:10px 0 0;color:#5f6b7a;">This email comes from an address that can't receive replies.{% if contact_email %} To answer, write to {{ contact_email }}.{% endif %}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

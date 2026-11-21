@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import F
@@ -62,7 +63,7 @@ WORK_EXPERIENCE_FIELDS = frozenset({"employer", "job_title", "started_on", "ende
 logger = logging.getLogger(__name__)
 
 
-def profile_of(student_id: int) -> Student:
+def profile_of(student_id: UUID) -> Student:
     """The Student with their counsellor, academic history, test scores, Applications and Visas.
 
     Raises:
@@ -75,13 +76,14 @@ def profile_of(student_id: int) -> Student:
             "test_scores",
             "work_experience",
             "applications__course__university",
+            "applications__course__files",
             "applications__documents__document_type",
             "applications__documents__files",
             "visas__application__course__university",
             "visas__documents__document_type",
             "visas__documents__files",
         )
-        .get(pk=student_id)
+        .get(public_id=student_id)
     )
 
 

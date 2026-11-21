@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any
+from uuid import UUID
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -12,7 +13,7 @@ from rest_framework import serializers
 from batches.models import NAME_MAX_LENGTH, TIME_SLOT_MAX_LENGTH, Mark, TestType
 from batches.services import active_teachers
 from batches.types import BatchDetails
-from config.serializers import StrictSerializer
+from config.serializers import StrictSerializer, parse_record_id
 from staff.models import Staff
 from staff.serializers import PlainTextField
 from students.models import Student
@@ -29,7 +30,6 @@ ENDS_ON_MESSAGE = f"Enter an end date within {YEARS_AWAY} years of today."
 ENDS_BEFORE_STARTS_MESSAGE = "It can't end before it starts."
 STUDENT_MESSAGE = "Choose a Student from the list."
 ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
-LARGEST_ID = 2**63 - 1
 _ALL_MESSAGES = ("required", "null", "blank", "invalid", "invalid_choice")
 
 
@@ -39,13 +39,6 @@ def _same_message(message: str) -> dict[str, Any]:
 
 def _length_message(limit: int) -> str:
     return f"Use at most {limit} characters."
-
-
-def _an_id(data: object) -> int | None:
-    """`data` as a database id, or None when it can't be one (text, decimals, booleans...)."""
-    if isinstance(data, bool) or not isinstance(data, int) or not 1 <= data <= LARGEST_ID:
-        return None
-    return data
 
 
 def years_from(today: date, years: int) -> date:
@@ -98,23 +91,25 @@ class BatchDateField(serializers.Field[date, str, str, Any]):
         return value.isoformat()
 
 
-class TeacherField(serializers.Field[Staff, int, int, Any]):
-    """Who teaches the class: an active Teacher, by id."""
+class TeacherField(serializers.Field[Staff, str, str, Any]):
+    """Who teaches the class: an active Teacher, by UUID (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(TEACHER_MESSAGE))
 
     def to_internal_value(self, data: object) -> Staff:
         """Return the Teacher; anyone else, invited, gone or unknown is refused."""
-        pk = _an_id(data)
-        teacher = None if pk is None else active_teachers().filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        teacher = (
+            None if public_id is None else active_teachers().filter(public_id=public_id).first()
+        )
         if teacher is None:
             self.fail("invalid")
         return teacher
 
-    def to_representation(self, value: Staff) -> int:
+    def to_representation(self, value: Staff) -> str:
         """Return the id (unused: answers are built by hand)."""
-        return value.pk
+        return str(value.public_id)
 
 
 class BatchSerializer(StrictSerializer[None]):
@@ -148,23 +143,23 @@ class BatchSerializer(StrictSerializer[None]):
         )
 
 
-class StudentChoiceField(serializers.Field[Student, int, int, Any]):
-    """A Student, by id."""
+class StudentChoiceField(serializers.Field[Student, str, str, Any]):
+    """A Student, by UUID (ADR 0027)."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(STUDENT_MESSAGE))
 
     def to_internal_value(self, data: object) -> Student:
         """Return the Student; anything but a known Student's id is refused."""
-        pk = _an_id(data)
-        student = None if pk is None else Student.objects.filter(pk=pk).first()
+        public_id = parse_record_id(data)
+        student = None if public_id is None else Student.objects.filter(public_id=public_id).first()
         if student is None:
             self.fail("invalid")
         return student
 
-    def to_representation(self, value: Student) -> int:
-        """Return the id (unused: answers are built by hand)."""
-        return value.pk
+    def to_representation(self, value: Student) -> str:
+        """Return the UUID (unused: answers are built by hand)."""
+        return str(value.public_id)
 
 
 class NewMemberSerializer(StrictSerializer[None]):
@@ -186,14 +181,14 @@ TOO_MANY_MARKS_MESSAGE = f"Send at most {MAX_MARKS} marks at once."
 _MARK_KEYS = frozenset({"student", "mark"})
 
 
-class MarksField(serializers.Field[dict[int, Mark], list[object], list[object], Any]):
-    """A class day's marks: a list of {"student": id, "mark": one of `Mark`}, each Student once."""
+class MarksField(serializers.Field[dict[UUID, Mark], list[object], list[object], Any]):
+    """A class day's marks: a list of {"student": UUID, "mark": a `Mark`}, each Student once."""
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(MARKS_MESSAGE))
 
-    def to_internal_value(self, data: object) -> dict[int, Mark]:
-        """Return each Student id's mark; anything else, or a Student twice, is refused."""
+    def to_internal_value(self, data: object) -> dict[UUID, Mark]:
+        """Return each Student UUID's mark; anything else, or a Student twice, is refused."""
         if not isinstance(data, list):
             self.fail("invalid")
         if len(data) > MAX_MARKS:
@@ -203,17 +198,17 @@ class MarksField(serializers.Field[dict[int, Mark], list[object], list[object], 
             raise serializers.ValidationError(MARKED_TWICE_MESSAGE)
         return marks
 
-    def _one(self, item: object) -> tuple[int, Mark]:
+    def _one(self, item: object) -> tuple[UUID, Mark]:
         if not isinstance(item, dict) or item.keys() != _MARK_KEYS:
             self.fail("invalid")
-        pk, mark = _an_id(item["student"]), item["mark"]
-        if pk is None or not isinstance(mark, str) or mark not in Mark.values:
+        student, mark = parse_record_id(item["student"]), item["mark"]
+        if student is None or not isinstance(mark, str) or mark not in Mark.values:
             self.fail("invalid")
-        return pk, Mark(mark)
+        return student, Mark(mark)
 
-    def to_representation(self, value: dict[int, Mark]) -> list[object]:
+    def to_representation(self, value: dict[UUID, Mark]) -> list[object]:
         """Return the marks as sent (unused: answers are built by hand)."""
-        return [{"student": pk, "mark": mark.value} for pk, mark in value.items()]
+        return [{"student": str(one), "mark": mark.value} for one, mark in value.items()]
 
 
 class AttendanceSerializer(StrictSerializer[None]):
@@ -221,7 +216,7 @@ class AttendanceSerializer(StrictSerializer[None]):
 
     marks = MarksField()
 
-    def to_marks(self) -> dict[int, Mark]:
-        """The validated marks, by Student id."""
-        marks: dict[int, Mark] = self.validated_data["marks"]
+    def to_marks(self) -> dict[UUID, Mark]:
+        """The validated marks, by Student UUID."""
+        marks: dict[UUID, Mark] = self.validated_data["marks"]
         return marks

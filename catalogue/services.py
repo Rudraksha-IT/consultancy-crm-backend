@@ -16,7 +16,12 @@ from django.db.models import Count, Prefetch, ProtectedError, Q, QuerySet
 from django.db.models.functions import Lower
 
 from catalogue.csv_import import CatalogueRow, ParsedCatalogue, RowProblem
-from catalogue.exceptions import DuplicateNameError, InUseError, NotArchivedError
+from catalogue.exceptions import (
+    DuplicateNameError,
+    InUseError,
+    KeepsFilesError,
+    NotArchivedError,
+)
 from catalogue.intakes import tidy_intakes
 from catalogue.models import Course, Intake, University
 from catalogue.types import (
@@ -28,6 +33,7 @@ from catalogue.types import (
     UniversityEdit,
 )
 from commission.models import Commission
+from course_files.models import CourseFile
 from documents.models import DocumentRequirement
 from documents.requirements import set_course_requirements
 from staff.models import Staff
@@ -143,11 +149,15 @@ def delete_university(university: University, by: Staff) -> None:
 
     Raises:
         NotArchivedError: It isn't saved as archived.
+        KeepsFilesError: One of its Courses keeps Course Files, even in the Bin.
         InUseError: An Application uses one of its Courses, or a Commission uses it.
     """
     if not university.archived:
         raise NotArchivedError
     courses = Course.objects.filter(university=university)
+    files = CourseFile.objects.filter(course__university=university).count()
+    if files:
+        raise KeepsFilesError(files)
     applications = courses.aggregate(n=Count("applications"))["n"] or 0
     if applications:
         raise InUseError(applications, "application")
@@ -258,10 +268,10 @@ def course_by_id(course_id: int) -> Course:
 
 
 def _courses_with_uses() -> QuerySet[Course]:
-    """Courses with their Intakes, extra documents and how many Applications use each."""
+    """Courses with Intakes, extra documents, Course Files and how many Applications use each."""
     # A count drops the model's own ordering (GROUP BY), so name order is asked for again.
     return (
-        Course.objects.prefetch_related("intakes", _asked_documents())
+        Course.objects.prefetch_related("intakes", _asked_documents(), "files")
         .annotate(application_count=Count("applications"))
         .order_by(Lower("name"), "pk")
     )
