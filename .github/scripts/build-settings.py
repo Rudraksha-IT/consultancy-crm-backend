@@ -32,7 +32,7 @@ ARGUMENTS = 2
 ROUTE = frozenset(
     {
         "DEPLOY_SSH_KEY",
-        "DEPLOY_KNOWN_HOSTS",
+        "DEPLOY_HOST_KEY",
         "DEPLOY_HOST",
         "DEPLOY_PORT",
         "CF_ACCESS_CLIENT_ID",
