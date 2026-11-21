@@ -25,5 +25,5 @@ Recorded 2026-11-17 for decisions made in issues 07, 08, 25, 44 and 61.
 
 ## Consequences
 
-- Production keys live in AWS Secrets Manager or SSM Parameter Store and reach the containers as environment values.
+- Production keys live only in the server's env files (owner-only permissions) and the password manager, and reach the containers as environment values (ADR 0025).
 - Rotating `TWO_FACTOR_SECRETS_KEY` needs re-sealing (or re-entering) what was sealed with the old one.

@@ -50,7 +50,7 @@ JWT_ACCESS_TOKEN_LIFETIME = read_access_token_lifetime(os.environ)
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(days=7)
 
 # Two-step login (issue 61). Authenticator secrets are sealed with TWO_FACTOR_SECRETS_KEY, a
-# Fernet key (from Secrets Manager or SSM), never SECRET_KEY. PLATFORM_ADMIN_TWO_FACTOR_DEFAULT
+# Fernet key (from the server's env file), never SECRET_KEY. PLATFORM_ADMIN_TWO_FACTOR_DEFAULT
 # (true/false, default false) is whether a Platform Admin made by the deploy starts with it on;
 # true needs the key. A bad value stops the server at start-up.
 _TWO_FACTOR = read_two_factor_settings(os.environ)
@@ -200,12 +200,14 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() == "true"
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", f"no-reply@{PRODUCT_DOMAIN}")
 
-# Document files (issue 16): private S3, one prefix per Consultancy schema. In AWS the server's IAM
-# role gives access; locally Compose points these at MinIO (and AWS_* keys in the environment).
+# Document files (issue 16): private S3-compatible storage, one prefix per Consultancy schema. In
+# production Cloudflare R2 (ADR 0025; region `auto`, AWS_* keys of an R2 token in the env file);
+# locally Compose points these at MinIO.
 DOCUMENT_STORAGE = os.environ.get("DOCUMENT_STORAGE", "documents.storage.S3DocumentStorage")
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
 DOCUMENTS_S3_REGION = os.environ.get("DOCUMENTS_S3_REGION", "ap-south-1")
-# Empty means AWS S3 itself. The public endpoint signs links for the browser (MinIO locally).
+# The S3 endpoint (R2's account address in production). The public endpoint signs links for the
+# browser (the same R2 address in production; MinIO's published port locally).
 DOCUMENTS_S3_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_ENDPOINT_URL", "")
 DOCUMENTS_S3_PUBLIC_ENDPOINT_URL = os.environ.get("DOCUMENTS_S3_PUBLIC_ENDPOINT_URL", "")
 # The files of one Document upload (documents.files.MAX_FILES_AT_ONCE, 10) plus one, so that one

@@ -21,5 +21,5 @@ Recorded 2026-11-17 for the decision made in issue 59.
 
 ## Consequences
 
-- The values come from Secrets Manager or SSM, like every other secret (ADR 0016).
+- The values come from the server's env files, like every other secret (ADR 0016).
 - Two-step login starts on or off from `PLATFORM_ADMIN_TWO_FACTOR_DEFAULT` (ADR 0009).
