@@ -256,6 +256,7 @@ class TestPlatformEvents:
         body = {
             "name": "Everest Education",
             "subdomain": "everest",
+            "contact_email": "info@everest.test",
         }
 
         created = platform_site.client.post(CONSULTANCIES_URL, body, format="json").json()

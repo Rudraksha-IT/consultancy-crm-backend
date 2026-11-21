@@ -205,6 +205,7 @@ class TestPlatformSetsTheme:
         return {
             "name": "Everest Education",
             "subdomain": "everest",
+            "contact_email": "info@everest.test",
             **extra,
         }
 

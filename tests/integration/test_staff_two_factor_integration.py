@@ -865,7 +865,11 @@ class TestEnvDefault:
         platform_site.log_in()
         response = platform_site.client.post(
             "/api/platform/consultancies/",
-            {"name": "Everest Education", "subdomain": "everest"},
+            {
+                "name": "Everest Education",
+                "subdomain": "everest",
+                "contact_email": "info@everest.test",
+            },
             format="json",
         )
         assert response.status_code == status.HTTP_202_ACCEPTED, response.content

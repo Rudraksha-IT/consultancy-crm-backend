@@ -337,6 +337,7 @@ class TestWhereItWorks:
             {
                 "name": "Login Ltd",
                 "subdomain": "login",
+                "contact_email": "info@login.test",
             },
             format="json",
         )
@@ -418,7 +419,7 @@ class TestDirectoryKeptInStep:
         platform_site.log_in()
         response = platform_site.client.post(
             "/api/platform/consultancies/",
-            {"name": "Delta Study", "subdomain": "beta"},
+            {"name": "Delta Study", "subdomain": "beta", "contact_email": "info@delta.test"},
             format="json",
         )
         assert response.status_code == status.HTTP_202_ACCEPTED

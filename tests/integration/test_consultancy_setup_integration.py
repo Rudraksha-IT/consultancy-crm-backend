@@ -65,6 +65,7 @@ def new_consultancy(**overrides: object) -> dict[str, object]:
     return {
         "name": "Everest Education",
         "subdomain": "everest",
+        "contact_email": "info@everest.test",
         **overrides,
     }
 
@@ -380,6 +381,7 @@ class TestRefusedInput:
             name="Everest Education",
             subdomain="everest",
             theme=DEFAULT_THEME,
+            contact_email="info@everest.test",
         )
         with schema_context(PUBLIC_SCHEMA):
             start_consultancy_setup(onboarding, by=ops)

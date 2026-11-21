@@ -196,10 +196,21 @@ class OfficeTextField(serializers.Field[str, str, str, Any]):
 
 
 class ContactEmailField(OfficeTextField):
-    """One plain email address (no name, no list), where Students' replies go."""
+    """One plain email address (no name, no list), where Students' and staff's replies go.
+
+    Never empty (ticket 20): it is asked when the office is opened and can't be cleared, so
+    every office email has Reply-To set to the office.
+    """
 
     def __init__(self) -> None:
         super().__init__(CONTACT_EMAIL_MESSAGE, CONTACT_EMAIL_MAX_LENGTH)
+
+    def to_internal_value(self, data: object) -> str:
+        """Return the trimmed address; empty (or only spaces) gets the field's message."""
+        value = super().to_internal_value(data)
+        if not value:
+            self.fail("invalid")
+        return value
 
     def check(self, value: str) -> bool:
         """Return whether it is a single real address."""
@@ -263,7 +274,10 @@ class AddressLineField(serializers.Field[str, str, str, Any]):
 
 
 class OfficeDetailsSerializer(StrictSerializer[None]):
-    """Configuration → General → Office details: every field sent, each checked; empty is fine."""
+    """Configuration → General → Office details: every field sent, each checked.
+
+    The contact email can't be empty; the other fields may be.
+    """
 
     contact_email = ContactEmailField()
     phone = PhoneField()

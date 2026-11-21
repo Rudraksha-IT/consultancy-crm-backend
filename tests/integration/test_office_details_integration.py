@@ -1,8 +1,9 @@
 """Configuration → General → Office details (spec stories 11-16).
 
 An Admin (or a Platform Admin in Support Access) sets the office's contact email, phone, address
-(two lines) and website. Each is checked; empty is allowed. Every Role reads them, and whether the
-contact email is set, from the context, so screens can show "add the contact email first".
+(two lines) and website. Each is checked; the contact email can't be emptied (ticket 20, spec
+120), the others may be empty. Every Role reads them, and whether the contact email is set, from
+the context, so screens can show "add the contact email first" (offices opened before ticket 20).
 """
 
 from __future__ import annotations
@@ -85,27 +86,49 @@ class TestAdminSavesOfficeDetails:
             assert consultancy["office_details"] == FULL
             assert consultancy["has_contact_email"] is True
 
-    def test_empty_fields_are_allowed_and_clear_what_was_there(
+    def test_empty_optional_fields_are_allowed_and_clear_what_was_there(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
         abc = make_consultancy("ABC Education", "abcedu")
         abc.log_in_as(Role.ADMIN)
         abc.client.put(OFFICE_DETAILS_URL, FULL, format="json")
+        only_email = {**EMPTY, "contact_email": FULL["contact_email"]}
 
-        response = abc.client.put(OFFICE_DETAILS_URL, EMPTY, format="json")
+        response = abc.client.put(OFFICE_DETAILS_URL, only_email, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"office_details": EMPTY, "has_contact_email": False}
-        assert _context_details(abc.client)["office_details"] == EMPTY
+        assert response.json() == {"office_details": only_email, "has_contact_email": True}
+        assert _context_details(abc.client)["office_details"] == only_email
+
+    @pytest.mark.parametrize("empty", ["", "   "])
+    def test_the_contact_email_cant_be_emptied(
+        self, make_consultancy: ConsultancyFactory, empty: str
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        abc.log_in_as(Role.ADMIN)
+        abc.client.put(OFFICE_DETAILS_URL, FULL, format="json")
+
+        response = abc.client.put(
+            OFFICE_DETAILS_URL, {**FULL, "contact_email": empty}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == {"contact_email": [EMAIL_MESSAGE]}
+        assert _context_details(abc.client)["office_details"] == FULL
 
     def test_only_some_fields_set(self, make_consultancy: ConsultancyFactory) -> None:
         abc = make_consultancy("ABC Education", "abcedu")
         abc.log_in_as(Role.ADMIN)
-        body = {**EMPTY, "phone": "01-4412345", "website": "http://himal.com.np/contact"}
+        body = {
+            **EMPTY,
+            "contact_email": "info@himal.com.np",
+            "phone": "01-4412345",
+            "website": "http://himal.com.np/contact",
+        }
 
         response = abc.client.put(OFFICE_DETAILS_URL, body, format="json")
 
-        assert response.json() == {"office_details": body, "has_contact_email": False}
+        assert response.json() == {"office_details": body, "has_contact_email": True}
 
     def test_text_is_trimmed_and_address_spaces_are_tidied(
         self, make_consultancy: ConsultancyFactory
@@ -137,7 +160,7 @@ class TestAdminSavesOfficeDetails:
         # An address is free text; screens and emails escape it, so it is stored exactly.
         abc = make_consultancy("ABC Education", "abcedu")
         abc.log_in_as(Role.ADMIN)
-        body = {**EMPTY, "address_line1": '<b>Tower</b> & Sons\' "Plaza"'}
+        body = {**FULL, "address_line1": '<b>Tower</b> & Sons\' "Plaza"'}
 
         response = abc.client.put(OFFICE_DETAILS_URL, body, format="json")
 

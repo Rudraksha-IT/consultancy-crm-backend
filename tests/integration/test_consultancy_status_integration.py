@@ -188,6 +188,7 @@ def new_consultancy(**overrides: object) -> dict[str, object]:
     return {
         "name": "Everest Education",
         "subdomain": "everest",
+        "contact_email": "info@everest.test",
         **overrides,
     }
 
@@ -773,6 +774,7 @@ class TestServicesGuardThemselves:
             name="Everest Education",
             subdomain="everest",
             theme=DEFAULT_THEME,
+            contact_email="info@everest.test",
             status=ConsultancyStatus.ACTIVE,
         )
 

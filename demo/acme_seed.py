@@ -48,6 +48,7 @@ with schema_context("public"):
                 name="Acme Education Consultancy",
                 subdomain="acme",
                 theme=DEFAULT_THEME,
+                contact_email="info@acme.com",
                 status=ConsultancyStatus.ACTIVE,
                 paid_until=date(2027, 6, 30),
             ),

@@ -5474,7 +5474,11 @@ class TestConsultancySetupIsolation:
         abc = make_consultancy("ABC Education", "abcedu")
         abc_admin = abc.add_staff(Role.ADMIN)
         platform_site.log_in()
-        body = {"name": "Everest Education", "subdomain": "everest"}
+        body = {
+            "name": "Everest Education",
+            "subdomain": "everest",
+            "contact_email": "info@everest.test",
+        }
 
         created = platform_site.client.post(self.CREATE, body, format="json").json()
         run_queued_jobs()
@@ -5501,7 +5505,7 @@ class TestConsultancySetupIsolation:
         abc = make_consultancy("ABC Education", "abcedu")
         xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
         access = abc.tokens_for(abc.add_staff(Role.ADMIN)).access
-        body = {"name": "X", "subdomain": "everest"}
+        body = {"name": "X", "subdomain": "everest", "contact_email": "info@everest.test"}
 
         for client in (abc.new_client(), xyz.new_client(), platform_site.new_client()):
             use_access_token(client, access)

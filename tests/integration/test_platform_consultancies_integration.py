@@ -53,6 +53,8 @@ DEFAULT_THEME = {
 
 
 TERMINATE = {"status": "terminated", "reason": "Contract ended"}
+CONTACT_EMAIL = "info@everest.test"
+CONTACT_EMAIL_MESSAGE = ["Enter a real email address, like info@youroffice.com."]
 
 
 def status_url(consultancy_id: object) -> str:
@@ -70,6 +72,7 @@ def new_consultancy(**overrides: str) -> dict[str, str]:
     return {
         "name": "Everest Education",
         "subdomain": "everest",
+        "contact_email": CONTACT_EMAIL,
         **overrides,
     }
 
@@ -193,7 +196,7 @@ class TestCreateConsultancy:
         response = platform_site.client.post(CONSULTANCIES_URL, {}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert set(response.json()) == {"name", "subdomain"}
+        assert set(response.json()) == {"name", "subdomain", "contact_email"}
 
     def test_nothing_is_created_when_the_request_is_invalid(
         self, platform_site: PlatformContext
@@ -203,6 +206,70 @@ class TestCreateConsultancy:
         create(platform_site.client, subdomain=build_host("everest"))
 
         assert not Consultancy.objects.filter(name="Everest Education").exists()
+
+
+class TestContactEmailWhenOpening:
+    """The office's contact email is asked when it is opened (ticket 20, spec 119)."""
+
+    def test_it_is_saved_as_the_offices_contact_email(self, platform_site: PlatformContext) -> None:
+        platform_site.log_in()
+
+        response = create(platform_site.client, contact_email="  info@everest.test ")
+
+        assert response.status_code == status.HTTP_202_ACCEPTED, response.content
+        office = Consultancy.objects.get(public_id=response.json()["id"])
+        assert office.contact_email == CONTACT_EMAIL
+
+    def test_it_is_required(self, platform_site: PlatformContext) -> None:
+        platform_site.log_in()
+        body = new_consultancy()
+        del body["contact_email"]
+
+        response = platform_site.client.post(CONSULTANCIES_URL, body, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == {"contact_email": CONTACT_EMAIL_MESSAGE}
+        assert not Consultancy.objects.filter(name="Everest Education").exists()
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",
+            "   ",
+            "info@a.test, sales@a.test",
+            "Everest <info@everest.test>",
+            "<script>alert(1)</script>@x.test",
+            "'; DROP TABLE tenancy_consultancy; --",
+            "info@everest.test\nBcc: x@y.test",
+            "not-an-email",
+            f"{'x' * 250}@everest.test",
+            42,
+            None,
+        ],
+    )
+    def test_anything_but_one_real_address_is_refused(
+        self, platform_site: PlatformContext, bad: object
+    ) -> None:
+        platform_site.log_in()
+
+        response = platform_site.client.post(
+            CONSULTANCIES_URL, {**new_consultancy(), "contact_email": bad}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == {"contact_email": CONTACT_EMAIL_MESSAGE}
+        assert not Consultancy.objects.filter(name="Everest Education").exists()
+
+    def test_other_offices_keep_their_contact_email(
+        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        Consultancy.objects.filter(pk=abc.consultancy.pk).update(contact_email="info@abc.test")
+        platform_site.log_in()
+
+        create(platform_site.client)
+
+        assert Consultancy.objects.get(pk=abc.consultancy.pk).contact_email == "info@abc.test"
 
 
 class TestListConsultancies:

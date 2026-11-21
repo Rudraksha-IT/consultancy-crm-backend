@@ -40,6 +40,7 @@ PRODUCT_DOMAIN_URL = "/api/platform/product-domain/"
 JOIN_COMPLETE_URL = "/api/auth/join/complete/"
 LOGIN_URL = "/api/auth/login/"
 EMAIL = "sita@everest.test"
+CONTACT_EMAIL = "info@everest.test"
 NAME = "Sita Sharma"
 NEW_PASSWORD = "Kathmandu!2026"  # noqa: S105  # test-only credential
 INJECTION_STRINGS = [
@@ -83,7 +84,9 @@ def everest(platform_site: PlatformContext) -> Consultancy:
     """A Consultancy created on the Platform and set up, with nobody in it yet."""
     platform_site.log_in()
     created = platform_site.client.post(
-        CONSULTANCIES_URL, {"name": "Everest Education", "subdomain": "everest"}, format="json"
+        CONSULTANCIES_URL,
+        {"name": "Everest Education", "subdomain": "everest", "contact_email": CONTACT_EMAIL},
+        format="json",
     )
     assert created.status_code == status.HTTP_202_ACCEPTED, created.content
     run_queued_jobs()
@@ -119,6 +122,14 @@ class TestProductDomain:
 
 
 class TestAddAdmin:
+    def test_the_invite_has_replies_going_to_the_offices_contact_email(
+        self, platform_site: PlatformContext, everest: Consultancy
+    ) -> None:
+        """The contact email asked when the office was opened (ticket 20, spec 119)."""
+        add_admin(platform_site.client, everest.public_id)
+
+        assert mail.outbox[-1].reply_to == [CONTACT_EMAIL]
+
     def test_invites_an_admin_by_code_into_the_office(
         self, platform_site: PlatformContext, everest: Consultancy
     ) -> None:

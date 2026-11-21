@@ -25,6 +25,8 @@ class ConsultancyOnboarding:
     name: str
     subdomain: str
     theme: ThemeConfig
+    # Where replies to the office's emails go (ticket 20); checked, never empty.
+    contact_email: str
     # The starting Status: Evaluation (14 days), or Active paid up to `paid_until` (spec 13a).
     status: ConsultancyStatus = ConsultancyStatus.EVALUATION
     paid_until: date | None = None
