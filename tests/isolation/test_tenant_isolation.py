@@ -4387,6 +4387,92 @@ MY_DEVICES_URL = "/api/me/devices/"
 SIGN_OUT_OTHERS_URL = "/api/me/devices/sign-out-others/"
 
 
+MY_EMAIL_URL = "/api/me/email/"
+MY_EMAIL_CONFIRM_URL = "/api/me/email/confirm/"
+
+
+class TestWorkEmailChangeIsolation:
+    """A Staff member changes their own email (2026-11-22 ticket 04)."""
+
+    def test_my_token_cant_ask_or_confirm_on_another_consultancy(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz_staff = xyz.add_staff(Role.COUNSELLOR)  # Same primary key as ABC's below.
+        tokens = abc.tokens_for(abc.add_staff(Role.COUNSELLOR))
+        use_access_token(xyz.client, tokens.access)
+
+        answers = [
+            xyz.client.post(
+                MY_EMAIL_URL,
+                {"email": "taken.over@office.com", "password": TEST_PASSWORD},
+                format="json",
+            ),
+            xyz.client.post(
+                MY_EMAIL_CONFIRM_URL,
+                {"email": "taken.over@office.com", "code": "123456"},
+                format="json",
+            ),
+        ]
+
+        assert {answer.status_code for answer in answers} == {status.HTTP_401_UNAUTHORIZED}
+        assert mail.outbox == []
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == xyz_staff.email
+
+    def test_a_code_from_one_office_never_works_in_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc_staff = abc.log_in_as(Role.COUNSELLOR)
+        xyz_staff = xyz.log_in_as(Role.COUNSELLOR)
+        assert abc_staff.pk == xyz_staff.pk
+        new_email = "sita.new@office.com"
+        abc.client.post(
+            MY_EMAIL_URL, {"email": new_email, "password": TEST_PASSWORD}, format="json"
+        )
+
+        answer = xyz.client.post(
+            MY_EMAIL_CONFIRM_URL, {"email": new_email, "code": _emailed_code()}, format="json"
+        )
+
+        assert answer.status_code == status.HTTP_400_BAD_REQUEST
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == xyz_staff.email
+        with tenant_context(abc.consultancy):
+            assert Staff.objects.get(pk=abc_staff.pk).email == abc_staff.email
+
+    def test_the_same_person_in_two_offices_changes_only_one(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        shared = "sita@office.com"
+        new_email = "sita.new@office.com"
+        abc_staff = abc.add_staff(Role.COUNSELLOR, email=shared)
+        xyz_staff = xyz.add_staff(Role.ADMIN, email=shared)
+        use_access_token(abc.client, abc.tokens_for(abc_staff).access)
+        use_access_token(xyz.client, xyz.tokens_for(xyz_staff).access)
+        abc.client.post(
+            MY_EMAIL_URL, {"email": new_email, "password": TEST_PASSWORD}, format="json"
+        )
+
+        answer = abc.client.post(
+            MY_EMAIL_CONFIRM_URL, {"email": new_email, "code": _emailed_code()}, format="json"
+        )
+
+        assert answer.status_code == status.HTTP_200_OK
+        with tenant_context(abc.consultancy):
+            assert Staff.objects.get(pk=abc_staff.pk).email == new_email
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == shared
+        assert xyz.client.get(ME_URL).status_code == status.HTTP_200_OK
+        assert [office.schema_name for office in offices_for(shared)] == ["xyzoverseas"]
+        assert [office.schema_name for office in offices_for(new_email)] == ["abcedu"]
+
+
 class TestMySettingsIsolation:
     def test_my_token_cant_read_or_change_the_same_id_on_another_consultancy(
         self, make_consultancy: ConsultancyFactory
