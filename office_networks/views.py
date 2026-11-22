@@ -21,9 +21,11 @@ from office_networks.answers import (
     limits_answer,
     office_network_answer,
     office_network_change_answer,
+    shown_network,
 )
 from office_networks.exceptions import OfficeNetworkOverlapsError, TooManyOfficeNetworksError
 from office_networks.models import OfficeNetwork
+from office_networks.networks import suggested_network
 from office_networks.serializers import NewOfficeNetworkSerializer
 from office_networks.services import (
     add_office_network,
@@ -111,7 +113,10 @@ class OfficeNetworkView(APIView):
 
 
 class CurrentNetworkView(APIView):
-    """The caller's own internet address and whether it is already on the list (spec 105).
+    """The caller's own internet address, what adding it would add, and whether it is covered.
+
+    For IPv4 the suggestion is the address itself; for IPv6 its /64, the office's group, so every
+    device on the office Wi-Fi can clock in (spec 1-2 of the first live fixes).
 
     The one place an address is ever given back (ADR 0004 rule 4): only to an Admin, only their
     own, so they can press "Add the network I'm on now". It is never stored or logged.
@@ -120,11 +125,13 @@ class CurrentNetworkView(APIView):
     permission_classes = PERMISSIONS
 
     def get(self, request: Request) -> Response:
-        """Return the address (None when it isn't known) and whether it is covered."""
+        """Return the address and suggestion (None when unknown) and whether it is covered."""
         address = client_address(request)
+        suggested = suggested_network(address)
         return Response(
             {
                 "address": None if address is None else str(address),
+                "suggested_network": None if suggested is None else shown_network(str(suggested)),
                 "covered": is_on_an_office_network(address),
             },
             headers={"Cache-Control": "no-store"},

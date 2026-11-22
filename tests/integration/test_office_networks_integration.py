@@ -120,6 +120,11 @@ class TestTheList:
             ("110.44.115.77/24", "110.44.115.0/24", "110.44.115.0/24"),
             ("2400:1A00:B030::1", "2400:1a00:b030::1", "2400:1a00:b030::1/128"),
             ("2400:1a00:b030::/48", "2400:1a00:b030::/48", "2400:1a00:b030::/48"),
+            (
+                "2400:1a00:b030:9:a1b2:c3d4:e5f6:1/64",
+                "2400:1a00:b030:9::/64",
+                "2400:1a00:b030:9::/64",
+            ),
             ("::ffff:110.44.115.82", OFFICE_ADDRESS, "110.44.115.82/32"),
         ],
     )
@@ -392,14 +397,20 @@ class TestLimitsFromTheEnvironment:
 
 
 class TestCurrentNetwork:
-    def test_shows_my_address_and_that_it_isnt_on_the_list(self, abc: ConsultancyContext) -> None:
+    def test_shows_my_address_what_would_be_added_and_that_it_isnt_on_the_list(
+        self, abc: ConsultancyContext
+    ) -> None:
         abc.log_in_as(Role.ADMIN)
         abc.client.defaults["HTTP_X_CLIENT_IP"] = OFFICE_ADDRESS
 
         response = abc.client.get(CURRENT_URL)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"address": OFFICE_ADDRESS, "covered": False}
+        assert response.json() == {
+            "address": OFFICE_ADDRESS,
+            "suggested_network": OFFICE_ADDRESS,
+            "covered": False,
+        }
         assert response["Cache-Control"] == "no-store"
 
     @pytest.mark.parametrize("listed", ["110.44.115.82/32", "110.44.115.0/24"])
@@ -408,17 +419,63 @@ class TestCurrentNetwork:
         add_stored(abc, listed)
         abc.client.defaults["HTTP_X_CLIENT_IP"] = OFFICE_ADDRESS
 
-        assert abc.client.get(CURRENT_URL).json() == {"address": OFFICE_ADDRESS, "covered": True}
+        assert abc.client.get(CURRENT_URL).json() == {
+            "address": OFFICE_ADDRESS,
+            "suggested_network": OFFICE_ADDRESS,
+            "covered": True,
+        }
 
-    def test_ipv6(self, abc: ConsultancyContext) -> None:
+    @pytest.mark.parametrize(
+        ("address", "group"),
+        [
+            ("2400:1a00:b030:9:a1b2:c3d4:e5f6:1", "2400:1a00:b030:9::/64"),
+            ("2400:1A00:B030:9::1", "2400:1a00:b030:9::/64"),
+            ("2400:1a00:b030::", "2400:1a00:b030::/64"),
+        ],
+    )
+    def test_on_ipv6_the_office_group_is_suggested(
+        self, abc: ConsultancyContext, address: str, group: str
+    ) -> None:
         abc.log_in_as(Role.ADMIN)
-        add_stored(abc, "2400:1a00:b030::/48")
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = address
+
+        body = abc.client.get(CURRENT_URL).json()
+
+        assert body["suggested_network"] == group
+        assert body["covered"] is False
+
+    @pytest.mark.parametrize("listed", ["2400:1a00:b030::/48", "2400:1a00:b030:9::/64"])
+    def test_ipv6_covered_by_a_saved_group(self, abc: ConsultancyContext, listed: str) -> None:
+        abc.log_in_as(Role.ADMIN)
+        add_stored(abc, listed)
         abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::1"
 
         assert abc.client.get(CURRENT_URL).json() == {
             "address": "2400:1a00:b030:9::1",
+            "suggested_network": "2400:1a00:b030:9::/64",
             "covered": True,
         }
+
+    def test_a_saved_single_ipv6_address_covers_only_itself(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        add_stored(abc, "2400:1a00:b030:9::1/128")
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::2"
+
+        assert abc.client.get(CURRENT_URL).json()["covered"] is False
+        assert abc.client.get(LIST_URL).json()["networks"][0]["network"] == "2400:1a00:b030:9::1"
+        assert stored(abc) == [("Office", "2400:1a00:b030:9::1/128")]
+
+    def test_the_suggestion_is_added_as_it_is(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9:a1b2:c3d4:e5f6:1"
+        suggested = abc.client.get(CURRENT_URL).json()["suggested_network"]
+
+        added = add(abc.client, {"label": "Office", "network": suggested})
+        again = abc.client.get(CURRENT_URL).json()
+
+        assert added.status_code == status.HTTP_201_CREATED
+        assert stored(abc) == [("Office", "2400:1a00:b030:9::/64")]
+        assert again["covered"] is True
 
     @pytest.mark.parametrize("sent", [None, "", "not-an-address", "<script>", "1.2.3.4, 5.6.7.8"])
     def test_without_a_usable_address_nothing_is_shown(
@@ -429,7 +486,11 @@ class TestCurrentNetwork:
         if sent is not None:
             abc.client.defaults["HTTP_X_CLIENT_IP"] = sent
 
-        assert abc.client.get(CURRENT_URL).json() == {"address": None, "covered": False}
+        assert abc.client.get(CURRENT_URL).json() == {
+            "address": None,
+            "suggested_network": None,
+            "covered": False,
+        }
 
     def test_the_address_is_never_logged_or_stored(
         self, abc: ConsultancyContext, json_logs: JsonLogs
@@ -440,7 +501,10 @@ class TestCurrentNetwork:
         abc.client.get(CURRENT_URL)
         add(abc.client, GOOD_BODY)
         abc.client.get(LIST_URL)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9:a1b2:c3d4:e5f6:1"
+        abc.client.get(CURRENT_URL)
 
+        assert "2400:1a00:b030:9" not in json_logs.text()
         assert "27.34.20.9" not in json_logs.text()
         assert "27.34.20.9" not in str(stored(abc)) + str(changes(abc))
 

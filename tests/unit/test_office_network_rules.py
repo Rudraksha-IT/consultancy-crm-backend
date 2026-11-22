@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ipaddress import IPv4Address, ip_address, ip_network
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 
 import pytest
 
@@ -13,6 +13,7 @@ from office_networks.networks import (
     is_on_office_network,
     overlaps_any,
     parse_office_network,
+    suggested_network,
 )
 
 LIMITS = OfficeNetworkLimits(max_networks=20, ipv4_widest_prefix=24, ipv6_widest_prefix=48)
@@ -166,3 +167,35 @@ class TestIsOnOfficeNetwork:
     def test_no_address_or_no_networks_is_never_on_one(self) -> None:
         assert not is_on_office_network(None, self.NETWORKS)
         assert not is_on_office_network(ip_address("110.44.115.82"), ())
+
+
+class TestSuggestedNetwork:
+    """What "Add the network I'm on now" adds for the whole office (spec 1, 2, 6)."""
+
+    @pytest.mark.parametrize(
+        ("address", "network"),
+        [
+            ("110.44.115.82", "110.44.115.82/32"),
+            ("2400:1a00:b030:9:a1b2:c3d4:e5f6:1", "2400:1a00:b030:9::/64"),
+            ("2400:1a00:b030:9::", "2400:1a00:b030:9::/64"),
+            ("2400:1a00:b030:9:ffff:ffff:ffff:ffff", "2400:1a00:b030:9::/64"),
+        ],
+    )
+    def test_ipv4_is_the_address_and_ipv6_its_64(self, address: str, network: str) -> None:
+        assert str(suggested_network(ip_address(address))) == network
+
+    def test_ipv4_is_never_widened(self) -> None:
+        suggested = suggested_network(IPv4Address("110.44.115.82"))
+
+        assert suggested is not None
+        assert suggested.num_addresses == 1
+
+    def test_every_address_in_the_group_is_on_it(self) -> None:
+        suggested = suggested_network(IPv6Address("2400:1a00:b030:9::1"))
+
+        assert suggested is not None
+        assert is_on_office_network(IPv6Address("2400:1a00:b030:9:dead:beef::7"), [suggested])
+        assert not is_on_office_network(IPv6Address("2400:1a00:b030:a::1"), [suggested])
+
+    def test_no_address_suggests_nothing(self) -> None:
+        assert suggested_network(None) is None

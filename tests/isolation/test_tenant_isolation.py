@@ -4820,6 +4820,25 @@ class TestOfficeNetworkIsolation:
         assert xyz.client.get(f"{self.URL}current/").json()["covered"] is False
         assert xyz.client.post(self.URL, body, format="json").status_code == 201
 
+    def test_an_ipv6_group_saved_in_one_office_never_covers_another_offices_staff(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::1"
+        suggested = abc.client.get(f"{self.URL}current/").json()["suggested_network"]
+        abc.client.post(self.URL, {"label": "ABC wifi", "network": suggested}, format="json")
+        with tenant_context(xyz.consultancy):
+            OfficeNetwork.objects.create(label="XYZ wifi", network="110.44.115.0/24")
+        xyz.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::2"
+
+        current = xyz.client.get(f"{self.URL}current/").json()
+        xyz.log_in_as(Role.COUNSELLOR)
+        clocked = xyz.client.post("/api/clock/in/", format="json")
+
+        assert current["covered"] is False
+        assert current["suggested_network"] == suggested
+        assert clocked.status_code == status.HTTP_403_FORBIDDEN
+
     def test_another_office_cant_remove_one_by_id(
         self, make_consultancy: ConsultancyFactory
     ) -> None:

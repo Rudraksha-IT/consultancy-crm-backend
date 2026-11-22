@@ -55,7 +55,12 @@ MINE_URL = "/api/clock/work-from-home/"
 NOTIFICATIONS_URL = "/api/notifications/"
 WAITING_URL = "/api/home/waiting/"
 
-OFF_NETWORK_IN = {"detail": "You can only clock in from the office network."}
+OFF_NETWORK_IN = {
+    "detail": (
+        "This network isn't saved as an office network. At the office? The office's internet "
+        "address may have changed. Ask an Admin to open the CRM here; it takes one tap."
+    )
+}
 NO_NETWORK = {"detail": "Ask your Admin to add the office network."}
 ADMIN_NEEDS_NONE = {
     "detail": "Admins can clock in from any network, so they never need Work from home dates."
