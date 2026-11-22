@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from django_tenants.utils import tenant_context
 from rest_framework import status
@@ -15,8 +17,7 @@ from rest_framework import status
 from config.office_networks import OfficeNetworkLimits
 from modules.services import switch_modules
 from modules.types import Module
-from office_networks.exceptions import OfficeNetworkChangeIsAppendOnlyError
-from office_networks.models import OfficeNetwork, OfficeNetworkChange
+from office_networks.models import OfficeNetwork
 from staff.models import Role
 from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs, PlatformContext
 from tests.integration.test_stage_and_counsellor_integration import INJECTION_STRINGS
@@ -70,11 +71,21 @@ def stored(office: ConsultancyContext) -> list[tuple[str, str]]:
         return list(OfficeNetwork.objects.order_by("pk").values_list("label", "network"))
 
 
-def changes(office: ConsultancyContext) -> list[tuple[str, str, str, str]]:
-    """Every change as stored: (action, label, network, by), oldest first."""
-    with tenant_context(office.consultancy):
-        rows = OfficeNetworkChange.objects.order_by("pk")
-        return list(rows.values_list("action", "label", "network", "by_name"))
+# The table that kept who added and removed each network, until it was dropped (ticket 02).
+HISTORY_TABLE = "office_networks_officenetworkchange"
+# The last migration that still had it.
+BEFORE_HISTORY_DROPPED = [("office_networks", "0002_public_id")]
+
+
+def office_tables(office: ConsultancyContext) -> set[str]:
+    """Every table in the office's schema whose name starts with office_networks_."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_schema = %s AND table_name LIKE 'office_networks_%%'",
+            [office.consultancy.schema_name],
+        )
+        return {row[0] for row in cursor.fetchall()}
 
 
 def add_stored(office: ConsultancyContext, network: str, label: str = "Office") -> OfficeNetwork:
@@ -90,9 +101,9 @@ class TestTheList:
         response = abc.client.get(LIST_URL)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"networks": [], "changes": [], "limits": DEFAULT_LIMITS}
+        assert response.json() == {"networks": [], "limits": DEFAULT_LIMITS}
 
-    def test_an_admin_adds_one_and_sees_it_with_who_added_it(self, abc: ConsultancyContext) -> None:
+    def test_an_admin_adds_one_and_sees_only_the_networks(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
         response = add(abc.client, GOOD_BODY)
@@ -101,17 +112,7 @@ class TestTheList:
         added = response.json()
         assert added == {"id": added["id"], "label": "Main office wifi", "network": OFFICE_ADDRESS}
         assert stored(abc) == [("Main office wifi", "110.44.115.82/32")]
-        body = abc.client.get(LIST_URL).json()
-        assert body["networks"] == [added]
-        [change] = body["changes"]
-        assert change == {
-            "id": change["id"],
-            "action": "added",
-            "label": "Main office wifi",
-            "network": OFFICE_ADDRESS,
-            "by": "Test Admin",
-            "at": change["at"],
-        }
+        assert abc.client.get(LIST_URL).json() == {"networks": [added], "limits": DEFAULT_LIMITS}
 
     @pytest.mark.parametrize(
         ("network", "shown", "kept"),
@@ -139,7 +140,7 @@ class TestTheList:
         assert response.json()["network"] == shown
         assert stored(abc) == [("Office", kept)]
 
-    def test_removing_one_is_recorded_under_the_list(self, abc: ConsultancyContext) -> None:
+    def test_removing_one_leaves_an_empty_list(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         added = add(abc.client, GOOD_BODY).json()
 
@@ -147,12 +148,7 @@ class TestTheList:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert stored(abc) == []
-        body = abc.client.get(LIST_URL).json()
-        assert body["networks"] == []
-        assert [(c["action"], c["label"], c["network"]) for c in body["changes"]] == [
-            ("removed", "Main office wifi", OFFICE_ADDRESS),
-            ("added", "Main office wifi", OFFICE_ADDRESS),
-        ]
+        assert abc.client.get(LIST_URL).json() == {"networks": [], "limits": DEFAULT_LIMITS}
 
     def test_removing_one_that_isnt_there_is_not_found(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -160,24 +156,19 @@ class TestTheList:
         response = abc.client.delete(network_url(999))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert changes(abc) == []
 
-    def test_changes_are_append_only(self, abc: ConsultancyContext) -> None:
+    def test_adding_and_removing_write_nothing_else(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
-        add(abc.client, GOOD_BODY)
 
-        with tenant_context(abc.consultancy):
-            change = OfficeNetworkChange.objects.get()
-            with pytest.raises(OfficeNetworkChangeIsAppendOnlyError):
-                change.save()
-            with pytest.raises(OfficeNetworkChangeIsAppendOnlyError):
-                change.delete()
-            with pytest.raises(OfficeNetworkChangeIsAppendOnlyError):
-                OfficeNetworkChange.objects.all().delete()
-            with pytest.raises(OfficeNetworkChangeIsAppendOnlyError):
-                OfficeNetworkChange.objects.update(label="x")
+        added = add(abc.client, GOOD_BODY).json()
+        after_add = stored(abc)
+        abc.client.delete(network_url(added["id"]))
 
-    def test_a_platform_admin_adds_and_removes_under_their_own_name(
+        assert office_tables(abc) == {"office_networks_officenetwork"}
+        assert after_add == [("Main office wifi", "110.44.115.82/32")]
+        assert stored(abc) == []
+
+    def test_a_platform_admin_adds_and_removes_and_nothing_is_recorded(
         self, abc: ConsultancyContext, platform_site: PlatformContext
     ) -> None:
         visitor = open_as_platform_admin(platform_site, abc).client
@@ -187,12 +178,39 @@ class TestTheList:
 
         assert added.status_code == status.HTTP_201_CREATED
         assert removed.status_code == status.HTTP_204_NO_CONTENT
+        assert office_tables(abc) == {"office_networks_officenetwork"}
+        assert stored(abc) == []
+
+
+class TestHistoryDropped:
+    """The old add and remove history is deleted from every office's schema (ticket 02)."""
+
+    @pytest.mark.parametrize("with_history", [True, False])
+    def test_the_migration_drops_the_history_and_keeps_the_networks(
+        self, abc: ConsultancyContext, *, with_history: bool
+    ) -> None:
         with tenant_context(abc.consultancy):
-            rows = OfficeNetworkChange.objects.order_by("pk")
-            assert [(r.by_name, r.by_staff_id, r.by_platform_admin) for r in rows] == [
-                ("Platform Ops (Platform Admin)", None, True),
-                ("Platform Ops (Platform Admin)", None, True),
-            ]
+            executor = MigrationExecutor(connection)
+            executor.migrate(BEFORE_HISTORY_DROPPED)
+            old_apps = executor.loader.project_state(BEFORE_HISTORY_DROPPED).apps
+            old_network = old_apps.get_model("office_networks", "OfficeNetwork")
+            old_network.objects.create(label="Main office wifi", network="110.44.115.82/32")
+            if with_history:
+                old_apps.get_model("office_networks", "OfficeNetworkChange").objects.create(
+                    action="added",
+                    label="Main office wifi",
+                    network="110.44.115.82/32",
+                    by_name="Test Admin",
+                )
+            assert HISTORY_TABLE in office_tables(abc)
+            with connection.cursor() as cursor:  # check the rows now, so tables can be dropped
+                cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+            executor = MigrationExecutor(connection)
+            executor.loader.build_graph()
+            executor.migrate(executor.loader.graph.leaf_nodes())
+
+        assert office_tables(abc) == {"office_networks_officenetwork"}
+        assert stored(abc) == [("Main office wifi", "110.44.115.82/32")]
 
 
 class TestRefused:
@@ -282,7 +300,6 @@ class TestRefused:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {"network": [ALREADY_ON_THE_LIST]}
         assert stored(abc) == [("Office", listed)]
-        assert changes(abc) == []
 
     def test_at_most_20_per_office(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
@@ -506,7 +523,7 @@ class TestCurrentNetwork:
 
         assert "2400:1a00:b030:9" not in json_logs.text()
         assert "27.34.20.9" not in json_logs.text()
-        assert "27.34.20.9" not in str(stored(abc)) + str(changes(abc))
+        assert "27.34.20.9" not in str(stored(abc))
 
 
 ENDPOINTS = [

@@ -4785,7 +4785,7 @@ class TestExportIsolation:
 
 
 class TestOfficeNetworkIsolation:
-    """Issue 55: each office's Office Networks, their changes and Clock-in switch are its own."""
+    """Issue 55: each office's Office Networks and Clock-in switch are its own."""
 
     URL = "/api/office-networks/"
 
@@ -4799,14 +4799,16 @@ class TestOfficeNetworkIsolation:
             office.log_in_as(Role.ADMIN)
         return abc, xyz
 
-    def test_each_office_sees_only_its_own_networks_and_changes(
+    def test_each_office_sees_only_its_own_networks(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
         abc, xyz = self._offices(make_consultancy)
         abc.client.post(self.URL, {"label": "ABC wifi", "network": "110.44.115.82"}, format="json")
 
-        assert xyz.client.get(self.URL).json()["networks"] == []
-        assert xyz.client.get(self.URL).json()["changes"] == []
+        assert xyz.client.get(self.URL).json() == {
+            "networks": [],
+            "limits": {"max_networks": 20, "ipv4_widest_prefix": 24, "ipv6_widest_prefix": 48},
+        }
         assert [n["label"] for n in abc.client.get(self.URL).json()["networks"]] == ["ABC wifi"]
 
     def test_the_same_network_can_be_in_two_offices_and_only_covers_its_own(
