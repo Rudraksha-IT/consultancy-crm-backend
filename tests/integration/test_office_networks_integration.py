@@ -575,6 +575,27 @@ class TestWhoMay:
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert stored(office) == [("Office", "110.44.115.82/32")]
 
+    def test_a_platform_admin_in_support_access_gets_the_answer_only_with_clock_in_on(
+        self, abc: ConsultancyContext, platform_site: PlatformContext
+    ) -> None:
+        # Support Access can do what an Admin can, so the answer is given as to an Admin; the
+        # office app never asks for it or offers it then (first live fixes, ticket 03).
+        visitor = open_as_platform_admin(platform_site, abc).client
+        visitor.defaults["HTTP_X_CLIENT_IP"] = OFFICE_ADDRESS
+
+        answer = visitor.get(CURRENT_URL)
+        switch_modules(abc.consultancy, set())
+        hidden = visitor.get(CURRENT_URL)
+
+        assert answer.status_code == status.HTTP_200_OK
+        assert answer.json() == {
+            "address": OFFICE_ADDRESS,
+            "suggested_network": OFFICE_ADDRESS,
+            "covered": False,
+        }
+        assert answer["Cache-Control"] == "no-store"
+        assert hidden.status_code == status.HTTP_404_NOT_FOUND
+
     def test_switching_clock_in_off_hides_them_and_on_again_brings_them_back(
         self, abc: ConsultancyContext
     ) -> None:
