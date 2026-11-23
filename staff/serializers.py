@@ -186,8 +186,8 @@ class NotificationChoicesSerializer(StrictSerializer[None]):
 class MyDetailsSerializer(StrictSerializer[None]):
     """What a Staff member may change about themselves (spec 22d, 22f, 22g).
 
-    Job title, Role, work email and joining date are set by an Admin, so they are unknown here
-    and refused.
+    Job title, Role and joining date are set by an Admin, and the email changes only with a
+    Code (`/api/me/email/`), so they are unknown here and refused.
     """
 
     name = PlainTextField(max_length=STAFF_NAME_MAX_LENGTH, required=False)

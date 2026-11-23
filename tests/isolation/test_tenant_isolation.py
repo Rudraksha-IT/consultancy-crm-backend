@@ -318,7 +318,10 @@ class TestPlatformTeamAndBrandIsolation:
             ("post", f"/api/platform/admins/{NO_RECORD_ID}/resend/"),
             ("post", f"/api/platform/admins/{NO_RECORD_ID}/reactivate/"),
             ("post", "/api/platform/brand/logo/"),
-            ("delete", "/api/platform/brand/logo/"),
+            ("get", "/api/platform/brand/logos/"),
+            ("put", "/api/platform/brand/in-use/"),
+            ("delete", f"/api/platform/brand/logos/{NO_RECORD_ID}/"),
+            ("get", f"/api/platform/brand/logos/{NO_RECORD_ID}/file/"),
             ("patch", "/api/platform/me/"),
         ],
     )
@@ -4387,6 +4390,92 @@ MY_DEVICES_URL = "/api/me/devices/"
 SIGN_OUT_OTHERS_URL = "/api/me/devices/sign-out-others/"
 
 
+MY_EMAIL_URL = "/api/me/email/"
+MY_EMAIL_CONFIRM_URL = "/api/me/email/confirm/"
+
+
+class TestWorkEmailChangeIsolation:
+    """A Staff member changes their own email (2026-11-22 ticket 04)."""
+
+    def test_my_token_cant_ask_or_confirm_on_another_consultancy(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz_staff = xyz.add_staff(Role.COUNSELLOR)  # Same primary key as ABC's below.
+        tokens = abc.tokens_for(abc.add_staff(Role.COUNSELLOR))
+        use_access_token(xyz.client, tokens.access)
+
+        answers = [
+            xyz.client.post(
+                MY_EMAIL_URL,
+                {"email": "taken.over@office.com", "password": TEST_PASSWORD},
+                format="json",
+            ),
+            xyz.client.post(
+                MY_EMAIL_CONFIRM_URL,
+                {"email": "taken.over@office.com", "code": "123456"},
+                format="json",
+            ),
+        ]
+
+        assert {answer.status_code for answer in answers} == {status.HTTP_401_UNAUTHORIZED}
+        assert mail.outbox == []
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == xyz_staff.email
+
+    def test_a_code_from_one_office_never_works_in_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc_staff = abc.log_in_as(Role.COUNSELLOR)
+        xyz_staff = xyz.log_in_as(Role.COUNSELLOR)
+        assert abc_staff.pk == xyz_staff.pk
+        new_email = "sita.new@office.com"
+        abc.client.post(
+            MY_EMAIL_URL, {"email": new_email, "password": TEST_PASSWORD}, format="json"
+        )
+
+        answer = xyz.client.post(
+            MY_EMAIL_CONFIRM_URL, {"email": new_email, "code": _emailed_code()}, format="json"
+        )
+
+        assert answer.status_code == status.HTTP_400_BAD_REQUEST
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == xyz_staff.email
+        with tenant_context(abc.consultancy):
+            assert Staff.objects.get(pk=abc_staff.pk).email == abc_staff.email
+
+    def test_the_same_person_in_two_offices_changes_only_one(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        shared = "sita@office.com"
+        new_email = "sita.new@office.com"
+        abc_staff = abc.add_staff(Role.COUNSELLOR, email=shared)
+        xyz_staff = xyz.add_staff(Role.ADMIN, email=shared)
+        use_access_token(abc.client, abc.tokens_for(abc_staff).access)
+        use_access_token(xyz.client, xyz.tokens_for(xyz_staff).access)
+        abc.client.post(
+            MY_EMAIL_URL, {"email": new_email, "password": TEST_PASSWORD}, format="json"
+        )
+
+        answer = abc.client.post(
+            MY_EMAIL_CONFIRM_URL, {"email": new_email, "code": _emailed_code()}, format="json"
+        )
+
+        assert answer.status_code == status.HTTP_200_OK
+        with tenant_context(abc.consultancy):
+            assert Staff.objects.get(pk=abc_staff.pk).email == new_email
+        with tenant_context(xyz.consultancy):
+            assert Staff.objects.get(pk=xyz_staff.pk).email == shared
+        assert xyz.client.get(ME_URL).status_code == status.HTTP_200_OK
+        assert [office.schema_name for office in offices_for(shared)] == ["xyzoverseas"]
+        assert [office.schema_name for office in offices_for(new_email)] == ["abcedu"]
+
+
 class TestMySettingsIsolation:
     def test_my_token_cant_read_or_change_the_same_id_on_another_consultancy(
         self, make_consultancy: ConsultancyFactory
@@ -4785,7 +4874,7 @@ class TestExportIsolation:
 
 
 class TestOfficeNetworkIsolation:
-    """Issue 55: each office's Office Networks, their changes and Clock-in switch are its own."""
+    """Issue 55: each office's Office Networks and Clock-in switch are its own."""
 
     URL = "/api/office-networks/"
 
@@ -4799,14 +4888,16 @@ class TestOfficeNetworkIsolation:
             office.log_in_as(Role.ADMIN)
         return abc, xyz
 
-    def test_each_office_sees_only_its_own_networks_and_changes(
+    def test_each_office_sees_only_its_own_networks(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
         abc, xyz = self._offices(make_consultancy)
         abc.client.post(self.URL, {"label": "ABC wifi", "network": "110.44.115.82"}, format="json")
 
-        assert xyz.client.get(self.URL).json()["networks"] == []
-        assert xyz.client.get(self.URL).json()["changes"] == []
+        assert xyz.client.get(self.URL).json() == {
+            "networks": [],
+            "limits": {"max_networks": 20, "ipv4_widest_prefix": 24, "ipv6_widest_prefix": 48},
+        }
         assert [n["label"] for n in abc.client.get(self.URL).json()["networks"]] == ["ABC wifi"]
 
     def test_the_same_network_can_be_in_two_offices_and_only_covers_its_own(
@@ -4819,6 +4910,25 @@ class TestOfficeNetworkIsolation:
 
         assert xyz.client.get(f"{self.URL}current/").json()["covered"] is False
         assert xyz.client.post(self.URL, body, format="json").status_code == 201
+
+    def test_an_ipv6_group_saved_in_one_office_never_covers_another_offices_staff(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::1"
+        suggested = abc.client.get(f"{self.URL}current/").json()["suggested_network"]
+        abc.client.post(self.URL, {"label": "ABC wifi", "network": suggested}, format="json")
+        with tenant_context(xyz.consultancy):
+            OfficeNetwork.objects.create(label="XYZ wifi", network="110.44.115.0/24")
+        xyz.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::2"
+
+        current = xyz.client.get(f"{self.URL}current/").json()
+        xyz.log_in_as(Role.COUNSELLOR)
+        clocked = xyz.client.post("/api/clock/in/", format="json")
+
+        assert current["covered"] is False
+        assert current["suggested_network"] == suggested
+        assert clocked.status_code == status.HTTP_403_FORBIDDEN
 
     def test_another_office_cant_remove_one_by_id(
         self, make_consultancy: ConsultancyFactory
@@ -6318,3 +6428,35 @@ class TestOfficeRecordIdIsolation:
             assert Staff.objects.get(pk=theirs.counsellor.pk).role == Role.COUNSELLOR
             assert not Task.objects.get(pk=theirs.task.pk).is_done
             assert FeeType.objects.get(pk=theirs.fee_type.pk).hidden is False
+
+
+class TestPlatformOnlyOnItsAddress:
+    """The Platform's API answers on its own address only (first live fixes, ticket 14)."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "auth/login/",
+            "auth/login/next/",
+            "auth/password-reset/",
+            "auth/join/",
+            "me/",
+            "admins/",
+            "consultancies/",
+            "email/",
+            "brand/logos/",
+            "product-domain/",
+            "support-visits/",
+        ],
+    )
+    @pytest.mark.parametrize("method", ["get", "post"])
+    def test_an_offices_address_has_no_platform(
+        self, make_consultancy: ConsultancyFactory, method: str, path: str
+    ) -> None:
+        northwind = make_consultancy("Northwind Overseas", "northwind")
+
+        client = northwind.new_client()
+
+        response = getattr(client, method)(f"/api/platform/{path}", {}, format="json")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND

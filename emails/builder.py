@@ -28,6 +28,8 @@ from emails.types import (
     PlatformInvite,
     PlatformResetCode,
     SenderLook,
+    StaffEmailChangeCode,
+    StaffEmailChanged,
     StaffInviteCode,
     StaffResetCode,
     TestEmail,
@@ -110,6 +112,22 @@ def _staff_reset(brand: str, email: StaffResetCode) -> _Body:
     )
 
 
+def _staff_email_change(brand: str, email: StaffEmailChangeCode) -> _Body:
+    return _Body(
+        f"Your code to change your email at {brand}",
+        "staff_email_change",
+        {"name": email.name, "code": email.code, "office": brand, "new_email": email.new_email},
+    )
+
+
+def _staff_email_changed(brand: str, email: StaffEmailChanged) -> _Body:
+    return _Body(
+        f"Your email at {brand} was changed",
+        "staff_email_changed",
+        {"name": email.name, "office": brand, "new_email": email.new_email},
+    )
+
+
 def _platform_invite(_: str, email: PlatformInvite) -> _Body:
     return _Body(
         "Your code to join the Platform",
@@ -140,6 +158,8 @@ _KINDS: dict[type, Callable[[str, Any], _Body]] = {
     Message: _message,
     StaffInviteCode: _staff_invite,
     StaffResetCode: _staff_reset,
+    StaffEmailChangeCode: _staff_email_change,
+    StaffEmailChanged: _staff_email_changed,
     PlatformInvite: _platform_invite,
     PlatformResetCode: _platform_reset,
     CentralLogin: _central_login,

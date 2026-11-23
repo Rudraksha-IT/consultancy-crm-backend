@@ -1,7 +1,8 @@
 name: Backup
 
 # A database backup from GitHub (ticket 15). The server's own timer makes one every 6 hours; this
-# workflow, every night at about 02:00 Nepal time and whenever someone runs it from the Actions
+# workflow, every night at about 02:00 Nepal time (started on `main` by nightly-backup.yml, since
+# schedules run only on the default branch, `dev`) and whenever someone runs it from the Actions
 # tab, also:
 #   1. checks the server's newest backup is recent (fails, so GitHub emails, if the timer stopped);
 #   2. makes one more backup now (kind `github`), copied to R2 like every other;
@@ -9,8 +10,6 @@ name: Backup
 # Copies are encrypted on the server with the backup public key; only the private key, kept
 # offline by the product owner, opens them (deploy/fetch-backup.sh --file <artifact>).
 on:
-  schedule:
-    - cron: "15 20 * * *"
   workflow_dispatch:
     inputs:
       reason:

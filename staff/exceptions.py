@@ -33,3 +33,7 @@ class EmployeeChangeRefusedError(Exception):
 
 class WrongCurrentPasswordError(Exception):
     """The current password typed when changing it isn't the person's password."""
+
+
+class SameEmailError(Exception):
+    """The new work email is the one the person already has."""

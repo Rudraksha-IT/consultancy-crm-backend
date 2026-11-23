@@ -1,0 +1,26 @@
+name: Nightly backup
+
+# Starts the Backup workflow on `main` every night at about 02:00 Nepal time (first live fixes,
+# ticket 06). GitHub runs schedules only on the default branch, `dev`, and the `production`
+# environment accepts only `main`, so Backup can't be scheduled itself. This starter holds no
+# secrets and uses no environment: it may only start workflows, and Backup runs from `main`'s
+# own reviewed copy. If starting fails, this run fails (so GitHub emails); if the backup fails,
+# the Backup run fails.
+on:
+  schedule:
+    - cron: "15 20 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  start-backup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    timeout-minutes: 5
+    steps:
+      - name: Start Backup on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run backup.yml --repo "$GITHUB_REPOSITORY" --ref main -f reason=nightly

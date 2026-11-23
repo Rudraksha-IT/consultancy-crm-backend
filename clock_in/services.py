@@ -55,10 +55,11 @@ from staff.models import Staff, StaffStatus
 from tenancy.client_address import ClientAddress
 
 NO_NETWORK_MESSAGE = "Ask your Admin to add the office network."
-OFF_NETWORK_MESSAGES = {
-    "in": "You can only clock in from the office network.",
-    "out": "You can only clock out from the office network.",
-}
+# The office's address may have changed: say what to do (first live fixes, spec 27).
+OFF_NETWORK_MESSAGE = (
+    "This network isn't saved as an office network. At the office? The office's internet "
+    "address may have changed. Ask an Admin to open the CRM here; it takes one tap."
+)
 ALREADY_IN_MESSAGE = "You're already clocked in."
 NOT_IN_MESSAGE = "You're not clocked in today."
 NOON = 12
@@ -535,7 +536,7 @@ def _check_network(
     if state is OfficeNetworkState.OFF:
         # Only that it didn't match: the address itself is never logged (ADR 0004).
         logger.warning("clock-%s refused: not on an office network", direction)
-        raise NotOnOfficeNetworkError(OFF_NETWORK_MESSAGES[direction])
+        raise NotOnOfficeNetworkError(OFF_NETWORK_MESSAGE)
 
 
 def _lock(staff_id: int) -> Staff:

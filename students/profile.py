@@ -16,7 +16,7 @@ from history.models import HistoryKind
 from history.services import Change, record
 from staff.models import Staff
 from students.exceptions import TooManyEntriesError
-from students.models import AcademicRecord, Student, TestScore, WorkExperience
+from students.models import AcademicRecord, Priority, Student, TestScore, WorkExperience
 
 # How many qualifications, or test scores, one Student can have.
 MAX_ENTRIES_PER_STUDENT = 20
@@ -126,6 +126,25 @@ def edit_note(student: Student, note: str, by: Staff) -> None:
         record(locked, HistoryKind.NOTE_EDITED, by, Change(before=before, after=note))
     student.note = note
     logger.info("Note edited: student_id=%s, by_staff_id=%s", student.pk, by.pk)
+
+
+def set_priority(student: Student, priority: Priority, by: Staff) -> None:
+    """Set the Student's Priority; History keeps each real change in words (ticket 10)."""
+    with transaction.atomic():
+        locked = Student.objects.select_for_update().get(pk=student.pk)
+        before = Priority(locked.priority)
+        if before == priority:
+            return
+        locked.priority = priority
+        locked.save(update_fields=["priority"])
+        record(
+            locked,
+            HistoryKind.PRIORITY_CHANGED,
+            by,
+            Change(before=str(before.label), after=str(priority.label)),
+        )
+    student.priority = priority
+    logger.info("Priority changed: student_id=%s, by_staff_id=%s", student.pk, by.pk)
 
 
 def add_academic_record(student: Student, details: Mapping[str, object]) -> AcademicRecord:

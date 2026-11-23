@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.urls import URLPattern, path
 
 from auth_tokens.views import LogoutView, RefreshView
+from staff.email_change_views import EmailChangeConfirmView, EmailChangeRequestView
 from staff.employee_views import (
     CounsellorChoicesView,
     EmployeeAssignedStudentsView,
@@ -52,6 +53,8 @@ urlpatterns: list[URLPattern] = [
     path("context/", StaffContextView.as_view(), name="staff-context"),
     path("me/", MyDetailsView.as_view(), name="my-details"),
     path("me/password/", MyPasswordView.as_view(), name="my-password"),
+    path("me/email/", EmailChangeRequestView.as_view(), name="my-email"),
+    path("me/email/confirm/", EmailChangeConfirmView.as_view(), name="my-email-confirm"),
     path("me/devices/", MyDevicesView.as_view(), name="my-devices"),
     path("me/two-factor/", MyTwoFactorView.as_view(), name="my-two-factor"),
     path(

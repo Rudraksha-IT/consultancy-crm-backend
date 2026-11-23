@@ -76,6 +76,23 @@ class StaffResetCode:
 
 
 @dataclass(frozen=True)
+class StaffEmailChangeCode:
+    """The Code a Staff member types to move to `new_email` (sent to that new address)."""
+
+    name: str
+    code: str
+    new_email: str
+
+
+@dataclass(frozen=True)
+class StaffEmailChanged:
+    """The notice to a Staff member's old address that their work email changed."""
+
+    name: str
+    new_email: str
+
+
+@dataclass(frozen=True)
 class PlatformInvite:
     """A Platform Admin Invite: the Code and the Join page."""
 
@@ -121,6 +138,8 @@ type EmailContent = (
     Message
     | StaffInviteCode
     | StaffResetCode
+    | StaffEmailChangeCode
+    | StaffEmailChanged
     | PlatformInvite
     | PlatformResetCode
     | CentralLogin

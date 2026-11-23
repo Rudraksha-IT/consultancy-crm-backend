@@ -54,7 +54,8 @@ def upload(client: APIClient, **fields: object) -> _MonkeyPatchedResponse:
 
 def brand(client: APIClient) -> Any:  # noqa: ANN401  # JSON
     """What the login screens get."""
-    return client.get(BRAND_URL).json()
+    # The name beside it is checked in test_product_name_integration.py (ticket 15).
+    return {"logo": client.get(BRAND_URL).json()["logo"]}
 
 
 def stored_keys() -> list[str]:
@@ -82,7 +83,7 @@ class TestUpload:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {"logo": {"url": "/api/platform/brand/logo/1/"}}
         [key] = stored_keys()
-        assert key.startswith("platform/product-logo/1-")
+        assert key.startswith("platform/product-logo/")
         assert brand(ops.new_client()) == response.json()
         assert brand(api_client(get_central_login_host())) == response.json()
         file = ops.new_client().get("/api/platform/brand/logo/1/")
@@ -99,7 +100,7 @@ class TestUpload:
 
         assert file.status_code == status.HTTP_200_OK
 
-    def test_a_new_logo_gets_a_new_address_and_the_old_file_goes(
+    def test_a_new_logo_gets_a_new_address_and_the_old_one_is_kept_saved(
         self, ops: PlatformContext
     ) -> None:
         upload(ops.client)
@@ -107,7 +108,8 @@ class TestUpload:
         response = upload(ops.client)
 
         assert response.json() == {"logo": {"url": "/api/platform/brand/logo/2/"}}
-        assert len(stored_keys()) == 1
+        # Kept as a saved logo (first live fixes, ticket 07), no longer shown at its old address.
+        assert len(stored_keys()) == 2  # both uploads
         assert ops.new_client().get("/api/platform/brand/logo/1/").status_code == 404
 
     def test_an_svg_is_cleaned_of_scripts(self, ops: PlatformContext) -> None:
@@ -153,24 +155,11 @@ class TestUpload:
         assert json_logs.with_message("Product logo changed: platform_admin_id=")
 
 
-class TestRemove:
-    def test_removing_shows_no_logo_and_deletes_the_file(self, ops: PlatformContext) -> None:
-        upload(ops.client)
-
-        response = ops.client.delete(LOGO_URL)
-
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert brand(ops.new_client()) == {"logo": None}
-        assert stored_keys() == []
-        assert ops.new_client().get("/api/platform/brand/logo/1/").status_code == 404
-
-
 class TestWhoCan:
     def test_nobody_logged_in_cannot_change_it(self, platform_site: PlatformContext) -> None:
         client = platform_site.new_client()
 
         assert upload(client).status_code == status.HTTP_401_UNAUTHORIZED
-        assert client.delete(LOGO_URL).status_code == status.HTTP_401_UNAUTHORIZED
         assert stored_keys() == []
 
     def test_staff_can_never_change_it(
@@ -189,7 +178,6 @@ class TestWhoCan:
         central = api_client(get_central_login_host())
 
         assert upload(central).status_code in {401, 403, 404, 405}
-        assert central.delete(LOGO_URL).status_code in {401, 403, 404, 405}
 
     def test_an_office_host_has_none_of_it(
         self, ops: PlatformContext, make_consultancy: ConsultancyFactory
@@ -202,3 +190,5 @@ class TestWhoCan:
         assert ops.client.put(LOGO_URL, {}, format="json").status_code == 405
         assert ops.client.post(BRAND_URL, {}, format="json").status_code == 405
         assert ops.client.get(LOGO_URL).status_code == 405
+        # Removing is per saved logo now (first live fixes, ticket 07).
+        assert ops.client.delete(LOGO_URL).status_code == 405

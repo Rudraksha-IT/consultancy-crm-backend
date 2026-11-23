@@ -140,6 +140,7 @@ class TestAddLead:
             "sub_agent_name",
             "note",
             "stage",
+            "priority",
             "assigned_counsellor",
             "created_at",
         }
@@ -589,6 +590,7 @@ class TestStudentList:
             "country": "australia",
             "source": "walk_in",
             "stage": "lead",
+            "priority": "normal",
             "assigned_counsellor": {"id": str(counsellor.public_id), "name": counsellor.name},
         }
 

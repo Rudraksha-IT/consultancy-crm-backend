@@ -34,6 +34,7 @@ from students.models import (
     EnglishTest,
     Gender,
     MaritalStatus,
+    Priority,
     Province,
     Qualification,
     Source,
@@ -50,6 +51,7 @@ from students.serializers import (
     SUB_AGENT_NOT_NEEDED_MESSAGE,
     NoteField,
     StrictChoiceField,
+    priority_field,
 )
 
 NOTHING_TO_CHANGE_MESSAGE = "Send at least one detail to change."
@@ -328,6 +330,16 @@ class NoteSerializer(StrictSerializer[None]):
     """The Student's whole Note, replacing the old text (spec 37)."""
 
     note = NoteField(required=True)
+
+
+class PrioritySerializer(StrictSerializer[None]):
+    """A Student's new Priority (ticket 10): one of the three, exactly as written."""
+
+    priority = priority_field()
+
+    def new_priority(self) -> Priority:
+        """Return the checked Priority."""
+        return Priority(self.validated_data["priority"])
 
 
 class AcademicRecordSerializer(StrictSerializer[None]):

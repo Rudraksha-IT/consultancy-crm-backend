@@ -12,6 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
 from config.two_factor import TwoFactorSettings, read_two_factor_settings
+from platform_admin.models import DEFAULT_PRODUCT_NAME as ISSUER
 from two_factor.numbers import (
     RECOVERY_CODE_COUNT,
     check_number,
@@ -24,7 +25,6 @@ from two_factor.numbers import (
     step_at,
 )
 from two_factor.sealing import open_secret, seal_secret
-from two_factor.services import ISSUER
 
 NOW = datetime(2026, 11, 6, 9, 0, 0, tzinfo=UTC)
 STEP = timedelta(seconds=30)

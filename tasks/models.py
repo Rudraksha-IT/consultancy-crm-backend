@@ -7,17 +7,12 @@ from django.db.models import Q
 
 from config.public_ids import public_id_field
 from staff.models import STAFF_NAME_MAX_LENGTH, Staff
-from students.models import Student
+from students.models import Priority, Student
 
 TITLE_MAX_LENGTH = 200
 
-
-class TaskPriority(models.TextChoices):
-    """How important a Task is (spec 77a). Normal unless someone says otherwise."""
-
-    HIGH = "high", "High"
-    NORMAL = "normal", "Normal"
-    LOW = "low", "Low"
+# How important a Task is (spec 77a), in the same words as a Student's Priority (ticket 10).
+TaskPriority = Priority
 
 
 # The order "To do" shows them in: High first (spec 79a).

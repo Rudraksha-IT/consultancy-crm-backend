@@ -5,7 +5,7 @@ from __future__ import annotations
 from ipaddress import ip_network
 
 from config.office_networks import OfficeNetworkLimits
-from office_networks.models import OfficeNetwork, OfficeNetworkChange
+from office_networks.models import OfficeNetwork
 
 
 def shown_network(stored: str) -> str:
@@ -22,18 +22,6 @@ def office_network_answer(office_network: OfficeNetwork) -> dict[str, object]:
         "id": office_network.public_id,
         "label": office_network.label,
         "network": shown_network(office_network.network),
-    }
-
-
-def office_network_change_answer(change: OfficeNetworkChange) -> dict[str, object]:
-    """One add or remove: what, which network, who and when."""
-    return {
-        "id": change.public_id,
-        "action": change.action,
-        "label": change.label,
-        "network": shown_network(change.network),
-        "by": change.by_name,
-        "at": change.at.isoformat(),
     }
 
 

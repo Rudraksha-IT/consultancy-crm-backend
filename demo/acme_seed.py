@@ -497,7 +497,7 @@ with tenant_context(office):
     # the Office Network, so clocking in works locally, and two weeks of days.
     office_address = os.environ.get("DEMO_OFFICE_NETWORK", "").strip()
     if office_address:
-        add_office_network("Office Wi-Fi", parse_office_network(office_address, office_network_limits()), admin)
+        add_office_network("Office Wi-Fi", parse_office_network(office_address, office_network_limits()))
     for person in (admin, sita, bikash, anita, prakash):
         for back in range(14, 0, -1):
             day = ago(back)
