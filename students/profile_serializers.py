@@ -51,6 +51,7 @@ from students.serializers import (
     SUB_AGENT_NOT_NEEDED_MESSAGE,
     NoteField,
     StrictChoiceField,
+    priority_field,
 )
 
 NOTHING_TO_CHANGE_MESSAGE = "Send at least one detail to change."
@@ -331,22 +332,10 @@ class NoteSerializer(StrictSerializer[None]):
     note = NoteField(required=True)
 
 
-CHOOSE_PRIORITY_MESSAGE = "Choose High, Normal or Low."
-
-
 class PrioritySerializer(StrictSerializer[None]):
     """A Student's new Priority (ticket 10): one of the three, exactly as written."""
 
-    priority = StrictChoiceField(
-        choices=Priority.choices,
-        error_messages={
-            "required": CHOOSE_PRIORITY_MESSAGE,
-            "null": CHOOSE_PRIORITY_MESSAGE,
-            "blank": CHOOSE_PRIORITY_MESSAGE,
-            "invalid": CHOOSE_PRIORITY_MESSAGE,
-            "invalid_choice": CHOOSE_PRIORITY_MESSAGE,
-        },
-    )
+    priority = priority_field()
 
     def new_priority(self) -> Priority:
         """Return the checked Priority."""

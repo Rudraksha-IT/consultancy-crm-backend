@@ -66,6 +66,7 @@ def _matching(filters: StudentFilters, viewer: Staff) -> Q:
         "source": filters.source,
         "country": filters.country,
         "target_level": filters.target_level,
+        "priority": filters.priority,
     }
     match = Q(**{field: value for field, value in exact.items() if value is not None})
     if filters.query:

@@ -38,6 +38,7 @@ def student_row(student: Student) -> dict[str, object]:
         "country": student.country,
         "source": student.source,
         "stage": student.stage,
+        "priority": student.priority,
         "assigned_counsellor": _counsellor(student.assigned_counsellor),
     }
 
@@ -149,7 +150,6 @@ def student_profile(student: Student, viewer: Staff) -> dict[str, object]:
         "test_scores": [test_score_answer(score) for score in student.test_scores.all()],
         "work_experience": [work_experience_answer(job) for job in student.work_experience.all()],
         "lost_reason": student.lost_reason,
-        "priority": student.priority,
         # Every Stage change, oldest first: the timeline works out time spent from these (issue 82).
         "stage_changes": [history_entry_answer(e) for e in stage_changes_of(student)],
         "progress": _progress_answer(student),

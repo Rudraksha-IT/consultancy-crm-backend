@@ -23,6 +23,7 @@ from students.models import (
     NOTE_MAX_LENGTH,
     STUDENT_NAME_MAX_LENGTH,
     Country,
+    Priority,
     Qualification,
     Source,
     Stage,
@@ -149,11 +150,27 @@ class NewStudentSerializer(StrictSerializer[None]):
         )
 
 
+CHOOSE_PRIORITY_MESSAGE = "Choose High, Normal or Low."
+
+
+def priority_field(*, required: bool = True) -> StrictChoiceField:
+    """A Student's Priority (ticket 10): one of the three, exactly as written."""
+    return StrictChoiceField(
+        choices=Priority.choices,
+        required=required,
+        error_messages=dict.fromkeys(
+            ("required", "null", "blank", "invalid", "invalid_choice"), CHOOSE_PRIORITY_MESSAGE
+        ),
+    )
+
+
 class StudentListQuerySerializer(StrictSerializer[None]):
     """The Student list's search, filters and page, from the query string."""
 
     q = serializers.CharField(max_length=SEARCH_MAX_LENGTH, required=False, allow_blank=True)
     stage = StrictChoiceField(choices=Stage.choices, required=False)
+    # Only Students with this Priority (ticket 11).
+    priority = priority_field(required=False)
     counsellor = serializers.RegexField(
         COUNSELLOR_FILTER_PATTERN,
         required=False,
@@ -192,6 +209,7 @@ def filters_from(data: Mapping[str, Any]) -> StudentFilters:
     source = data.get("source")
     country = data.get("country")
     target_level = data.get("target_level")
+    priority = data.get("priority")
     return StudentFilters(
         query=data.get("q", ""),
         stage=None if stage is None else Stage(stage),
@@ -199,4 +217,5 @@ def filters_from(data: Mapping[str, Any]) -> StudentFilters:
         counsellor=data.get("counsellor", ""),
         country=None if country is None else Country(country),
         target_level=None if target_level is None else TargetLevel(target_level),
+        priority=None if priority is None else Priority(priority),
     )

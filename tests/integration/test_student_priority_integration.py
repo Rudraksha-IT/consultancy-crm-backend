@@ -14,7 +14,7 @@ from django.db.migrations.executor import MigrationExecutor
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
-from staff.models import Role
+from staff.models import Role, Staff
 from students.models import Priority, Stage, Student
 from tasks.models import TaskPriority
 from tests.conftest import ConsultancyContext, ConsultancyFactory, JsonLogs
@@ -294,3 +294,94 @@ class TestExistingStudents:
             executor.migrate(executor.loader.graph.leaf_nodes())
 
             assert Student.objects.get(pk=kept.pk).priority == Priority.NORMAL
+
+
+# The Students list (ticket 11; spec stories 87-89).
+LIST = "/api/students/"
+
+
+def listed(office: ConsultancyContext, **query: str) -> list[str]:
+    """The names the Students list shows for `query`, in its order."""
+    response = office.client.get(LIST, query)
+    assert response.status_code == status.HTTP_200_OK, response.json()
+    return [row["name"] for row in response.json()["results"]]
+
+
+def with_priority(
+    office: ConsultancyContext,
+    name: str,
+    priority: Priority,
+    counsellor: Staff | None = None,
+    stage: Stage = Stage.LEAD,
+) -> Student:
+    """A Student called `name` with `priority`."""
+    return make_student(office, counsellor, stage, name=name, priority=priority)
+
+
+class TestOnTheStudentsList:
+    def test_each_row_has_its_priority(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        with_priority(abc, "Asha Rai", Priority.HIGH)
+
+        [row] = abc.client.get(LIST).json()["results"]
+
+        assert row["priority"] == "high"
+
+    @pytest.mark.parametrize(
+        ("value", "names"),
+        [("high", ["Bina KC", "Asha Rai"]), ("normal", ["Chet Lama"]), ("low", ["Dev Shah"])],
+    )
+    def test_the_filter_shows_only_that_priority_in_the_same_order(
+        self, abc: ConsultancyContext, value: str, names: list[str]
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        with_priority(abc, "Asha Rai", Priority.HIGH)
+        with_priority(abc, "Chet Lama", Priority.NORMAL)
+        with_priority(abc, "Bina KC", Priority.HIGH)
+        with_priority(abc, "Dev Shah", Priority.LOW)
+
+        assert listed(abc, priority=value) == names
+
+    def test_no_filter_keeps_the_usual_order(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        with_priority(abc, "Asha Rai", Priority.LOW)
+        with_priority(abc, "Bina KC", Priority.HIGH)
+
+        assert listed(abc) == ["Bina KC", "Asha Rai"]
+
+    def test_it_works_with_stage_counsellor_and_search(self, abc: ConsultancyContext) -> None:
+        me = abc.log_in_as(Role.COUNSELLOR)
+        with_priority(abc, "Asha Rai", Priority.HIGH, counsellor=me, stage=Stage.COUNSELLING)
+        with_priority(abc, "Asha Thapa", Priority.HIGH, counsellor=me)
+        with_priority(abc, "Asha Lama", Priority.LOW, counsellor=me, stage=Stage.COUNSELLING)
+        with_priority(abc, "Bina KC", Priority.HIGH, counsellor=me, stage=Stage.COUNSELLING)
+
+        assert listed(abc, priority="high", stage="counselling", counsellor="me", q="Asha") == [
+            "Asha Rai"
+        ]
+
+    @pytest.mark.parametrize(
+        "value", ["urgent", "HIGH", "High", "1", "high,low", *INJECTION_STRINGS]
+    )
+    def test_a_bad_value_is_refused(self, abc: ConsultancyContext, value: str) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = abc.client.get(LIST, {"priority": value})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == CHOOSE_PRIORITY
+
+    def test_another_offices_students_never_appear(
+        self, abc: ConsultancyContext, make_consultancy: ConsultancyFactory
+    ) -> None:
+        other = make_consultancy("XYZ Education", "xyzedu")
+        with_priority(other, "Their Student", Priority.HIGH)
+        with_priority(abc, "Our Student", Priority.HIGH)
+        abc.log_in_as(Role.ADMIN)
+
+        assert listed(abc, priority="high") == ["Our Student"]
+
+    def test_a_teacher_is_refused(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.TEACHER)
+
+        assert abc.client.get(LIST, {"priority": "high"}).status_code == (status.HTTP_403_FORBIDDEN)
