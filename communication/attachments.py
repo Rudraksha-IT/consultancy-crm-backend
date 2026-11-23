@@ -18,7 +18,7 @@ from course_files.models import CourseFile
 from document_examples.models import DocumentExample
 from document_examples.services import TypeGuide
 from documents.exceptions import DocumentStorageError
-from documents.files import PDF
+from documents.files import PDF, ZIP
 from documents.models import DocumentFile
 from documents.storage import document_storage
 from emails.types import FileAttachment
@@ -137,10 +137,14 @@ def _examples() -> list[Attachable]:
 
 
 def _documents_of(student: Student) -> list[Attachable]:
-    """The Student's own Document files in use, of Documents in use."""
-    rows = DocumentFile.objects.filter(
-        document__student=student, binned_at__isnull=True, document__binned_at__isnull=True
-    ).select_related("document__document_type")
+    """The Student's own Document files in use, of Documents in use, but never a zip."""
+    rows = (
+        DocumentFile.objects.filter(
+            document__student=student, binned_at__isnull=True, document__binned_at__isnull=True
+        )
+        .exclude(content_type=ZIP.content_type)
+        .select_related("document__document_type")
+    )
     return [_document_file(file) for file in rows.order_by("document__document_type__name", "pk")]
 
 
@@ -199,12 +203,16 @@ def _found(wanted: Sequence[Chosen], student: Student | None) -> dict[Chosen, At
     found = [_course_file(file) for file in course_files]
     found += [example_attachable(example, example.document_type.name) for example in examples]
     if student is not None:
-        documents = DocumentFile.objects.filter(
-            public_id__in=_ids(wanted, AttachmentKind.DOCUMENT_FILE),
-            document__student=student,
-            binned_at__isnull=True,
-            document__binned_at__isnull=True,
-        ).select_related("document__document_type")
+        documents = (
+            DocumentFile.objects.filter(
+                public_id__in=_ids(wanted, AttachmentKind.DOCUMENT_FILE),
+                document__student=student,
+                binned_at__isnull=True,
+                document__binned_at__isnull=True,
+            )
+            .exclude(content_type=ZIP.content_type)
+            .select_related("document__document_type")
+        )
         found += [_document_file(file) for file in documents]
     return {Chosen(file.kind, file.id): file for file in found}
 

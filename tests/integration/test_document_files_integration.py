@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from rest_framework.response import _MonkeyPatchedResponse
 
 CHOOSE_FILE = {"file": ["Choose a file to upload."]}
-FILE_KIND = {"file": ["Upload a PDF, JPG or PNG file."]}
+FILE_KIND = {"file": ["Upload a PDF, JPG, PNG or ZIP file."]}
 TOO_MANY_AT_ONCE = {"file": [f"Upload at most {MAX_FILES_AT_ONCE} files at once."]}
 TOO_BIG_TOGETHER = {"file": ["The files are too big together. Upload at most 20 MB at once."]}
 REJECTED_NEEDS_NEW_COPY = {

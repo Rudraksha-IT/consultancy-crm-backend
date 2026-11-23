@@ -45,7 +45,7 @@ DEFAULT_TYPES = [
 ]
 CHOOSE_TYPE = {"document_type": ["Choose a document type from the list."]}
 CHOOSE_FILE = {"file": ["Choose a file to upload."]}
-FILE_KIND = {"file": ["Upload a PDF, JPG or PNG file."]}
+FILE_KIND = {"file": ["Upload a PDF, JPG, PNG or ZIP file."]}
 COUNSELLOR_OR_ADMIN = {"detail": "Only the Student's counsellor or an Admin can do this."}
 
 

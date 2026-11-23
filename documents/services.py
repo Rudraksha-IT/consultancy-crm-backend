@@ -43,6 +43,7 @@ from documents.exceptions import (
     TooManyDocumentTypesError,
     TooManyFilesError,
 )
+from documents.files import DOWNLOAD_ONLY_TYPES
 from documents.groups import DocumentGroup
 from documents.models import Document, DocumentFile, DocumentRequirement, DocumentType
 from documents.storage import document_storage
@@ -385,12 +386,15 @@ def document_link(
 
 
 def signed_file_link(file: DocumentFile, *, as_attachment: bool, by: Staff) -> str:
-    """A link to the file that works for a few minutes only; call after every check."""
+    """A link to the file that works for a few minutes only; call after every check.
+
+    A zip is always saved, never opened in the browser (ticket 09).
+    """
     link = document_storage().signed_link(
         file.storage_key,
         file_name=file.file_name,
         content_type=file.content_type,
-        as_attachment=as_attachment,
+        as_attachment=as_attachment or file.content_type in DOWNLOAD_ONLY_TYPES,
     )
     logger.info(
         "Document link issued: document_id=%s, file_id=%s, by_staff_id=%s",
