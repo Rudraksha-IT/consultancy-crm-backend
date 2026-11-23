@@ -24,7 +24,7 @@ from pytest_django.fixtures import Settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from platform_admin.models import PlatformAdmin
+from platform_admin.models import DEFAULT_PRODUCT_NAME, PlatformAdmin
 from staff.models import Role
 from tenancy.subdomains import get_central_login_host
 from tests.conftest import (
@@ -39,7 +39,6 @@ from tests.conftest import (
 from two_factor.models import EventKind, RecoveryCode, TwoFactorAccount, TwoFactorEvent
 from two_factor.services import (
     CHALLENGE_TRIES_ALLOWED,
-    ISSUER,
     PERSON_WRONG_NUMBERS_ALLOWED,
 )
 
@@ -225,7 +224,7 @@ class TestSetup:
         assert first.status_code == status.HTTP_200_OK
         assert uri.scheme == "otpauth"
         assert admin.email in unquote(uri.path)
-        assert parse_qs(uri.query)["issuer"] == [ISSUER]
+        assert parse_qs(uri.query)["issuer"] == [DEFAULT_PRODUCT_NAME]
         assert again.status_code == status.HTTP_400_BAD_REQUEST
         assert again.json()["start_again"] is True
 

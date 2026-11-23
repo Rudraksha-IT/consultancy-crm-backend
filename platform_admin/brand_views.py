@@ -23,17 +23,19 @@ from platform_admin.auth import get_request_platform_admin
 from platform_admin.brand import (
     MAX_SAVED_LOGOS,
     get_product_logo,
+    get_product_name,
     list_saved_logos,
     read_product_logo,
     read_saved_logo,
     remove_saved_logo,
     set_product_logo,
+    set_product_name,
     use_saved_logo,
 )
 from platform_admin.exceptions import SavedLogosFullError
 from platform_admin.models import SavedProductLogo
 from platform_admin.permissions import IsPlatformAdmin
-from platform_admin.serializers import UseLogoSerializer
+from platform_admin.serializers import ProductNameSerializer, UseLogoSerializer
 from tenancy.serializers import LogoUploadSerializer
 from tenancy.types import StoredLogo
 from tenancy.views import LOGO_SECURITY_POLICY, NOT_FOUND_MESSAGE
@@ -46,15 +48,17 @@ logger = logging.getLogger(__name__)
 
 
 class ProductBrandView(APIView):
-    """`{logo: {url} | null}` for the login screens; open to anyone."""
+    """`{logo: {url} | null, name}` for the login screens and every page; open to anyone."""
 
     authentication_classes = ()
     permission_classes = (AllowAny,)
 
     def get(self, request: Request) -> Response:
-        """Return where the product's logo is, or null."""
+        """Return where the product's logo is (or null), and the product's name."""
         logo = get_product_logo()
-        return Response({"logo": None if logo is None else asdict(logo)})
+        return Response(
+            {"logo": None if logo is None else asdict(logo), "name": get_product_name()}
+        )
 
 
 class ProductLogoFileView(APIView):
@@ -170,3 +174,19 @@ class SavedLogoFileView(APIView):
         response = _logo_file(logo)
         response["Cache-Control"] = "private, no-store"
         return response
+
+
+class ProductNameView(APIView):
+    """`PUT {name}`: the product's name in every tab, screen and Platform email (ticket 15)."""
+
+    permission_classes = (IsPlatformAdmin,)
+
+    def put(self, request: Request) -> Response:
+        """Keep the checked name; answer `{name}` as kept."""
+        serializer = ProductNameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        admin = get_request_platform_admin(request)
+        name = set_product_name(serializer.validated_data["name"], admin)
+        # The name itself stays out of the log; the change is recorded with it.
+        logger.info("Product name changed: platform_admin_id=%s", admin.pk)
+        return Response({"name": name})

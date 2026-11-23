@@ -6,6 +6,7 @@ from auth_tokens.views import LogoutView, RefreshView
 from platform_admin.brand_views import (
     LogoInUseView,
     ProductLogoView,
+    ProductNameView,
     SavedLogoFileView,
     SavedLogosView,
     SavedLogoView,
@@ -58,6 +59,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
         name="saved-logo-file",
     ),
     path("brand/in-use/", LogoInUseView.as_view(), name="product-logo-in-use"),
+    path("brand/name/", ProductNameView.as_view(), name="product-name"),
     path("email/", PlatformEmailView.as_view(), name="platform-email"),
     path("email/test/", PlatformTestEmailView.as_view(), name="platform-test-email"),
     path("auth/login/", PlatformLoginView.as_view(), name="platform-login"),

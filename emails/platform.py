@@ -1,4 +1,4 @@
-"""The Platform's look for its emails (ADR 0023): the product's name and logo, in emerald.
+"""The Platform's look for its emails (ADR 0023): the product's saved name and logo, in emerald.
 
 Not part of the pure builder: it reads the product's logo from private storage.
 """
@@ -9,8 +9,8 @@ import logging
 
 from documents.exceptions import DocumentStorageError
 from documents.storage import document_storage
-from emails.looks import PRODUCT_NAME
 from emails.types import Logo, PlatformLook
+from platform_admin.brand import get_product_name
 from platform_admin.models import ProductBrand
 
 logger = logging.getLogger(__name__)
@@ -36,4 +36,4 @@ def _logo() -> Logo | None:
 
 def platform_look() -> PlatformLook:
     """The product's name and its logo (PNG or JPEG), for every Platform email."""
-    return PlatformLook(name=PRODUCT_NAME, logo=_logo())
+    return PlatformLook(name=get_product_name(), logo=_logo())

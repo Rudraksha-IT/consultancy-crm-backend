@@ -9,16 +9,25 @@ from __future__ import annotations
 
 import io
 import logging
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
 from django.db import transaction
+from django_tenants.utils import get_public_schema_name, schema_context
 
 from documents.exceptions import DocumentStorageError
 from documents.storage import document_storage
 from platform_admin.exceptions import SavedLogosFullError
-from platform_admin.models import ProductBrand, SavedProductLogo
+from platform_admin.models import (
+    DEFAULT_PRODUCT_NAME,
+    PRODUCT_NAME_MAX_LENGTH,
+    PlatformAdmin,
+    ProductBrand,
+    ProductNameChange,
+    SavedProductLogo,
+)
 from tenancy.logo import CheckedLogo
 from tenancy.types import StoredLogo
 
@@ -28,6 +37,16 @@ MAX_SAVED_LOGOS = 10
 _BRAND_FIELDS = ["logo", "logo_version"]
 
 logger = logging.getLogger(__name__)
+
+
+__all__ = ["DEFAULT_PRODUCT_NAME", "PRODUCT_NAME_MAX_LENGTH"]
+
+BLANK_NAME_MESSAGE = "Enter the product's name."
+LONG_NAME_MESSAGE = f"Use at most {PRODUCT_NAME_MAX_LENGTH} characters."
+NAME_KIND_MESSAGE = "Use letters, numbers, spaces and . - & ' ( ) + only."
+# Besides letters, numbers and their marks (any language): nothing that could start markup, a
+# template, a quote, a header line or a hidden direction change.
+_NAME_MARKS = frozenset(" .-&'()+")
 
 
 @dataclass(frozen=True)
@@ -162,3 +181,48 @@ def _remove_file(key: str) -> None:
         document_storage().delete(key)
     except DocumentStorageError:
         logger.warning("Removed product logo's file not deleted")
+
+
+def tidy_product_name(name: str) -> str:
+    """The name as it would be kept: single spaces between words, none at the ends.
+
+    Only plain spaces are tidied; a tab or line break stays, so the check refuses it.
+    """
+    return " ".join(part for part in name.split(" ") if part)
+
+
+def product_name_problem(name: str) -> str | None:
+    """Why a tidied product name is refused, or None (ticket 15)."""
+    if name == "":
+        return BLANK_NAME_MESSAGE
+    if len(name) > PRODUCT_NAME_MAX_LENGTH:
+        return LONG_NAME_MESSAGE
+    if not _is_letter_or_number(name[0]) or not all(_is_name_character(c) for c in name):
+        return NAME_KIND_MESSAGE
+    return None
+
+
+def _is_letter_or_number(character: str) -> bool:
+    return unicodedata.category(character)[0] in {"L", "N"}
+
+
+def _is_name_character(character: str) -> bool:
+    return character in _NAME_MARKS or unicodedata.category(character)[0] in {"L", "N", "M"}
+
+
+def get_product_name() -> str:
+    """The product's name in use: the saved one, or the default before any change."""
+    with schema_context(get_public_schema_name()):
+        name = ProductBrand.objects.filter(pk=1).values_list("name", flat=True).first()
+    return DEFAULT_PRODUCT_NAME if name is None else name
+
+
+def set_product_name(name: str, by: PlatformAdmin) -> str:
+    """Keep a checked, tidied name; record the change (none when it is the same name)."""
+    with schema_context(get_public_schema_name()), transaction.atomic():
+        brand = _brand()
+        if brand.name != name:
+            ProductNameChange.objects.create(before=brand.name, after=name, by=by)
+            brand.name = name
+            brand.save(update_fields=["name"])
+    return name

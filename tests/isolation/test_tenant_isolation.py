@@ -6453,8 +6453,10 @@ class TestPlatformOnlyOnItsAddress:
     def test_an_offices_address_has_no_platform(
         self, make_consultancy: ConsultancyFactory, method: str, path: str
     ) -> None:
-        polar = make_consultancy("Polar Overseas", "polar")
+        northwind = make_consultancy("Northwind Overseas", "northwind")
 
-        response = getattr(polar.new_client(), method)(f"/api/platform/{path}", {}, format="json")
+        client = northwind.new_client()
+
+        response = getattr(client, method)(f"/api/platform/{path}", {}, format="json")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND

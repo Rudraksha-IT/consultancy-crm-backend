@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from config.public_ids import pk_for
 from config.serializers import RecordIdField, StrictCharField, StrictSerializer
+from platform_admin.brand import product_name_problem, tidy_product_name
 from platform_admin.models import SUPPORT_REASON_MAX_LENGTH, SavedProductLogo
 from platform_admin.services import name_problem
 from platform_admin.types import ConsultancyOnboarding
@@ -205,6 +206,8 @@ class PlatformResetConfirmSerializer(ResetCodeSerializer):
 
 
 UNKNOWN_LOGO_MESSAGE = "Pick one of the saved logos."
+# Room for spaces the tidying removes; the kept name is at most PRODUCT_NAME_MAX_LENGTH.
+PRODUCT_NAME_INPUT_MAX_LENGTH = 200
 
 
 class UseLogoSerializer(StrictSerializer[None]):
@@ -225,3 +228,19 @@ class UseLogoSerializer(StrictSerializer[None]):
         """Return the saved logo's number, or None."""
         logo_id: int | None = self.validated_data["logo"]
         return logo_id
+
+
+class ProductNameSerializer(StrictSerializer[None]):
+    """Platform → Settings (ticket 15): the product's new name, tidied then checked."""
+
+    name = StrictCharField(
+        max_length=PRODUCT_NAME_INPUT_MAX_LENGTH, allow_blank=True, trim_whitespace=False
+    )
+
+    def validate_name(self, value: str) -> str:
+        """Single spaces between words; refuse blank, too long, or anything but safe characters."""
+        name = tidy_product_name(value)
+        problem = product_name_problem(name)
+        if problem is not None:
+            raise serializers.ValidationError(problem)
+        return name

@@ -72,7 +72,8 @@ def use(client: APIClient, logo: object) -> _MonkeyPatchedResponse:
 
 def brand(client: APIClient) -> Any:  # noqa: ANN401  # JSON
     """What the login screens and the tab icon get."""
-    return client.get(BRAND_URL).json()
+    # The name beside it is checked in test_product_name_integration.py (ticket 15).
+    return {"logo": client.get(BRAND_URL).json()["logo"]}
 
 
 def call(client: APIClient, method: str, url: str) -> _MonkeyPatchedResponse:
