@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 from rest_framework import serializers
 
-from config.serializers import StrictCharField, StrictSerializer
-from platform_admin.models import SUPPORT_REASON_MAX_LENGTH
+from config.public_ids import pk_for
+from config.serializers import RecordIdField, StrictCharField, StrictSerializer
+from platform_admin.models import SUPPORT_REASON_MAX_LENGTH, SavedProductLogo
 from platform_admin.services import name_problem
 from platform_admin.types import ConsultancyOnboarding
 from staff.models import STAFF_NAME_MAX_LENGTH
@@ -200,3 +202,26 @@ class PlatformResetConfirmSerializer(ResetCodeSerializer):
     """Forgot password, last step on the Platform (issue 63): the email, Code and new password."""
 
     new_password = StrictCharField(max_length=PASSWORD_MAX_LENGTH, trim_whitespace=False)
+
+
+UNKNOWN_LOGO_MESSAGE = "Pick one of the saved logos."
+
+
+class UseLogoSerializer(StrictSerializer[None]):
+    """Platform → Settings (ticket 07): a saved logo's id, or null for the app's own logo."""
+
+    logo = RecordIdField(message=UNKNOWN_LOGO_MESSAGE, allow_null=True)
+
+    def validate_logo(self, value: uuid.UUID | None) -> int | None:
+        """The saved logo's number; refuse an id no saved logo has."""
+        if value is None:
+            return None
+        found = pk_for(SavedProductLogo.objects.all(), value)
+        if found == 0:
+            raise serializers.ValidationError(UNKNOWN_LOGO_MESSAGE)
+        return found
+
+    def to_logo_id(self) -> int | None:
+        """Return the saved logo's number, or None."""
+        logo_id: int | None = self.validated_data["logo"]
+        return logo_id

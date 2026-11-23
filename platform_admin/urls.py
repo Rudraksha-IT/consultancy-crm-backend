@@ -3,7 +3,13 @@ from __future__ import annotations
 from django.urls import URLPattern, URLResolver, include, path
 
 from auth_tokens.views import LogoutView, RefreshView
-from platform_admin.brand_views import ProductLogoView
+from platform_admin.brand_views import (
+    LogoInUseView,
+    ProductLogoView,
+    SavedLogoFileView,
+    SavedLogosView,
+    SavedLogoView,
+)
 from platform_admin.email_views import PlatformEmailView, PlatformTestEmailView
 from platform_admin.reset_views import (
     PlatformResetConfirmView,
@@ -44,6 +50,14 @@ from platform_admin.views import (
 urlpatterns: list[URLPattern | URLResolver] = [
     path("", include("platform_admin.brand_urls")),
     path("brand/logo/", ProductLogoView.as_view(), name="product-logo"),
+    path("brand/logos/", SavedLogosView.as_view(), name="saved-logos"),
+    path("brand/logos/<saved_logo:logo_id>/", SavedLogoView.as_view(), name="saved-logo"),
+    path(
+        "brand/logos/<saved_logo:logo_id>/file/",
+        SavedLogoFileView.as_view(),
+        name="saved-logo-file",
+    ),
+    path("brand/in-use/", LogoInUseView.as_view(), name="product-logo-in-use"),
     path("email/", PlatformEmailView.as_view(), name="platform-email"),
     path("email/test/", PlatformTestEmailView.as_view(), name="platform-test-email"),
     path("auth/login/", PlatformLoginView.as_view(), name="platform-login"),

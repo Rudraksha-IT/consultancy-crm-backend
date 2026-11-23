@@ -158,17 +158,33 @@ class PlatformResetRequest(models.Model):
         return f"Platform reset request {self.pk}"
 
 
-class ProductBrand(models.Model):
-    """The product's own logo (issue 65), shown on the Platform's and Central login's screens.
+class SavedProductLogo(models.Model):
+    """One product logo a Platform Admin uploaded (first live fixes, ticket 07).
 
-    One row only (pk 1). The file is in private storage under `platform/`; no key means no logo
-    (the initials show). The version grows with every upload, so each logo has its own address.
-    Written only by `platform_admin.brand`.
+    At most 10 are kept, each in private storage under `platform/`. `ProductBrand.logo` says
+    which one, if any, is in use. Written only by `platform_admin.brand`.
     """
 
-    logo_key = models.CharField(max_length=LOGO_KEY_MAX_LENGTH, blank=True, default="")
-    logo_content_type = models.CharField(
-        max_length=LOGO_CONTENT_TYPE_MAX_LENGTH, blank=True, default=""
+    public_id = public_id_field()
+
+    key = models.CharField(max_length=LOGO_KEY_MAX_LENGTH)
+    content_type = models.CharField(max_length=LOGO_CONTENT_TYPE_MAX_LENGTH)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return "Saved product logo"
+
+
+class ProductBrand(models.Model):
+    """The product's own logo in use (issue 65), shown on the Platform's and login screens.
+
+    One row only (pk 1). No logo means none uploaded is in use: the tab shows the app's own logo
+    and the login screens the initials (ticket 07). The version grows with every change of the
+    logo in use, so each change has its own address. Written only by `platform_admin.brand`.
+    """
+
+    logo = models.ForeignKey(
+        SavedProductLogo, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     logo_version = models.PositiveIntegerField(default=0)
 

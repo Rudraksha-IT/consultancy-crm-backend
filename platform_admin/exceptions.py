@@ -29,3 +29,7 @@ class TestEmailLimitError(Exception):
     """A Platform Admin has sent too many test emails in the last hour."""
 
     __test__ = False  # not a pytest test class, despite its name
+
+
+class SavedLogosFullError(Exception):
+    """The most saved product logos are kept already (ticket 07); one must be removed first."""

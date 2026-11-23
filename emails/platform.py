@@ -21,16 +21,17 @@ _INLINE_LOGO_TYPES = frozenset({"image/png", "image/jpeg"})
 
 
 def _logo() -> Logo | None:
-    brand = ProductBrand.objects.filter(pk=1).first()
-    if brand is None or not brand.logo_key or brand.logo_content_type not in _INLINE_LOGO_TYPES:
+    brand = ProductBrand.objects.select_related("logo").filter(pk=1).first()
+    logo = None if brand is None else brand.logo
+    if logo is None or logo.content_type not in _INLINE_LOGO_TYPES:
         return None
     try:
-        content = document_storage().read(brand.logo_key)
+        content = document_storage().read(logo.key)
     except DocumentStorageError:
         # silent: the email shows the product name instead of the logo
         logger.warning("Product logo not read for an email")
         return None
-    return Logo(content=content, content_type=brand.logo_content_type)
+    return Logo(content=content, content_type=logo.content_type)
 
 
 def platform_look() -> PlatformLook:

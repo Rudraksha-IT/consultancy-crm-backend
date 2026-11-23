@@ -18,7 +18,7 @@ from expenses.models import Expense
 from fee_types.models import FeeType
 from notifications.models import Notification
 from office_networks.models import OfficeNetwork
-from platform_admin.models import PlatformAdmin
+from platform_admin.models import PlatformAdmin, SavedProductLogo
 from staff.models import Staff
 from tasks.models import Task
 from tenancy.models import Consultancy
@@ -45,5 +45,6 @@ register_record_converters(
         "transfer_request": TransferRequest,
         "consultancy": Consultancy,
         "platform_admin": PlatformAdmin,
+        "saved_logo": SavedProductLogo,
     }
 )

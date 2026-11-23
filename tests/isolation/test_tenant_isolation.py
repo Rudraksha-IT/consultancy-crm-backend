@@ -318,7 +318,10 @@ class TestPlatformTeamAndBrandIsolation:
             ("post", f"/api/platform/admins/{NO_RECORD_ID}/resend/"),
             ("post", f"/api/platform/admins/{NO_RECORD_ID}/reactivate/"),
             ("post", "/api/platform/brand/logo/"),
-            ("delete", "/api/platform/brand/logo/"),
+            ("get", "/api/platform/brand/logos/"),
+            ("put", "/api/platform/brand/in-use/"),
+            ("delete", f"/api/platform/brand/logos/{NO_RECORD_ID}/"),
+            ("get", f"/api/platform/brand/logos/{NO_RECORD_ID}/file/"),
             ("patch", "/api/platform/me/"),
         ],
     )
