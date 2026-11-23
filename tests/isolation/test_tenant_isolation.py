@@ -6428,3 +6428,33 @@ class TestOfficeRecordIdIsolation:
             assert Staff.objects.get(pk=theirs.counsellor.pk).role == Role.COUNSELLOR
             assert not Task.objects.get(pk=theirs.task.pk).is_done
             assert FeeType.objects.get(pk=theirs.fee_type.pk).hidden is False
+
+
+class TestPlatformOnlyOnItsAddress:
+    """The Platform's API answers on its own address only (first live fixes, ticket 14)."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "auth/login/",
+            "auth/login/next/",
+            "auth/password-reset/",
+            "auth/join/",
+            "me/",
+            "admins/",
+            "consultancies/",
+            "email/",
+            "brand/logos/",
+            "product-domain/",
+            "support-visits/",
+        ],
+    )
+    @pytest.mark.parametrize("method", ["get", "post"])
+    def test_an_offices_address_has_no_platform(
+        self, make_consultancy: ConsultancyFactory, method: str, path: str
+    ) -> None:
+        polar = make_consultancy("Polar Overseas", "polar")
+
+        response = getattr(polar.new_client(), method)(f"/api/platform/{path}", {}, format="json")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
