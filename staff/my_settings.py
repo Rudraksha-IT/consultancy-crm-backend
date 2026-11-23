@@ -1,7 +1,8 @@
 """A Staff member's own Settings (spec 22c-22g; issue 38). Call inside the Consultancy's schema.
 
 Each Staff member changes only their own name, mobile, light/dark, Swipe between pages and email
-choices, and their own password. Job title, Role, work email and joining date stay with the Admin.
+choices, and their own password. Job title, Role and joining date stay with the Admin; the
+email changes only with a Code sent to the new one (`staff.email_change`, 2026-11-22).
 """
 
 from __future__ import annotations

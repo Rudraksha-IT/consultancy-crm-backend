@@ -21,6 +21,8 @@ MAX_NETWORK_LENGTH = 49
 NETWORK_TEXT = re.compile(r"^[0-9A-Fa-f:.]+(/[0-9]{1,3})?\Z")
 _MAPPED_IPV4_PREFIX = 96
 _IPV4 = 4
+# On IPv6 every device in the office has its own address inside the office's /64 (spec 2).
+OFFICE_GROUP_PREFIX_V6 = 64
 
 
 class NetworkProblem(StrEnum):
@@ -71,6 +73,22 @@ def is_on_office_network(
     if address is None:
         return False
     return any(address.version == net.version and address in net for net in networks)
+
+
+def suggested_network(
+    address: IPv4Address | IPv6Address | None,
+) -> OfficeNetworkRange | None:
+    """Return what "Add the network I'm on now" adds for `address`, or None without one.
+
+    On IPv4 every device in the office shares one address, so it is that address alone; it is
+    never widened (spec 6). On IPv6 each device has its own address, and phones change theirs
+    often, so it is the address's /64, the office's group (spec 2).
+    """
+    if address is None:
+        return None
+    if isinstance(address, IPv4Address):
+        return IPv4Network(address)
+    return IPv6Network((address, OFFICE_GROUP_PREFIX_V6), strict=False)
 
 
 def _as_network(raw: str) -> OfficeNetworkRange:

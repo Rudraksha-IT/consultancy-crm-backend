@@ -1,0 +1,5 @@
+<p style="margin:0 0 14px;">Hello {{ name }},</p>
+<p style="margin:0 0 14px;">Use this code to make {{ new_email }} your email at {{ office }}:</p>
+{% include "emails/parts/code.html" %}
+<p style="margin:0 0 14px;">It works for {{ minutes }} minutes, once.</p>
+<p class="em-muted" style="margin:0 0 14px;color:#5f6b7a;">If you didn't ask for it, you can ignore this email. Nothing changes until the code is entered.</p>

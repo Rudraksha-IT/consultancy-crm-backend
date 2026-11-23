@@ -1,0 +1,5 @@
+Hello {{ name }},
+
+Your email was changed to {{ new_email }}. From now on, log in to {{ office }} with that email.
+
+If this wasn't you, tell your Admin.

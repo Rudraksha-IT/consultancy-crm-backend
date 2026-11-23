@@ -24,6 +24,7 @@ from django.utils import timezone
 from auth_tokens.models import TokenKind
 from auth_tokens.services import sign_out_everywhere
 from auth_tokens.types import Person
+from platform_admin.brand import get_product_name
 from platform_admin.models import PlatformAdmin
 from staff.actors import actor_name, is_platform_visitor, stored_staff
 from staff.models import Staff
@@ -51,8 +52,6 @@ from two_factor.numbers import (
 )
 from two_factor.sealing import open_secret, seal_secret, secrets_key_is_set
 
-# The authenticator app shows this name above the account's email.
-ISSUER = "Rudraksha CRM"
 CHALLENGE_LIFETIME = timedelta(minutes=5)
 # Wrong numbers allowed on one challenge; the next try finds it ended.
 CHALLENGE_TRIES_ALLOWED = 5
@@ -200,7 +199,8 @@ def begin_setup(token: str, host: str) -> tuple[Person, str]:
     account.save(update_fields=["pending_secret"])
     challenge.setup_given = True
     challenge.save(update_fields=["setup_given"])
-    return person, setup_uri(secret, person.email, ISSUER)
+    # The app shows the product's name now; an app set up earlier keeps the old one (ticket 15).
+    return person, setup_uri(secret, person.email, get_product_name())
 
 
 def confirm_setup(token: str, number: str, host: str) -> tuple[Person, list[str]]:

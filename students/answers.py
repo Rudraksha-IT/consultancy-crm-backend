@@ -38,6 +38,7 @@ def student_row(student: Student) -> dict[str, object]:
         "country": student.country,
         "source": student.source,
         "stage": student.stage,
+        "priority": student.priority,
         "assigned_counsellor": _counsellor(student.assigned_counsellor),
     }
 
@@ -158,6 +159,7 @@ def student_profile(student: Student, viewer: Staff) -> dict[str, object]:
         "documents": progress_answer(checklist_of(student).checklist),
         "details_version": student.details_version,
         "can_change": may(StudentAction.CHANGE),
+        "can_set_priority": may(StudentAction.SET_PRIORITY),
         "can_edit_details": may(StudentAction.EDIT_DETAILS),
         "can_set_stage": may(StudentAction.SET_STAGE),
         "can_assign": may(StudentAction.ASSIGN),

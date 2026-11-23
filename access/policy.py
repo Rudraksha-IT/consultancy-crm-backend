@@ -126,6 +126,8 @@ class StudentAction(StrEnum):
     MESSAGE = "message"
     # Log any Student's Visit to the office, and see Visits (spec 23a-23c).
     LOG_VISIT = "log_visit"
+    # Set any Student's Priority: anyone who can open them (ticket 10).
+    SET_PRIORITY = "set_priority"
     # See, add, change and delete one Student's Fees: their counsellor's or an Admin's (spec 76a).
     CHANGE_FEES = "change_fees"
     # See Balances: what each Student has paid and still owes, and their totals (spec 73, 76b).

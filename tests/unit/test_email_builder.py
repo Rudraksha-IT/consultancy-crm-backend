@@ -33,6 +33,8 @@ from emails.types import (
     PlatformInvite,
     PlatformLook,
     PlatformResetCode,
+    StaffEmailChangeCode,
+    StaffEmailChanged,
     StaffInviteCode,
     StaffResetCode,
     TestEmail,
@@ -230,6 +232,38 @@ class TestCodeEmails:
             assert "30 minutes" in part
             assert "didn't ask for it" in part
 
+    def test_staff_email_change_code_names_the_new_email(self) -> None:
+        email = build_email(
+            OFFICE, StaffEmailChangeCode(name="Ram Thapa", code=CODE, new_email="ram@himal.example")
+        )
+        assert email.subject == "Your code to change your email at Himal Education"
+        assert email.reply_to == "hello@himal.example"
+        for part in (email.html, email.text):
+            assert CODE in part
+            assert "ram@himal.example" in part
+            assert "30 minutes" in part
+            assert "didn't ask for it" in part
+
+    def test_staff_email_changed_notice_has_no_code(self) -> None:
+        email = build_email(
+            OFFICE, StaffEmailChanged(name="Ram Thapa", new_email="ram@himal.example")
+        )
+        assert email.subject == "Your email at Himal Education was changed"
+        assert email.reply_to == "hello@himal.example"
+        for part in (email.html, email.text):
+            assert "Your email was changed to ram@himal.example." in part
+            assert "If this wasn't you, tell your Admin." in part
+        assert not re.search(r"\b\d{6}\b", email.text)
+
+    def test_email_change_names_and_addresses_are_escaped(self) -> None:
+        for content in (
+            StaffEmailChangeCode(name=INJECTION, code=CODE, new_email=INJECTION),
+            StaffEmailChanged(name=INJECTION, new_email=INJECTION),
+        ):
+            email = build_email(OFFICE, content)
+            assert "<script>" not in email.html
+            assert "&lt;script&gt;" in email.html
+
     def test_platform_reset_names_the_platform_address(self) -> None:
         email = build_email(
             PLATFORM,
@@ -253,12 +287,18 @@ class TestCodeEmails:
         [
             StaffInviteCode("Ram", "Admin", CODE, "https://himal.example.test/join"),
             StaffResetCode("Ram", CODE),
+            StaffEmailChangeCode("Ram", CODE, "ram@himal.example"),
             PlatformResetCode("Asha", CODE, "platform.example"),
             PlatformInvite("Asha", CODE, "https://platform.example/join"),
         ],
     )
     def test_no_code_is_ever_inside_a_link(
-        self, content: StaffInviteCode | StaffResetCode | PlatformResetCode | PlatformInvite
+        self,
+        content: StaffInviteCode
+        | StaffResetCode
+        | StaffEmailChangeCode
+        | PlatformResetCode
+        | PlatformInvite,
     ) -> None:
         look = PLATFORM if isinstance(content, PlatformResetCode | PlatformInvite) else OFFICE
         html = build_email(look, content).html

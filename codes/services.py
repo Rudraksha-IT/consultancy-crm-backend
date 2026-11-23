@@ -72,10 +72,11 @@ def _scope_of(holder: CodeHolder) -> _Scope | None:
     )
 
 
-def issue_code(holder: CodeHolder, purpose: CodePurpose) -> str:
+def issue_code(holder: CodeHolder, purpose: CodePurpose, *, bound_to: str = "") -> str:
     """Make a new Code for `holder`, replacing any earlier one for `purpose`, and return it.
 
-    The caller emails it; it is never stored or logged.
+    The caller emails it; it is never stored or logged. A Code `bound_to` a value (the new
+    email of an email change) is accepted only with that same value.
 
     Raises:
         CodeLimitReachedError: `MAX_CODES_PER_HOUR` were already sent in the last hour.
@@ -99,17 +100,25 @@ def issue_code(holder: CodeHolder, purpose: CodePurpose) -> str:
             **scope.owner,
             purpose=purpose,
             salt=salt,
-            code_hash=_hash(salt, code),
+            code_hash=_hash(salt, code, bound_to),
             created_at=now,
             expires_at=now + CODE_LIFETIME,
         )
     return code
 
 
-def use_code(holder: CodeHolder, purpose: CodePurpose, code: str, *, consume: bool = True) -> None:
+def use_code(
+    holder: CodeHolder,
+    purpose: CodePurpose,
+    code: str,
+    *,
+    consume: bool = True,
+    bound_to: str = "",
+) -> None:
     """Accept `code` for `holder` and `purpose`, using it up unless `consume` is False.
 
-    A wrong Code counts as a try. Call it outside any transaction a refusal would roll back,
+    A Code issued `bound_to` a value works only with the same value. A wrong Code (or value)
+    counts as a try. Call it outside any transaction a refusal would roll back,
     or that try is forgotten. A Platform Admin's Code works only on the Platform's own schema.
 
     Raises:
@@ -117,12 +126,14 @@ def use_code(holder: CodeHolder, purpose: CodePurpose, code: str, *, consume: bo
             outside its scope.
     """
     scope = _scope_of(holder)
-    if scope is None or not _accept(scope, purpose, code, consume=consume):
+    if scope is None or not _accept(scope, purpose, (code, bound_to), consume=consume):
         raise InvalidCodeError
     logger.info("code accepted: %s purpose=%s", scope.who, purpose.value)
 
 
-def _accept(scope: _Scope, purpose: CodePurpose, code: str, *, consume: bool) -> bool:
+def _accept(scope: _Scope, purpose: CodePurpose, typed: tuple[str, str], *, consume: bool) -> bool:
+    """Whether `typed` (the Code and its bound value) is right; a wrong one counts as a try."""
+    code, bound_to = typed
     with transaction.atomic():
         record: CodeRecord | None = (
             scope.codes.select_for_update()
@@ -138,7 +149,7 @@ def _accept(scope: _Scope, purpose: CodePurpose, code: str, *, consume: bool) ->
         if record is None:
             return False
         this = scope.codes.filter(pk=record.pk)
-        if not hmac.compare_digest(record.code_hash, _hash(record.salt, code)):
+        if not hmac.compare_digest(record.code_hash, _hash(record.salt, code, bound_to)):
             this.update(attempts=F("attempts") + 1)
             if record.attempts + 1 >= MAX_ATTEMPTS:
                 logger.warning("code out of tries: %s purpose=%s", scope.who, purpose.value)
@@ -148,7 +159,24 @@ def _accept(scope: _Scope, purpose: CodePurpose, code: str, *, consume: bool) ->
         return True
 
 
-def _hash(salt: str, code: str) -> str:
-    """Keyed with the server's secret, so the database alone never reveals a Code."""
+def withdraw_code(holder: CodeHolder, purpose: CodePurpose) -> None:
+    """End `holder`'s open Code for `purpose` (one that could not be sent); it still counts."""
+    scope = _scope_of(holder)
+    if scope is None:
+        raise WrongCodeScopeError
+    scope.codes.filter(purpose=purpose, used_at__isnull=True, replaced_at__isnull=True).update(
+        replaced_at=timezone.now()
+    )
+
+
+def _bound(bound_to: str) -> str:
+    return f":{bound_to}" if bound_to else ""
+
+
+def _hash(salt: str, code: str, bound_to: str = "") -> str:
+    """Keyed with the server's secret, so the database alone never reveals a Code.
+
+    A bound value goes into the hash, so the Code works only with it.
+    """
     key = settings.SECRET_KEY.encode()
-    return hmac.new(key, f"{salt}:{code}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(key, f"{salt}:{code}{_bound(bound_to)}".encode(), hashlib.sha256).hexdigest()

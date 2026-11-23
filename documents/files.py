@@ -33,18 +33,33 @@ class FileKind:
     extension: str
     # Extensions a person may have typed for this kind (lowercase, with the dot).
     known_extensions: tuple[str, ...]
-    signature: bytes
+    # The first bytes any file of this kind starts with (one of them).
+    signatures: tuple[bytes, ...]
+    # False for a kind that is only ever downloaded, never shown in the browser.
+    opens_in_browser: bool = True
 
 
-PDF = FileKind("application/pdf", ".pdf", (".pdf",), b"%PDF-")
-JPEG = FileKind("image/jpeg", ".jpg", (".jpg", ".jpeg"), b"\xff\xd8\xff")
-PNG = FileKind("image/png", ".png", (".png",), b"\x89PNG\r\n\x1a\n")
+PDF = FileKind("application/pdf", ".pdf", (".pdf",), (b"%PDF-",))
+JPEG = FileKind("image/jpeg", ".jpg", (".jpg", ".jpeg"), (b"\xff\xd8\xff",))
+PNG = FileKind("image/png", ".png", (".png",), (b"\x89PNG\r\n\x1a\n",))
+# A zip starts with its first entry, or (when it holds nothing) with its end record. It is kept
+# as sent: never unzipped, read inside or shown (first live fixes, ticket 09).
+ZIP = FileKind(
+    "application/zip", ".zip", (".zip",), (b"PK\x03\x04", b"PK\x05\x06"), opens_in_browser=False
+)
+# What files may be anywhere a Document-like file is uploaded: PDFs and photos.
 FILE_KINDS = (PDF, JPEG, PNG)
+# A Student's Documents also take zips (ticket 09); nothing else does.
+STUDENT_DOCUMENT_KINDS = (*FILE_KINDS, ZIP)
+# Content types that are only ever downloaded.
+DOWNLOAD_ONLY_TYPES = frozenset(
+    kind.content_type for kind in STUDENT_DOCUMENT_KINDS if not kind.opens_in_browser
+)
 
 
-def detect_kind(start: bytes) -> FileKind | None:
-    """The kind of file whose first bytes are `start`, or None when it isn't a PDF or photo."""
-    return next((kind for kind in FILE_KINDS if start.startswith(kind.signature)), None)
+def detect_kind(start: bytes, kinds: tuple[FileKind, ...] = FILE_KINDS) -> FileKind | None:
+    """The kind among `kinds` whose first bytes are `start`, or None when it is none of them."""
+    return next((kind for kind in kinds if start.startswith(kind.signatures)), None)
 
 
 def safe_file_name(name: str, kind: FileKind) -> str:

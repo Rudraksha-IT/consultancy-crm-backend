@@ -16,8 +16,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from config.serializers import StrictSerializer
-from emails.looks import PRODUCT_NAME
 from platform_admin.auth import get_request_platform_admin
+from platform_admin.brand import get_product_name
 from platform_admin.email_check import EmailState, EmailStatus, email_status, send_test_email
 from platform_admin.exceptions import TestEmailLimitError
 from platform_admin.permissions import IsPlatformAdmin
@@ -45,7 +45,7 @@ def _settings_answer(request: Request, shown: EmailStatus) -> dict[str, Any]:
     return {
         "email": _status_answer(shown),
         "from_address": settings.DEFAULT_FROM_EMAIL,
-        "product_name": PRODUCT_NAME,
+        "product_name": get_product_name(),
         "sent_to": str(get_request_platform_admin(request).email),
     }
 

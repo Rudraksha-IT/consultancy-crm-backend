@@ -17,10 +17,12 @@ from applications.models import Application, Visa
 from applications.statuses import OfferKind, VisaStatus
 from config.serializers import RecordIdField, StrictSerializer, parse_record_id
 from documents.files import (
+    FILE_KINDS,
     MAX_DOCUMENT_BYTES,
     MAX_FILES_AT_ONCE,
     MAX_UPLOAD_BYTES,
     SIGNATURE_BYTES,
+    STUDENT_DOCUMENT_KINDS,
     FileKind,
     detect_kind,
     safe_file_name,
@@ -52,6 +54,7 @@ CHOOSE_TYPE_MESSAGE = "Choose a document type from the list."
 CHOOSE_FILE_MESSAGE = "Choose a file to upload."
 FILE_TOO_BIG_MESSAGE = "The file is too big. Upload at most 10 MB."
 FILE_KIND_MESSAGE = "Upload a PDF, JPG or PNG file."
+STUDENT_DOCUMENT_KIND_MESSAGE = "Upload a PDF, JPG, PNG or ZIP file."
 TOO_MANY_AT_ONCE_MESSAGE = f"Upload at most {MAX_FILES_AT_ONCE} files at once."
 _UPLOAD_MB = MAX_UPLOAD_BYTES // (1024 * 1024)
 TOO_BIG_TOGETHER_MESSAGE = (
@@ -194,10 +197,19 @@ class StudentRecordField[M: Model](serializers.Field[M, str, str, Any]):
 
 
 class DocumentFileField(serializers.Field[Upload, Upload, None, Any]):
-    """One uploaded file: a PDF, JPG or PNG (by its bytes), not empty, at most 10 MB."""
+    """One uploaded file of one of `kinds` (by its bytes), not empty, at most 10 MB.
 
-    def __init__(self) -> None:
+    PDFs and photos unless told otherwise; a Student's Documents also take zips (ticket 09).
+    """
+
+    def __init__(
+        self,
+        kinds: tuple[FileKind, ...] = FILE_KINDS,
+        kind_message: str = FILE_KIND_MESSAGE,
+    ) -> None:
         super().__init__(error_messages=_same_message(CHOOSE_FILE_MESSAGE))
+        self.kinds = kinds
+        self.kind_message = kind_message
 
     def to_internal_value(self, data: object) -> Upload:
         """Return the file once its size and first bytes are checked."""
@@ -205,30 +217,33 @@ class DocumentFileField(serializers.Field[Upload, Upload, None, Any]):
             self.fail("invalid")
         if data.size > MAX_DOCUMENT_BYTES:
             raise serializers.ValidationError(FILE_TOO_BIG_MESSAGE)
-        if _kind_of(data) is None:
-            raise serializers.ValidationError(FILE_KIND_MESSAGE)
+        if _kind_of(data, self.kinds) is None:
+            raise serializers.ValidationError(self.kind_message)
         return data
 
     def to_representation(self, value: Upload) -> None:
         """Never shown."""
 
 
-def _kind_of(upload: Upload) -> FileKind | None:
+def _kind_of(
+    upload: Upload, kinds: tuple[FileKind, ...] = STUDENT_DOCUMENT_KINDS
+) -> FileKind | None:
     upload.seek(0)
     start = upload.read(SIGNATURE_BYTES)
     upload.seek(0)
-    return detect_kind(start)
+    return detect_kind(start, kinds)
 
 
 class DocumentFilesField(serializers.Field[list[Upload], list[Upload], None, Any]):
-    """One or more files sent under the same name (issue 78), each checked like one file.
+    """One or more files of a Student's Document sent under the same name (issue 78).
 
-    At most MAX_FILES_AT_ONCE, and at most MAX_UPLOAD_BYTES together.
+    Each is checked like one file and may also be a zip (ticket 09). At most MAX_FILES_AT_ONCE,
+    and at most MAX_UPLOAD_BYTES together.
     """
 
     def __init__(self) -> None:
         super().__init__(error_messages=_same_message(CHOOSE_FILE_MESSAGE))
-        self._one = DocumentFileField()
+        self._one = DocumentFileField(STUDENT_DOCUMENT_KINDS, STUDENT_DOCUMENT_KIND_MESSAGE)
 
     def get_value(self, dictionary: Any) -> object:  # noqa: ANN401  # DRF's own signature
         """Every value sent under the field's name, from a form; a plain object's one value."""

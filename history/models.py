@@ -67,6 +67,8 @@ class HistoryKind(models.TextChoices):
     # Before and after are the appointment's moments in UTC ISO 8601, empty for none (booked:
     # before empty; moved: both; cleared: after empty); `detail` is the Appointment.
     VISA_DATE_CHANGED = "visa_date_changed", "Visa date changed"
+    # Before and after are the Priorities' words, e.g. "Normal" and "High" (ticket 10).
+    PRIORITY_CHANGED = "priority_changed", "Priority changed"
 
 
 class AppendOnlyQuerySet(models.QuerySet["HistoryEntry"]):

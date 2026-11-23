@@ -65,8 +65,12 @@ HOLIDAYS_URL = "/api/clock/holidays/"
 EXPORTS_URL = "/api/exports/"
 
 NO_NETWORK = {"detail": "Ask your Admin to add the office network."}
-OFF_NETWORK_IN = {"detail": "You can only clock in from the office network."}
-OFF_NETWORK_OUT = {"detail": "You can only clock out from the office network."}
+# Spec 27: the office's address may have changed; the same words for clocking in and out.
+OFF_NETWORK_MESSAGE = (
+    "This network isn't saved as an office network. At the office? The office's internet "
+    "address may have changed. Ask an Admin to open the CRM here; it takes one tap."
+)
+OFF_NETWORK_IN = OFF_NETWORK_OUT = {"detail": OFF_NETWORK_MESSAGE}
 ALREADY_IN = {"detail": "You're already clocked in."}
 NOT_IN = {"detail": "You're not clocked in today."}
 PLATFORM_CANT_CLOCK = {"detail": "A Platform Admin can't clock in or out."}
@@ -194,6 +198,65 @@ class TestClockingIn:
         abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::1"
 
         assert abc.client.post(IN_URL, format="json").status_code == status.HTTP_201_CREATED
+
+    def test_an_ipv6_office_group_added_from_the_suggestion_covers_every_device_in_it(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9:a1b2:c3d4:e5f6:1"
+        suggested = abc.client.get("/api/office-networks/current/").json()["suggested_network"]
+        added = abc.client.post(
+            "/api/office-networks/", {"label": "Office", "network": suggested}, format="json"
+        )
+        abc.log_in_as(Role.COUNSELLOR)
+
+        tried = {}
+        for device in ("2400:1a00:b030:9::1", "2400:1a00:b030:9:ffff:ffff:ffff:fffe"):
+            abc.client.defaults["HTTP_X_CLIENT_IP"] = device
+            tried[device] = abc.client.post(IN_URL, format="json").status_code
+            abc.client.post(OUT_URL, format="json")
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:a::1"
+        other_group = abc.client.post(IN_URL, format="json")
+
+        assert added.status_code == status.HTTP_201_CREATED
+        assert added.json()["network"] == "2400:1a00:b030:9::/64"
+        assert set(tried.values()) == {status.HTTP_201_CREATED}
+        assert other_group.status_code == status.HTTP_403_FORBIDDEN
+        assert other_group.json() == OFF_NETWORK_IN
+
+    def test_an_ipv4_suggestion_stays_the_one_address(self, abc: ConsultancyContext) -> None:
+        with tenant_context(abc.consultancy):
+            OfficeNetwork.objects.all().delete()
+        abc.log_in_as(Role.ADMIN)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "27.34.20.9"
+        suggested = abc.client.get("/api/office-networks/current/").json()["suggested_network"]
+        abc.client.post(
+            "/api/office-networks/", {"label": "Office", "network": suggested}, format="json"
+        )
+        abc.log_in_as(Role.COUNSELLOR)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "27.34.20.10"
+
+        refused = abc.client.post(IN_URL, format="json")
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "27.34.20.9"
+        allowed = abc.client.post(IN_URL, format="json")
+
+        assert suggested == "27.34.20.9"
+        assert refused.json() == OFF_NETWORK_IN
+        assert allowed.status_code == status.HTTP_201_CREATED
+
+    def test_a_single_ipv6_address_saved_before_stays_only_that_address(
+        self, abc: ConsultancyContext
+    ) -> None:
+        add_network(abc, "2400:1a00:b030:9::1/128")
+        abc.log_in_as(Role.COUNSELLOR)
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::2"
+
+        refused = abc.client.post(IN_URL, format="json")
+        abc.client.defaults["HTTP_X_CLIENT_IP"] = "2400:1a00:b030:9::1"
+        allowed = abc.client.post(IN_URL, format="json")
+
+        assert refused.status_code == status.HTTP_403_FORBIDDEN
+        assert allowed.status_code == status.HTTP_201_CREATED
 
     @pytest.mark.parametrize("address", [HOME_ADDRESS, None, "not-an-address", "10.0.0.5"])
     def test_anywhere_else_is_refused_and_nothing_recorded(

@@ -34,6 +34,17 @@ WARD_MAX = 35
 DEFAULT_NATIONALITY = "Nepali"
 
 
+class Priority(models.TextChoices):
+    """How urgent something is: a Student's case (ticket 10) or a Task (spec 77a), Normal to start.
+
+    The one list of words both use (GLOSSARY: Student Priority).
+    """
+
+    HIGH = "high", "High"
+    NORMAL = "normal", "Normal"
+    LOW = "low", "Low"
+
+
 class Stage(models.TextChoices):
     """Where a Student is in their journey with the Consultancy (GLOSSARY: Stage)."""
 
@@ -193,6 +204,10 @@ class Student(models.Model):
     note = models.TextField(max_length=NOTE_MAX_LENGTH, blank=True, default="")
     stage = models.CharField(
         max_length=CHOICE_MAX_LENGTH, choices=Stage.choices, default=Stage.LEAD
+    )
+    # How urgently their case needs attention (ticket 10); kept as the Stage moves.
+    priority = models.CharField(
+        max_length=CHOICE_MAX_LENGTH, choices=Priority.choices, default=Priority.NORMAL
     )
     # Why the Student was lost; only while their Stage is Lost (spec 39). History keeps old ones.
     lost_reason = models.TextField(max_length=LOST_REASON_MAX_LENGTH, blank=True, default="")

@@ -16,7 +16,7 @@ Recorded 2026-11-17 for decisions made in issues 10, 19, 79 and 83.
 
 - Each Student has a **History**: an append-only list of entries written by the service that made the change, never by hand and never by a view. Covered: Stage changes (with what caused an automatic move), Note edits (with the previous text), Payment created, edited or deleted, Transfers, Offer Letters and the Chosen Offer, the Bin, Application and Visa Status changes, Documents checked and Visa dates booked or moved.
 - Each entry keeps **who did it, by name as it was at the time**, when, and what changed (before and after). An action by a Platform Admin in Support Access is shown under their own name marked "Platform Admin", never as a Staff member.
-- Other records follow the same pattern with their own append-only tables: Consultancy Status changes, Export Records, Work Session changes, Office Network changes, two-step login events.
+- Other records follow the same pattern with their own append-only tables: Consultancy Status changes, Export Records, Work Session changes, two-step login events. (Office Network adds and removes were recorded too until 2026-11-22, when the product owner decided they aren't wanted; the table was dropped in the first live fixes, ticket 02.)
 - The append-only tables refuse updates and deletes at the query-set level.
 - Recording that started late is honest: nothing is guessed for the past, and reports say "Counted from <date>".
 

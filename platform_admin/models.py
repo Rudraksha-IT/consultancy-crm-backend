@@ -11,6 +11,9 @@ from config.public_ids import public_id_field
 from tenancy.models import LOGO_CONTENT_TYPE_MAX_LENGTH, LOGO_KEY_MAX_LENGTH
 
 PLATFORM_ADMIN_NAME_MAX_LENGTH = 200
+# The product's own name (first live fixes, ticket 15), until a Platform Admin changes it.
+DEFAULT_PRODUCT_NAME = "Rudraksha CRM"
+PRODUCT_NAME_MAX_LENGTH = 40
 
 
 class PlatformAdminManager(BaseUserManager["PlatformAdmin"]):
@@ -158,22 +161,52 @@ class PlatformResetRequest(models.Model):
         return f"Platform reset request {self.pk}"
 
 
-class ProductBrand(models.Model):
-    """The product's own logo (issue 65), shown on the Platform's and Central login's screens.
+class SavedProductLogo(models.Model):
+    """One product logo a Platform Admin uploaded (first live fixes, ticket 07).
 
-    One row only (pk 1). The file is in private storage under `platform/`; no key means no logo
-    (the initials show). The version grows with every upload, so each logo has its own address.
-    Written only by `platform_admin.brand`.
+    At most 10 are kept, each in private storage under `platform/`. `ProductBrand.logo` says
+    which one, if any, is in use. Written only by `platform_admin.brand`.
     """
 
-    logo_key = models.CharField(max_length=LOGO_KEY_MAX_LENGTH, blank=True, default="")
-    logo_content_type = models.CharField(
-        max_length=LOGO_CONTENT_TYPE_MAX_LENGTH, blank=True, default=""
+    public_id = public_id_field()
+
+    key = models.CharField(max_length=LOGO_KEY_MAX_LENGTH)
+    content_type = models.CharField(max_length=LOGO_CONTENT_TYPE_MAX_LENGTH)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return "Saved product logo"
+
+
+class ProductBrand(models.Model):
+    """The product's own logo in use (issue 65), shown on the Platform's and login screens.
+
+    One row only (pk 1). No logo means none uploaded is in use: the tab shows the app's own logo
+    and the login screens the initials (ticket 07). The version grows with every change of the
+    logo in use, so each change has its own address. Written only by `platform_admin.brand`.
+    """
+
+    logo = models.ForeignKey(
+        SavedProductLogo, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     logo_version = models.PositiveIntegerField(default=0)
+    # Shown in every tab, screen and Platform email (ticket 15); checked by `platform_admin.brand`.
+    name = models.CharField(max_length=PRODUCT_NAME_MAX_LENGTH, default=DEFAULT_PRODUCT_NAME)
 
     def __str__(self) -> str:
         return "Product brand"
+
+
+class ProductNameChange(models.Model):
+    """One change of the product's name (ticket 15): from what, to what, by whom and when."""
+
+    before = models.CharField(max_length=PRODUCT_NAME_MAX_LENGTH)
+    after = models.CharField(max_length=PRODUCT_NAME_MAX_LENGTH)
+    by = models.ForeignKey(PlatformAdmin, null=True, on_delete=models.SET_NULL, related_name="+")
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return "Product name change"
 
 
 EMAIL_TEST_REFERENCE_MAX_LENGTH = 64

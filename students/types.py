@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from staff.models import Staff
-from students.models import Country, Qualification, Source, Stage, TargetLevel
+from students.models import Country, Priority, Qualification, Source, Stage, TargetLevel
 
 
 @dataclass(frozen=True)
@@ -39,3 +39,7 @@ class StudentFilters:
     # The country they most want to study in, and the level they aim for (spec 31).
     country: Country | None = None
     target_level: TargetLevel | None = None
+    # Only Students with this Priority (ticket 11).
+    priority: Priority | None = None
+    # Leave out Lost Students (Home, ticket 12).
+    hide_lost: bool = False

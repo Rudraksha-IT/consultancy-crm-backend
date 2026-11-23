@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from documents.files import FILE_NAME_MAX_CHARACTERS, JPEG, PDF, PNG, detect_kind, safe_file_name
+from documents.files import (
+    FILE_NAME_MAX_CHARACTERS,
+    JPEG,
+    PDF,
+    PNG,
+    STUDENT_DOCUMENT_KINDS,
+    ZIP,
+    detect_kind,
+    safe_file_name,
+)
 
 
 class TestDetectKind:
@@ -27,6 +36,29 @@ class TestDetectKind:
     )
     def test_anything_else_is_unknown(self, start: bytes) -> None:
         assert detect_kind(start) is None
+
+
+class TestZipOnlyWhereAllowed:
+    @pytest.mark.parametrize("start", [b"PK\x03\x04\x14\x00", b"PK\x05\x06\x00\x00"])
+    def test_a_zip_is_known_where_zips_are_allowed(self, start: bytes) -> None:
+        assert detect_kind(start, STUDENT_DOCUMENT_KINDS) == ZIP
+        assert detect_kind(start) is None
+
+    @pytest.mark.parametrize("start", [b"PK", b"PK\x01\x02", b"PK\x07\x08", b"\x1f\x8b\x08"])
+    def test_other_archives_and_parts_are_not_zips(self, start: bytes) -> None:
+        assert detect_kind(start, STUDENT_DOCUMENT_KINDS) is None
+
+    def test_only_zips_are_download_only(self) -> None:
+        assert [kind.opens_in_browser for kind in STUDENT_DOCUMENT_KINDS] == [
+            True,
+            True,
+            True,
+            False,
+        ]
+
+    def test_a_zip_name_always_ends_in_zip(self) -> None:
+        assert safe_file_name("marks.pdf", ZIP) == "marks.pdf.zip"
+        assert safe_file_name("papers.ZIP", ZIP) == "papers.zip"
 
 
 class TestSafeFileName:

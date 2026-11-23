@@ -14,7 +14,13 @@ from emails.builder import build_email
 from emails.office import office_look
 from emails.platform import platform_look
 from emails.sender import send_email
-from emails.types import PlatformInvite, PlatformResetCode, StaffInviteCode, StaffResetCode
+from emails.types import (
+    PlatformInvite,
+    PlatformResetCode,
+    StaffEmailChangeCode,
+    StaffInviteCode,
+    StaffResetCode,
+)
 from staff.models import Role, Staff
 
 if TYPE_CHECKING:
@@ -50,6 +56,18 @@ def send_code_email(
         str(staff.email),
         f"send_{purpose.value}_code",
     )
+
+
+def send_email_change_code(
+    staff: Staff, code: str, new_email: str, consultancy: Consultancy
+) -> None:
+    """Email `code` to the `new_email` `staff` is moving to, in `consultancy`'s look.
+
+    Raises:
+        SendFailedError: the mail server didn't take it.
+    """
+    content = StaffEmailChangeCode(name=str(staff.name), code=code, new_email=new_email)
+    send_email(build_email(office_look(consultancy), content), new_email, "send_email_change_code")
 
 
 def send_platform_code_email(admin: PlatformAdmin, code: str, platform_address: str) -> None:
