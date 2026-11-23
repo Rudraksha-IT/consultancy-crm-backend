@@ -385,3 +385,63 @@ class TestOnTheStudentsList:
         abc.log_in_as(Role.TEACHER)
 
         assert abc.client.get(LIST, {"priority": "high"}).status_code == (status.HTTP_403_FORBIDDEN)
+
+
+# Home's "High priority Students" (ticket 12; spec stories 90-94).
+class TestForHome:
+    def test_hide_lost_leaves_lost_students_out_and_counts_the_rest(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        for number in range(4):
+            with_priority(abc, f"Active {number}", Priority.HIGH, stage=Stage.COUNSELLING)
+        with_priority(abc, "Gone", Priority.HIGH, stage=Stage.LOST)
+        with_priority(abc, "Calm", Priority.NORMAL)
+
+        response = abc.client.get(LIST, {"priority": "high", "hide_lost": "true"})
+
+        body = response.json()
+        assert body["count"] == 4
+        assert "Gone" not in [row["name"] for row in body["results"]]
+
+    def test_without_hide_lost_lost_students_are_listed(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        with_priority(abc, "Gone", Priority.HIGH, stage=Stage.LOST)
+
+        assert listed(abc, priority="high") == ["Gone"]
+
+    def test_a_counsellor_gets_only_their_own(self, abc: ConsultancyContext) -> None:
+        me = abc.log_in_as(Role.COUNSELLOR)
+        other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
+        with_priority(abc, "Mine", Priority.HIGH, counsellor=me)
+        with_priority(abc, "Theirs", Priority.HIGH, counsellor=other)
+
+        assert listed(abc, priority="high", hide_lost="true", counsellor="me") == ["Mine"]
+
+    def test_an_admin_gets_everyones(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        other = abc.add_staff(Role.COUNSELLOR, email="other@abc.test")
+        with_priority(abc, "Theirs", Priority.HIGH, counsellor=other)
+        with_priority(abc, "Nobody's", Priority.HIGH)
+
+        assert listed(abc, priority="high", hide_lost="true") == ["Nobody's", "Theirs"]
+
+    @pytest.mark.parametrize("value", ["maybe", "yes please", *INJECTION_STRINGS])
+    def test_a_bad_hide_lost_is_refused(self, abc: ConsultancyContext, value: str) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = abc.client.get(LIST, {"hide_lost": value})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "hide_lost" in response.json()
+
+    def test_another_offices_students_never_count(
+        self, abc: ConsultancyContext, make_consultancy: ConsultancyFactory
+    ) -> None:
+        other = make_consultancy("XYZ Education", "xyzedu")
+        with_priority(other, "Their Student", Priority.HIGH)
+        abc.log_in_as(Role.ADMIN)
+
+        response = abc.client.get(LIST, {"priority": "high", "hide_lost": "true"})
+
+        assert response.json()["count"] == 0

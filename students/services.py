@@ -73,6 +73,8 @@ def _matching(filters: StudentFilters, viewer: Staff) -> Q:
         match &= student_search(filters.query)
     if filters.counsellor:
         match &= assigned_to(filters.counsellor, viewer)
+    if filters.hide_lost:
+        match &= ~Q(stage=Stage.LOST)
     return match
 
 

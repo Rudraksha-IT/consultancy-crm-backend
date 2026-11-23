@@ -171,6 +171,9 @@ class StudentListQuerySerializer(StrictSerializer[None]):
     stage = StrictChoiceField(choices=Stage.choices, required=False)
     # Only Students with this Priority (ticket 11).
     priority = priority_field(required=False)
+    # Leave out Lost Students, as Home's "High priority Students" does (ticket 12).
+    # Only "true" is taken; a missing value means Lost Students are listed too.
+    hide_lost = StrictChoiceField(choices=[("true", "true")], required=False)
     counsellor = serializers.RegexField(
         COUNSELLOR_FILTER_PATTERN,
         required=False,
@@ -218,4 +221,5 @@ def filters_from(data: Mapping[str, Any]) -> StudentFilters:
         country=None if country is None else Country(country),
         target_level=None if target_level is None else TargetLevel(target_level),
         priority=None if priority is None else Priority(priority),
+        hide_lost=data.get("hide_lost") == "true",
     )

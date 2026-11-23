@@ -41,3 +41,5 @@ class StudentFilters:
     target_level: TargetLevel | None = None
     # Only Students with this Priority (ticket 11).
     priority: Priority | None = None
+    # Leave out Lost Students (Home, ticket 12).
+    hide_lost: bool = False
