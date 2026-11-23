@@ -34,6 +34,7 @@ from students.models import (
     EnglishTest,
     Gender,
     MaritalStatus,
+    Priority,
     Province,
     Qualification,
     Source,
@@ -328,6 +329,28 @@ class NoteSerializer(StrictSerializer[None]):
     """The Student's whole Note, replacing the old text (spec 37)."""
 
     note = NoteField(required=True)
+
+
+CHOOSE_PRIORITY_MESSAGE = "Choose High, Normal or Low."
+
+
+class PrioritySerializer(StrictSerializer[None]):
+    """A Student's new Priority (ticket 10): one of the three, exactly as written."""
+
+    priority = StrictChoiceField(
+        choices=Priority.choices,
+        error_messages={
+            "required": CHOOSE_PRIORITY_MESSAGE,
+            "null": CHOOSE_PRIORITY_MESSAGE,
+            "blank": CHOOSE_PRIORITY_MESSAGE,
+            "invalid": CHOOSE_PRIORITY_MESSAGE,
+            "invalid_choice": CHOOSE_PRIORITY_MESSAGE,
+        },
+    )
+
+    def new_priority(self) -> Priority:
+        """Return the checked Priority."""
+        return Priority(self.validated_data["priority"])
 
 
 class AcademicRecordSerializer(StrictSerializer[None]):

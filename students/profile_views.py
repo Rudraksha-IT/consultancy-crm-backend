@@ -13,7 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from access.policy import why_cannot_change
+from access.policy import StudentAction, why_cannot, why_cannot_change
 from history.answers import history_entry_answer
 from history.serializers import HistoryQuerySerializer
 from history.services import history_of
@@ -39,10 +39,12 @@ from students.profile import (
     edit_note,
     profile_of,
     remove_entry,
+    set_priority,
 )
 from students.profile_serializers import (
     AcademicRecordSerializer,
     NoteSerializer,
+    PrioritySerializer,
     StudentDetailsSerializer,
     TestScoreSerializer,
     WorkExperienceSerializer,
@@ -106,6 +108,22 @@ class StudentNoteView(_StudentView):
         serializer = NoteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         edit_note(student, serializer.validated_data["note"], by=get_request_staff(request))
+        return _profile_answer(request, student_id)
+
+
+class StudentPriorityView(_StudentView):
+    """Set the Student's Priority (PUT): anyone who can open them (ticket 10)."""
+
+    def put(self, request: Request, student_id: UUID) -> Response:
+        """Save the Priority sent and return the profile as stored."""
+        student = _student(student_id)
+        staff = get_request_staff(request)
+        reason = why_cannot(staff, StudentAction.SET_PRIORITY, student)
+        if reason is not None:  # pragma: no cover  # CanSeeStudents refuses the same Staff first
+            raise PermissionDenied(reason)
+        serializer = PrioritySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        set_priority(student, serializer.new_priority(), by=staff)
         return _profile_answer(request, student_id)
 
 

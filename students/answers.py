@@ -149,6 +149,7 @@ def student_profile(student: Student, viewer: Staff) -> dict[str, object]:
         "test_scores": [test_score_answer(score) for score in student.test_scores.all()],
         "work_experience": [work_experience_answer(job) for job in student.work_experience.all()],
         "lost_reason": student.lost_reason,
+        "priority": student.priority,
         # Every Stage change, oldest first: the timeline works out time spent from these (issue 82).
         "stage_changes": [history_entry_answer(e) for e in stage_changes_of(student)],
         "progress": _progress_answer(student),
@@ -158,6 +159,7 @@ def student_profile(student: Student, viewer: Staff) -> dict[str, object]:
         "documents": progress_answer(checklist_of(student).checklist),
         "details_version": student.details_version,
         "can_change": may(StudentAction.CHANGE),
+        "can_set_priority": may(StudentAction.SET_PRIORITY),
         "can_edit_details": may(StudentAction.EDIT_DETAILS),
         "can_set_stage": may(StudentAction.SET_STAGE),
         "can_assign": may(StudentAction.ASSIGN),
