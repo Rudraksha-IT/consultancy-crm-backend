@@ -34,7 +34,9 @@ WAITING_URL = "/api/home/waiting/"
 PROGRESS_ROLES_ONLY = {"detail": "Only counsellors and Admins can see this."}
 # The domain and the Staff member, then the three counts and the appointments: each after
 # django-tenants' search_path, however much is waiting.
-MOST_QUERIES = 12
+# Home counts Documents waiting from the Students' checklists, as the Documents page does (list
+# tidy-ups 22): building them adds a fixed 8, never one per Student.
+MOST_QUERIES = 20
 NOTHING_WAITING = {
     "documents_waiting": 0,
     "transfer_requests_waiting": 0,

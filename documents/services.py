@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Q, QuerySet
+from django.db.models import Q, QuerySet
 from django.db.models.functions import Lower
 
 from applications.models import Application
@@ -405,28 +405,19 @@ def signed_file_link(file: DocumentFile, *, as_attachment: bool, by: Staff) -> s
     return link
 
 
-def waiting_documents(students: QuerySet[Student]) -> QuerySet[Document]:
-    """The newest copies still Pending Verification, for these Students but not Leads or Lost.
+def waiting_count(students: QuerySet[Student]) -> int:
+    """How many checklist Documents of these Students wait for a check (list tidy-ups 22).
 
-    The Students the Documents page lists (spec 64a), so the Home's count and the page's
-    "waiting to check" filter agree (issue 52). Nothing in the Bin waits for a check.
+    The same count the Documents page shows, Students' checklists only: a Document of a type not
+    on the checklist ("Other documents") isn't counted. Leads, Lost and the Bin are left out, as on
+    the page. A fixed number of queries.
     """
-    newer = Document.objects.filter(
-        student_id=OuterRef("student_id"),
-        document_type_id=OuterRef("document_type_id"),
-        pk__gt=OuterRef("pk"),
-        binned_at__isnull=True,
-    )
-    return Document.objects.filter(
-        binned_at__isnull=True,
-        verification=Verification.PENDING,
-        student__in=students.exclude(stage__in=_NO_PAPERWORK_STAGES),
-    ).exclude(Exists(newer))
+    return sum(one.checklist.counts.waiting for one in paperwork(students))
 
 
-def with_waiting_documents(students: QuerySet[Student]) -> QuerySet[Student]:
-    """Only the Students who have a Document waiting to be checked (issue 52)."""
-    return students.filter(pk__in=waiting_documents(students).values("student_id"))
+def only_waiting(found: list[Paperwork]) -> list[Paperwork]:
+    """The Students with a checklist Document waiting for a check (issue 52, list tidy-ups 22)."""
+    return [one for one in found if one.checklist.counts.waiting > 0]
 
 
 def paperwork(students: QuerySet[Student]) -> list[Paperwork]:

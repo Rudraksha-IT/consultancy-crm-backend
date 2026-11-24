@@ -19,7 +19,7 @@ from applications.models import Visa
 from applications.statuses import VisaStatus
 from clock_in.work_from_home import waiting as work_from_home_waiting
 from documents.bin import count_in_bin
-from documents.services import waiting_documents
+from documents.services import waiting_count
 from staff.actors import is_platform_visitor
 from staff.models import Role, Staff
 from students.models import Student
@@ -76,7 +76,7 @@ def waiting_on(staff: Staff, *, clock_in_on: bool = False) -> Waiting:
     return Waiting(
         work_from_home_requests=len(requests),
         work_from_home_first_staff_id=requests[0] if requests else None,
-        documents=waiting_documents(students).count(),
+        documents=waiting_count(students),
         transfer_requests=waiting_for(staff).count(),
         documents_in_bin=count_in_bin() if staff.role == Role.ADMIN else 0,
         appointment_count=len(appointments),
