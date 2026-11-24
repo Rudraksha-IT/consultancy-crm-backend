@@ -1,10 +1,11 @@
 name: Backup
 
-# A database backup from GitHub (ticket 15). The server's own timer makes one every 6 hours; this
-# workflow, every night at about 02:00 Nepal time (started on `main` by nightly-backup.yml, since
-# schedules run only on the default branch, `dev`) and whenever someone runs it from the Actions
-# tab, also:
-#   1. checks the server's newest backup is recent (fails, so GitHub emails, if the timer stopped);
+# Backups from GitHub (ticket 15). The server's own timer makes the one backup a day (14:15 Nepal
+# time); every night at about 02:00 Nepal time nightly-backup.yml starts this on `main` (schedules
+# run only on the default branch, `dev`) with check_only, which only:
+#   1. checks the server's newest backup is recent (fails, so GitHub emails, if the timer stopped).
+# Run from the Actions tab without check_only, it also (the owner wants one backup a day, so only
+# when one is needed now, 2026-11-24):
 #   2. makes one more backup now (kind `github`), copied to R2 like every other;
 #   3. downloads that encrypted copy and keeps it here as a workflow artifact for 7 days.
 # Copies are encrypted on the server with the backup public key; only the private key, kept
@@ -16,6 +17,10 @@ on:
         description: Why (kept in the server's backup history)
         type: string
         required: true
+      check_only:
+        description: Only check the server's newest backup is recent; make none
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,6 +50,7 @@ jobs:
         run: .github/scripts/ssh-request.sh backup-check
       - name: Back up now
         id: backup
+        if: ${{ !inputs.check_only }}
         env:
           DEPLOY_REASON: ${{ inputs.reason || 'nightly backup from GitHub' }}
         run: |
@@ -56,6 +62,7 @@ jobs:
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
       - name: Download the encrypted copy
+        if: ${{ !inputs.check_only }}
         env:
           NAME: ${{ steps.backup.outputs.name }}
         run: |
@@ -68,6 +75,7 @@ jobs:
           fi
           echo "- Artifact: \`$NAME\`, $(numfmt --to=iec --suffix=B "$size"), kept 7 days" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.check_only }}
         with:
           name: ${{ steps.backup.outputs.name }}
           path: ${{ runner.temp }}/backup/${{ steps.backup.outputs.name }}
