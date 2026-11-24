@@ -1,4 +1,4 @@
-"""The eight ready-made emails' starting text (spec stories 28 to 46), the same for every office.
+"""The nine ready-made emails' starting text (spec stories 28 to 46), the same for every office.
 
 A draft is plain text: Staff edit it in the composer and the builder puts it in the frame when it
 is sent. An email to many Students has no first name and starts "Dear Student,".
@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from emails.types import (
+    CheckingIn,
     ClassDetails,
     DocumentsNeeded,
     Draft,
@@ -132,6 +133,18 @@ def _class_details(_: DraftContext, email: ClassDetails) -> Draft:
     )
 
 
+def _checking_in(context: DraftContext, _: CheckingIn) -> Draft:
+    return Draft(
+        f"Checking in from {context.office_name}",
+        "We haven't heard from you in a while, so we wanted to check in. Are you still planning "
+        "to study abroad? If you are, would you like to carry on with us? We'd be glad to pick "
+        "up where we left off.\n\n"
+        "If something changed, or something didn't work out for you, please tell us what "
+        "happened. It helps us do better. Reply to this email or call the office; our contact "
+        "details are at the bottom of this email.",
+    )
+
+
 def _plain(_: DraftContext, __: PlainEmail) -> Draft:
     return Draft("", "")
 
@@ -144,6 +157,7 @@ _DRAFTS: dict[type, Callable[[DraftContext, Any], Draft]] = {
     OfferReceived: _offer_received,
     VisaResult: _visa_result,
     ClassDetails: _class_details,
+    CheckingIn: _checking_in,
     PlainEmail: _plain,
 }
 

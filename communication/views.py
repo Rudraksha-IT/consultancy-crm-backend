@@ -68,7 +68,6 @@ ROWS_PER_PAGE = 25
 ONE_OF_MESSAGE = "Choose a class or a Student list."
 TOO_MANY_MESSAGE = "Email at most {limit} Students at once."
 NOT_FOUND_MESSAGE = "Some of these Students can't be found."
-LOST_MESSAGE = "Lost Students can't be chosen."
 NO_CONTACT_EMAIL_MESSAGE = (
     "Your Admin needs to add the office's contact email in Configuration first."
 )
@@ -197,12 +196,11 @@ class BulkMessagesView(APIView):
         if batch_id is not None and query.has_student_filters():
             raise ValidationError({"detail": ONE_OF_MESSAGE})
         filters = None if batch_id is not None else query.to_filters()
-        choosable = (
-            _recipients(request, batch_id, filters)
-            .exclude(stage=Stage.LOST)
-            .exclude(email="")
-            .order_by("name", "pk")
-        )
+        found = _recipients(request, batch_id, filters).exclude(email="")
+        # Lost Students are ticked only when the list shows the Lost (list tidy-ups 34).
+        if filters is None or filters.stage != Stage.LOST:
+            found = found.exclude(stage=Stage.LOST)
+        choosable = found.order_by("name", "pk")
         limit = settings.BULK_MAX_STUDENTS
         return Response(choosable_answer(list(choosable[:limit]), choosable.count(), limit))
 
@@ -254,7 +252,7 @@ def _chosen(ids: list[UUID]) -> list[Student]:
     """The Students chosen, in the order given.
 
     Raises:
-        ValidationError: nobody, too many, an unknown Student, or a Lost one was chosen.
+        ValidationError: nobody, too many, or an unknown Student was chosen.
     """
     limit = settings.BULK_MAX_STUDENTS
     if not ids:
@@ -264,8 +262,6 @@ def _chosen(ids: list[UUID]) -> list[Student]:
     found = Student.objects.in_bulk(ids, field_name="public_id")
     if len(found) != len(ids):
         raise ValidationError({"students": [NOT_FOUND_MESSAGE]})
-    if any(student.stage == Stage.LOST for student in found.values()):
-        raise ValidationError({"students": [LOST_MESSAGE]})
     return [found[pk] for pk in ids]
 
 
