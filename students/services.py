@@ -11,6 +11,7 @@ import re
 from django.core.paginator import Page, Paginator
 from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.db.models.functions import Lower
 
 from staff.actors import stored_staff
 from staff.models import Staff
@@ -49,13 +50,15 @@ def add_student(details: NewStudent, by: Staff) -> Student:
 
 
 def find_students(filters: StudentFilters, viewer: Staff) -> QuerySet[Student]:
-    """Every Student matching the search and filters, newest first.
+    """Every Student matching the search and filters, newest first (or A to Z by name).
 
     `viewer` is who "assigned to me" means.
     """
     students = Student.objects.select_related("assigned_counsellor").filter(
         _matching(filters, viewer)
     )
+    if filters.by_name:
+        return students.order_by(Lower("name"), "pk")
     return students.order_by("-created_at", "-pk")
 
 

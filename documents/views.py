@@ -105,11 +105,11 @@ from documents.services import (
     checklist_of,
     document_link,
     document_types,
+    only_waiting,
     paperwork,
     set_needed_by_everyone,
     signed_file_link,
     upload_document,
-    with_waiting_documents,
 )
 from documents.storage import SIGNED_LINK_SECONDS
 from documents.types import NewDocumentType
@@ -414,9 +414,9 @@ class PaperworkView(APIView):
         students = Student.objects.all()
         if query.only_mine():
             students = students.filter(assigned_counsellor=get_request_staff(request))
-        if query.only_waiting():
-            students = with_waiting_documents(students)
         found = paperwork(students)
+        if query.only_waiting():
+            found = only_waiting(found)
         try:
             page = Paginator(found, PAPERWORK_PER_PAGE).page(query.page_number())
         except EmptyPage as error:

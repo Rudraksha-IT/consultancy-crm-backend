@@ -20,6 +20,7 @@ from emails.looks import PRODUCT_NAME
 from emails.types import (
     BuiltEmail,
     CentralLogin,
+    CheckingIn,
     ClassDetails,
     DocumentsNeeded,
     DraftContext,
@@ -171,6 +172,7 @@ _READY_MADE: tuple[tuple[str, DraftContext, ReadyMade], ...] = (
             "IELTS Morning", "Sunday to Friday", "7:00 to 8:30 am", "1 Dec 2026", "Hari Adhikari"
         ),
     ),
+    ("Checking in", _ONE, CheckingIn()),
     ("Plain email", _ONE, PlainEmail()),
 )
 

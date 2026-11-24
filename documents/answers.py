@@ -198,7 +198,10 @@ def paperwork_answer(one: Paperwork) -> dict[str, object]:
 
 
 def paperwork_totals(found: list[Paperwork]) -> dict[str, int]:
-    """The counts by state across every Student on the page's list (not only this page)."""
+    """The counts by state across every Student on the page's list (not only this page).
+
+    Home's count of Documents waiting uses the same checklist counts (list tidy-ups 22).
+    """
     counts = [one.checklist.counts for one in found]
     return {
         "rejected": sum(count.rejected for count in counts),

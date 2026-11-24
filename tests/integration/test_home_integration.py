@@ -145,7 +145,8 @@ class TestProgress:
         )
         assert profile == {"percent": 88, "next_step": "Medical coming up", "is_done": False}
 
-    def test_a_granted_visa_is_done_and_comes_first(self, abc: ConsultancyContext) -> None:
+    def test_a_granted_visa_is_finished_and_left_out_of_home(self, abc: ConsultancyContext) -> None:
+        """Finished Students need no work, so Home's progress skips them (list tidy-ups 14)."""
         admin = abc.log_in_as(Role.ADMIN)
         make_student(abc, admin, Stage.OFFER, name="Asha Offer")
         student = make_student(abc, admin, Stage.VISA, name="Binod Granted")
@@ -154,11 +155,16 @@ class TestProgress:
             Visa.objects.create(student=student, application=application, status=VisaStatus.GRANTED)
 
         body = abc.client.get(PROGRESS_URL).json()
+        profile = abc.client.get(f"/api/students/{student.public_id}/").json()["progress"]
 
-        assert names(body) == ["Binod Granted", "Asha Offer"]
-        first = body["results"][0]
-        assert (first["percent"], first["is_done"]) == (100, True)
-        assert first["next_step"] == "Visa granted. Help with flights and pre-departure."
+        assert names(body) == ["Asha Offer"]
+        assert body["count"] == 1
+        # Their own page still says they are done.
+        assert profile == {
+            "percent": 100,
+            "next_step": "Visa granted. Help with flights and pre-departure.",
+            "is_done": True,
+        }
 
     def test_furthest_along_come_first_and_lost_students_are_left_out(
         self, abc: ConsultancyContext

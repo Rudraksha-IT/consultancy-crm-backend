@@ -48,7 +48,6 @@ NOT_FOR_TEACHERS = {"detail": "Teachers can't see Students."}
 NOT_FOR_FRONT_DESK = {"detail": "Only Admins, counsellors and teachers can see classes."}
 CHOOSE_SOMEONE = {"students": ["Choose at least one Student."]}
 NOT_FOUND = {"students": ["Some of these Students can't be found."]}
-LOST = {"students": ["Lost Students can't be chosen."]}
 TOO_SLOW = "Not sent: sending took too long. Send again to this Student."
 
 SOME_UUID = "00000000-0000-4000-8000-000000000001"
@@ -261,10 +260,14 @@ class TestRefusedBulkEmails:
     def test_nobody_chosen_is_refused(self, abc: ConsultancyContext, admin: Staff) -> None:
         assert self._refused(abc, bulk()) == CHOOSE_SOMEONE
 
-    def test_a_lost_student_cant_be_chosen(
+    def test_a_lost_student_can_be_chosen(
         self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
     ) -> None:
-        assert self._refused(abc, bulk(students["sita"], students["lila"])) == LOST
+        # List tidy-ups 34: Lost Students can be asked whether they want to carry on.
+        response = send_bulk(abc, bulk(students["sita"], students["lila"]))
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert sorted(sent.to[0] for sent in outbox()) == ["lila@example.com", "sita@example.com"]
 
     def test_an_unknown_student_is_refused(
         self, abc: ConsultancyContext, admin: Staff, students: dict[str, Student]
@@ -347,12 +350,15 @@ class TestPreTicking:
             abc.client.get(BULK_URL, {"stage": "counselling"}).json(),
             abc.client.get(BULK_URL, {"q": "maya"}).json(),
             abc.client.get(BULK_URL).json(),
+            # Lost Students are ticked only when the list shows the Lost (list tidy-ups 34).
+            abc.client.get(BULK_URL, {"stage": "lost"}).json(),
         ]
 
         assert [chosen(answer) for answer in answers] == [
             ["Gita Rai", "Sita Gurung"],
             ["Maya Lama"],
             ["Gita Rai", "Maya Lama", "Sita Gurung"],
+            ["Lila Shrestha"],
         ]
 
     def test_assigned_to_me_means_the_one_asking(

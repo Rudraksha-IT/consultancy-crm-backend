@@ -43,3 +43,5 @@ class StudentFilters:
     priority: Priority | None = None
     # Leave out Lost Students (Home, ticket 12).
     hide_lost: bool = False
+    # A to Z by name instead of newest first (the email picker, list tidy-ups 34).
+    by_name: bool = False

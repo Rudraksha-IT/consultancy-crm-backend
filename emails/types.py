@@ -272,6 +272,11 @@ class ClassDetails:
 
 
 @dataclass(frozen=True)
+class CheckingIn:
+    """Checking in: asks a Lost Student whether to carry on, or what happened (list tidy-ups 34)."""
+
+
+@dataclass(frozen=True)
 class PlainEmail:
     """Plain email: only the greeting and sign-off."""
 
@@ -284,6 +289,7 @@ type ReadyMade = (
     | OfferReceived
     | VisaResult
     | ClassDetails
+    | CheckingIn
     | PlainEmail
 )
 
