@@ -53,6 +53,17 @@ def test_refuses_a_header_that_breaks_the_standard(message: str, why: str) -> No
     assert why in " ".join(found)
 
 
+def test_the_pull_request_number_a_squash_adds_isnt_counted() -> None:
+    """GitHub ends a squash merge's header with " (#N)"; only the PR title's own length counts.
+
+    A 69-character PR title, squashed into dev, broke the release PR's check (2026-11-24).
+    """
+    title = "fix(home): leave finished Students out, count waiting from checklists"
+
+    assert problems(f"{title} (#9)\n") == []
+    assert "72 characters" in " ".join(problems("feat: " + "a" * 67 + " (#123)\n"))
+
+
 AI_LINES = [
     "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
     "co-authored-by: Claude <claude@example.com>",

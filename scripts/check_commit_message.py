@@ -1,7 +1,8 @@
 """Refuse a commit message that breaks the team's rules.
 
 1. Conventional Commits: ``type(scope)!: summary``. The summary starts with a small letter, has
-   no full stop, the header is at most 72 characters, and a blank line comes before any body.
+   no full stop, the header is at most 72 characters (not counting the " (#N)" a squash merge
+   adds), and a blank line comes before any body.
 2. No line may credit an AI as co-author ("Co-authored-by: Claude ...", "Generated with ...").
    A human co-author is fine.
 
@@ -19,6 +20,8 @@ TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
 HEADER = re.compile(rf"^(?:{TYPES})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: (?P<summary>\S.*)$")
 GIT_MADE = re.compile(r"^(?:Merge |Revert \"|fixup! |squash! )")
 MAX_HEADER = 72
+# GitHub ends a squash merge's header with " (#N)"; the PR title's own length is what counts.
+SQUASH_NUMBER = re.compile(r" \(#\d+\)$")
 SCISSORS = "# ------------------------ >8 ------------------------"
 
 AI_NAMES = (
@@ -49,7 +52,10 @@ def _header_problems(lines: list[str]) -> list[str]:
     rules = (
         (summary[0].isupper(), "The summary must start with a small letter."),
         (summary.endswith("."), "The summary must not end with a full stop."),
-        (len(header) > MAX_HEADER, f"The first line must be at most {MAX_HEADER} characters."),
+        (
+            len(SQUASH_NUMBER.sub("", header)) > MAX_HEADER,
+            f"The first line must be at most {MAX_HEADER} characters.",
+        ),
     )
     return [say for broken, say in rules if broken]
 
