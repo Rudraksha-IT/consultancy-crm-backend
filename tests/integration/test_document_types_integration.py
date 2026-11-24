@@ -363,6 +363,23 @@ class TestDocumentsPage:
         assert (body["count"], body["page"], body["page_size"]) == (3, 1, 25)
         assert str(missing_all.public_id) == body["results"][0]["student"]["id"]
 
+    def test_waiting_total_matches_home_counting_other_documents_too(
+        self, abc: ConsultancyContext
+    ) -> None:
+        """Home said 14 waiting, the page 10: other documents waited too (list tidy-ups 22)."""
+        abc.log_in_as(Role.ADMIN)
+        student = make_student(abc, stage=Stage.APPLYING, name="Asha Waiting")
+        make_document(abc, student, "Passport", Verification.PENDING)
+        with tenant_context(abc.consultancy):
+            DocumentType.objects.create(name="Gap year letter", needed_by_everyone=False)
+        make_document(abc, student, "Gap year letter", Verification.PENDING)
+
+        totals = abc.client.get(PAPERWORK_URL).json()["totals"]
+        home = abc.client.get("/api/home/waiting/").json()
+
+        assert totals["waiting"] == 2
+        assert home["documents_waiting"] == totals["waiting"]
+
     def test_rejected_weighs_more_than_waiting_which_weighs_more_than_missing(
         self, abc: ConsultancyContext
     ) -> None:

@@ -197,12 +197,16 @@ def paperwork_answer(one: Paperwork) -> dict[str, object]:
     }
 
 
-def paperwork_totals(found: list[Paperwork]) -> dict[str, int]:
-    """The counts by state across every Student on the page's list (not only this page)."""
+def paperwork_totals(found: list[Paperwork], waiting: int) -> dict[str, int]:
+    """The counts by state across every Student on the page's list (not only this page).
+
+    `waiting` is every Document waiting for a check, Other documents too, counted as Home counts
+    it, so the two always agree (list tidy-ups 22).
+    """
     counts = [one.checklist.counts for one in found]
     return {
         "rejected": sum(count.rejected for count in counts),
-        "waiting": sum(count.waiting for count in counts),
+        "waiting": waiting,
         "missing": sum(count.missing for count in counts),
         "verified": sum(count.verified for count in counts),
     }

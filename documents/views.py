@@ -109,6 +109,7 @@ from documents.services import (
     set_needed_by_everyone,
     signed_file_link,
     upload_document,
+    waiting_documents,
     with_waiting_documents,
 )
 from documents.storage import SIGNED_LINK_SECONDS
@@ -426,7 +427,7 @@ class PaperworkView(APIView):
                 "count": page.paginator.count,
                 "page": page.number,
                 "page_size": PAPERWORK_PER_PAGE,
-                "totals": paperwork_totals(found),
+                "totals": paperwork_totals(found, waiting_documents(students).count()),
                 "results": [paperwork_answer(one) for one in page],
             }
         )
