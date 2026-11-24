@@ -40,6 +40,7 @@ from documents.checklist import DocumentState
 from documents.services import checklist_of
 from emails.drafts import draft_email
 from emails.types import (
+    CheckingIn,
     ClassDetails,
     DocumentsNeeded,
     Draft,
@@ -61,14 +62,14 @@ from payments.models import Payment, PaymentMethod
 from payments.money import format_npr
 from payments.services import paid_for, written_date
 from staff.models import Staff
-from students.models import Student
+from students.models import Stage, Student
 from tenancy.models import Consultancy
 
 logger = logging.getLogger(__name__)
 
 
 class Kind(StrEnum):
-    """The eight ready-made emails, in the order the composer offers them."""
+    """The nine ready-made emails, in the order the composer offers them."""
 
     WELCOME = "welcome"
     DOCUMENTS_NEEDED = "documents_needed"
@@ -77,6 +78,7 @@ class Kind(StrEnum):
     OFFER_RECEIVED = "offer_received"
     VISA_RESULT = "visa_result"
     CLASS_DETAILS = "class_details"
+    CHECKING_IN = "checking_in"
     PLAIN = "plain"
 
 
@@ -108,6 +110,7 @@ NOTHING_TO_PAY_MESSAGE = "Nothing left to pay"
 ONLY_ADMIN_MESSAGE = "Only an Admin can send it"
 NO_RECORD_NEEDED_MESSAGE = "This email isn't about a record."
 ONE_AT_A_TIME_MESSAGE = "This email goes to one Student at a time."
+ONLY_LOST_MESSAGE = "Only for Lost Students"
 
 _MODULE_OF = {Kind.FEE_REMINDER: Module.ACCOUNTS, Kind.CLASS_DETAILS: Module.BATCHES}
 _RECORD_OF = {
@@ -116,7 +119,7 @@ _RECORD_OF = {
     Kind.VISA_RESULT: RecordKind.VISA,
     Kind.CLASS_DETAILS: RecordKind.BATCH,
 }
-FOR_MANY = (Kind.CLASS_DETAILS, Kind.PLAIN)
+FOR_MANY = (Kind.CLASS_DETAILS, Kind.CHECKING_IN, Kind.PLAIN)
 _STILL_NEEDED = (DocumentState.NOT_RECEIVED, DocumentState.REJECTED)
 _OFFICE_DAYS = {
     WeeklyOff.SATURDAY: "Sunday to Friday",
@@ -334,6 +337,17 @@ def _fee_reminder(student: Student, staff: Staff) -> ReadyMade:
     )
 
 
+def _checking_in(student: Student, _: Staff) -> ReadyMade:
+    """Asks a Lost Student whether to carry on (list tidy-ups 34); for nobody else.
+
+    Raises:
+        ReadyMadeUnavailableError: the Student isn't Lost.
+    """
+    if student.stage != Stage.LOST:
+        raise ReadyMadeUnavailableError(ONLY_LOST_MESSAGE)
+    return CheckingIn()
+
+
 def _plain(_: Student, __: Staff) -> ReadyMade:
     return PlainEmail()
 
@@ -342,6 +356,7 @@ _ABOUT_THE_STUDENT: dict[Kind, Callable[[Student, Staff], ReadyMade]] = {
     Kind.WELCOME: _welcome,
     Kind.DOCUMENTS_NEEDED: _documents_needed,
     Kind.FEE_REMINDER: _fee_reminder,
+    Kind.CHECKING_IN: _checking_in,
     Kind.PLAIN: _plain,
 }
 
@@ -355,7 +370,7 @@ def student_menu(student: Student, asker: Asker) -> list[MenuEntry]:
 
 
 def many_menu(asker: Asker) -> list[MenuEntry]:
-    """The ready-made emails that can go to many Students: Class details and Plain email."""
+    """The ready-made emails that can go to many Students: Class details, Checking in, Plain."""
     entries = []
     for kind in _kinds_on(asker, list(FOR_MANY)):
         if kind == Kind.CLASS_DETAILS:
@@ -451,7 +466,7 @@ def many_draft(kind: Kind, record: str | None, asker: Asker) -> DraftWithFiles:
         email = _about(RecordKind.BATCH, None, record, asker.staff)
     else:
         _check_no_record(record)
-        email = PlainEmail()
+        email = CheckingIn() if kind == Kind.CHECKING_IN else PlainEmail()
     logger.info("Email draft made for many: kind=%s, staff_id=%s", kind.value, asker.staff.pk)
     return DraftWithFiles(_fitting(draft_email(_context(asker, first_name=None), email)))
 

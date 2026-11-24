@@ -16,6 +16,7 @@ from emails.looks import PLATFORM_ACCENT, readable_accent
 from emails.types import (
     BuiltEmail,
     CentralLogin,
+    CheckingIn,
     ClassDetails,
     DocumentsNeeded,
     DraftContext,
@@ -440,6 +441,11 @@ class TestDrafts:
         assert draft.subject == "Your class: IELTS Morning"
         for value in ["Sunday to Friday", "7:00 to 8:30", "1 Dec 2026", "Hari"]:
             assert value in draft.text
+
+    def test_checking_in(self) -> None:
+        draft = draft_email(CONTEXT, CheckingIn())
+        assert draft.subject == "Checking in from Himal Education"
+        assert draft.text.startswith("Dear Anjali,\n\nWe haven't heard from you in a while")
 
     def test_plain_email_has_only_greeting_and_sign_off(self) -> None:
         draft = draft_email(CONTEXT, PlainEmail())

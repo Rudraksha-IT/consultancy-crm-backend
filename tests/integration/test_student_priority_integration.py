@@ -426,6 +426,26 @@ class TestForHome:
 
         assert listed(abc, priority="high", hide_lost="true") == ["Nobody's", "Theirs"]
 
+    def test_order_name_lists_them_a_to_z_for_the_email_picker(
+        self, abc: ConsultancyContext
+    ) -> None:
+        # List tidy-ups 34: the email picker lists Students by name.
+        abc.log_in_as(Role.ADMIN)
+        for name in ("Maya", "anil", "Zara"):
+            with_priority(abc, name, Priority.NORMAL)
+
+        assert listed(abc, order="name") == ["anil", "Maya", "Zara"]
+        assert listed(abc) == ["Zara", "anil", "Maya"]
+
+    @pytest.mark.parametrize("value", ["newest", "-name", "created_at", *INJECTION_STRINGS])
+    def test_a_bad_order_is_refused(self, abc: ConsultancyContext, value: str) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = abc.client.get(LIST, {"order": value})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "order" in response.json()
+
     @pytest.mark.parametrize("value", ["maybe", "yes please", *INJECTION_STRINGS])
     def test_a_bad_hide_lost_is_refused(self, abc: ConsultancyContext, value: str) -> None:
         abc.log_in_as(Role.ADMIN)

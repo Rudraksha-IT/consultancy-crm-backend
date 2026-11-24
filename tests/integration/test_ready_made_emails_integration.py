@@ -59,6 +59,7 @@ KINDS = [
     "offer_received",
     "visa_result",
     "class_details",
+    "checking_in",
     "plain",
 ]
 CHOOSE_A_KIND = {"kind": ["Choose one of the ready-made emails."]}
@@ -261,7 +262,7 @@ def sita(abc: ConsultancyContext, counsellor: Staff) -> Student:
 
 
 class TestTheMenu:
-    def test_it_lists_the_eight_ready_made_emails_in_order(
+    def test_it_lists_the_nine_ready_made_emails_in_order(
         self, abc: ConsultancyContext, admin: Staff, sita: Student
     ) -> None:
         response = abc.client.get(menu_url(sita))
@@ -291,6 +292,12 @@ class TestTheMenu:
             "unavailable": None,
         }
         assert kinds["plain"]["unavailable"] is None
+        assert kinds["checking_in"] == {
+            "kind": "checking_in",
+            "record": None,
+            "records": [],
+            "unavailable": "Only for Lost Students",
+        }
         assert kinds["documents_needed"]["unavailable"] is None
 
     def test_it_lists_the_records_to_pick_newest_first(
@@ -549,6 +556,29 @@ class TestDrafts:
             f"Class: IELTS Morning\nDays: {days}\nTime: 7:00-8:30 AM\nStarts: 1 Dec 2026\n"
             "Teacher: Hari Teacher"
         ) in answer["body"]
+
+    def test_checking_in_asks_a_lost_student_whether_to_carry_on(
+        self, abc: ConsultancyContext, admin: Staff, sita: Student
+    ) -> None:
+        # List tidy-ups 34.
+        with tenant_context(abc.consultancy):
+            Student.objects.filter(pk=sita.pk).update(stage=Stage.LOST)
+
+        assert menu(abc, sita)["checking_in"]["unavailable"] is None
+        answer = drafted(abc, sita, "checking_in")
+        assert answer["subject"] == "Checking in from ABC Education"
+        assert answer["body"].startswith("Dear Sita,\n\nWe haven't heard from you in a while")
+        assert "would you like to carry on" in answer["body"]
+        assert "tell us what happened" in answer["body"]
+        assert answer["body"].endswith(SIGN_OFF)
+
+    def test_checking_in_is_refused_for_a_student_who_isnt_lost(
+        self, abc: ConsultancyContext, admin: Staff, sita: Student
+    ) -> None:
+        response = draft(abc, sita, "checking_in")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Only for Lost Students" in str(response.json())
 
     def test_plain_email_is_only_the_greeting_and_sign_off(
         self, abc: ConsultancyContext, admin: Staff, sita: Student
@@ -814,7 +844,7 @@ class TestWhoMayDraft:
 
 
 class TestEmailToMany:
-    def test_only_plain_email_and_class_details_are_offered(
+    def test_only_class_details_checking_in_and_plain_email_are_offered(
         self, abc: ConsultancyContext, admin: Staff, teacher: Staff
     ) -> None:
         later = make_batch(abc, teacher, name="PTE Evening", starts_on=date(2027, 1, 5))
@@ -840,6 +870,7 @@ class TestEmailToMany:
                     ],
                     "unavailable": None,
                 },
+                {"kind": "checking_in", "record": None, "records": [], "unavailable": None},
                 {"kind": "plain", "record": None, "records": [], "unavailable": None},
             ]
         }
@@ -847,16 +878,19 @@ class TestEmailToMany:
     def test_with_no_class_running_class_details_are_unavailable(
         self, abc: ConsultancyContext, admin: Staff
     ) -> None:
-        [entry, _] = abc.client.get(BULK_MENU_URL).json()["kinds"]
+        [entry, *_] = abc.client.get(BULK_MENU_URL).json()["kinds"]
 
         assert entry["unavailable"] == "No classes yet"
 
-    def test_batches_off_offers_only_plain_email(
+    def test_batches_off_leaves_out_class_details(
         self, abc: ConsultancyContext, admin: Staff
     ) -> None:
         switch_modules(abc.consultancy, {Module.COMMUNICATION})
 
-        assert [k["kind"] for k in abc.client.get(BULK_MENU_URL).json()["kinds"]] == ["plain"]
+        assert [k["kind"] for k in abc.client.get(BULK_MENU_URL).json()["kinds"]] == [
+            "checking_in",
+            "plain",
+        ]
         assert bulk_draft(abc, "class_details", 1).status_code == status.HTTP_404_NOT_FOUND
 
     def test_each_copy_starts_dear_student(
@@ -947,6 +981,15 @@ class TestEditingAndSending:
         assert "<script>" not in html_of(sent)
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_of(sent)
         assert INJECTION_STRINGS[0] in sent.body
+
+    def test_checking_in_goes_to_many_each_starting_dear_student(
+        self, abc: ConsultancyContext, admin: Staff
+    ) -> None:
+        # List tidy-ups 34.
+        answer = bulk_draft(abc, "checking_in").json()
+
+        assert answer["subject"] == "Checking in from ABC Education"
+        assert answer["body"].startswith("Dear Student,\n\nWe haven't heard from you in a while")
 
     def test_class_details_go_to_many_each_starting_dear_student(
         self, abc: ConsultancyContext, admin: Staff, sita: Student, teacher: Staff

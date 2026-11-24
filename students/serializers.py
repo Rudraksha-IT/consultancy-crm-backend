@@ -174,6 +174,8 @@ class StudentListQuerySerializer(StrictSerializer[None]):
     # Leave out Lost Students, as Home's "High priority Students" does (ticket 12).
     # Only "true" is taken; a missing value means Lost Students are listed too.
     hide_lost = StrictChoiceField(choices=[("true", "true")], required=False)
+    # "name": A to Z by name (the email picker, list tidy-ups 34); otherwise newest first.
+    order = StrictChoiceField(choices=[("name", "name")], required=False)
     counsellor = serializers.RegexField(
         COUNSELLOR_FILTER_PATTERN,
         required=False,
@@ -222,4 +224,5 @@ def filters_from(data: Mapping[str, Any]) -> StudentFilters:
         target_level=None if target_level is None else TargetLevel(target_level),
         priority=None if priority is None else Priority(priority),
         hide_lost=data.get("hide_lost") == "true",
+        by_name=data.get("order") == "name",
     )

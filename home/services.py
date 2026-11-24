@@ -29,7 +29,10 @@ class StudentProgress:
 
 
 def progress_of_students(students: QuerySet[Student]) -> list[StudentProgress]:
-    """The Students (not Lost), furthest along first, then by name.
+    """The Students still on their way (not Lost, not finished), furthest along first, then by name.
+
+    A Student whose Visa is granted needs no more work, so Home leaves them out (list tidy-ups
+    14); their own page still shows them as done.
 
     A fixed number of queries however many Students there are: the Students, their Applications,
     their Visas, and their checklists.
@@ -56,6 +59,7 @@ def progress_of_students(students: QuerySet[Student]) -> list[StudentProgress]:
         )
         for student in found
     ]
+    rows = [row for row in rows if not row.progress.is_done]
     logger.debug("progress built: students=%s", len(rows))
     # sorted() keeps the name order among Students equally far along.
     return sorted(rows, key=lambda row: -row.progress.percent)
