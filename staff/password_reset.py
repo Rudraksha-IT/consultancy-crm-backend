@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from django.db import transaction
 
+from auth_tokens.password_tries import clear_wrong_passwords
 from auth_tokens.services import sign_out_everywhere
 from codes.emails import send_code_email
 from codes.exceptions import CodeLimitReachedError, InvalidCodeError
@@ -69,6 +70,7 @@ def reset_password(email: str, code: str, password: str) -> Staff:
         staff.set_password(password)
         staff.save(update_fields=["password"])
         sign_out_everywhere(staff)
+        clear_wrong_passwords(staff.email)
     logger.info("Password reset: staff_id=%s", staff.pk)
     return staff
 

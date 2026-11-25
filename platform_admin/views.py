@@ -18,8 +18,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from auth_tokens.password_tries import PasswordTriesUsedUpError, check_password_try
 from auth_tokens.services import issue_tokens
 from auth_tokens.types import TokenClaims
+from auth_tokens.views import password_tries_used_up
 from modules.serializers import ModuleSwitchesSerializer
 from modules.services import switch_modules
 from platform_admin.auth import get_request_platform_admin
@@ -97,9 +99,12 @@ class PlatformLoginView(APIView):
         """
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        admin = authenticate_platform_admin(
-            serializer.validated_data["email"], serializer.validated_data["password"]
-        )
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
+        try:
+            admin = check_password_try(email, lambda: authenticate_platform_admin(email, password))
+        except PasswordTriesUsedUpError as error:
+            return password_tries_used_up(error)
         if admin is None:
             logger.info("Platform Admin login failed")
             return Response(

@@ -17,6 +17,8 @@ from django_tenants.utils import tenant_context
 from rest_framework import status
 
 from applications.models import Application, Visa
+from auth_tokens.models import WrongPasswordCount
+from auth_tokens.password_tries import WRONG_PASSWORDS_ALLOWED
 from auth_tokens.services import sign_out_everywhere
 from batches.models import Attendance, Batch, BatchMembership, Mark
 from catalogue.models import Course, Intake, University
@@ -171,6 +173,26 @@ class TestLoginIsolation:
             sign_out_everywhere(abc_admin)
 
         assert xyz.client.get(CONTEXT_URL).status_code == status.HTTP_200_OK
+
+    def test_wrong_passwords_on_one_consultancy_never_count_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        email = "sita@shared.test"
+        abc.add_staff(Role.COUNSELLOR, email=email)
+        xyz.add_staff(Role.COUNSELLOR, email=email)
+        wrong = {"email": email, "password": "not-the-password"}
+        for _ in range(WRONG_PASSWORDS_ALLOWED):
+            abc.client.post(LOGIN_URL, wrong, format="json")
+        refused = abc.client.post(LOGIN_URL, {**wrong, "password": TEST_PASSWORD}, format="json")
+        assert refused.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+        right = xyz.client.post(LOGIN_URL, {**wrong, "password": TEST_PASSWORD}, format="json")
+
+        assert right.status_code == status.HTTP_200_OK
+        with tenant_context(xyz.consultancy):
+            assert not WrongPasswordCount.objects.exists()
 
 
 RESET_URL = "/api/auth/password-reset/"

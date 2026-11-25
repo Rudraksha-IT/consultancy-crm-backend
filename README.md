@@ -62,7 +62,11 @@ The `platform_site` fixture returns a client bound to the Platform host;
 Login is JWTs (ADR 0003, `auth_tokens` app); Django sets no cookie and has no CSRF check (the
 Next.js server holds the tokens and checks `Origin`).
 
-- `POST /api/auth/login/` `{email, password}` -> `{access, refresh, context}`.
+- `POST /api/auth/login/` `{email, password}` -> `{access, refresh, context}`. After 10 wrong
+  passwords for one email in 15 minutes (counted in the office's schema by the email's keyed
+  hash, unknown emails too), every try for it answers 429 with `Retry-After` until the window
+  ends, even with the right password; a right password below the limit or a reset by Code
+  clears the count (`auth_tokens/password_tries.py`, security ticket 01).
 - `POST /api/auth/refresh/` `{refresh}` -> `{access, refresh}`; the old refresh token is refused
   from then on (rotation).
 - `POST /api/auth/logout/` `{refresh}` -> 204; that refresh token is refused from then on.
@@ -447,7 +451,8 @@ Platform Admins (`platform_admin.PlatformAdmin`) live in the public schema and a
 Their tokens carry `tenant_schema: "public"` and `kind: "platform_admin"`, so they only work on
 the Platform host; their refresh tokens are recorded in the public schema.
 
-- `POST /api/platform/auth/login/` `{email, password}` -> `{access, refresh, platform_admin}`;
+- `POST /api/platform/auth/login/` `{email, password}` -> `{access, refresh, platform_admin}`
+  (wrong passwords limited as on the staff login, counted in the public schema);
   `POST /api/platform/auth/refresh/` and `POST /api/platform/auth/logout/` as on Consultancy hosts;
   `GET /api/platform/me/` -> `{platform_admin: {id, name, email}}`.
 - `GET /api/platform/consultancies/` -> `[{id, name, subdomain, host, status, status_reason,

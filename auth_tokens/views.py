@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from auth_tokens.exceptions import InvalidTokenError
 from auth_tokens.headers import CHALLENGE, REFUSED_MESSAGE
 from auth_tokens.models import TokenKind
+from auth_tokens.password_tries import PasswordTriesUsedUpError
 from auth_tokens.refusals import log_token_refusal
 from auth_tokens.serializers import RefreshTokenSerializer
 from auth_tokens.services import revoke_refresh_token, rotate_refresh_token
@@ -35,6 +36,20 @@ def token_refused(error: InvalidTokenError) -> Response:
         {"detail": REFUSED_MESSAGE},
         status=status.HTTP_401_UNAUTHORIZED,
         headers={"WWW-Authenticate": CHALLENGE},
+    )
+
+
+TOO_MANY_WRONG_MESSAGE = (
+    "Too many wrong passwords. Try again in 15 minutes, or reset your password."
+)
+
+
+def password_tries_used_up(error: PasswordTriesUsedUpError) -> Response:
+    """429 for a login whose wrong passwords are used up, saying how long to wait."""
+    return Response(
+        {"detail": TOO_MANY_WRONG_MESSAGE},
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Retry-After": str(error.retry_after)},
     )
 
 
