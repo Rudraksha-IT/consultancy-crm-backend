@@ -403,7 +403,8 @@ class TestFilters:
             {"sort": "-started_on"},
             {"page": "0"},
             {"page": "two"},
-            {"q": "sita"},
+            {"q": "a" * 101},
+            {"search": "sita"},
             {"colour": "red"},
             *({"status": text} for text in INJECTION_STRINGS),
             *({"country": text} for text in INJECTION_STRINGS),
@@ -418,6 +419,121 @@ class TestFilters:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "DROP" not in str(response.json())
         assert "<script>" not in str(response.json())
+
+
+class TestSearch:
+    """Ticket 24 (UI revamp): `q` finds a Visa by its Student or its University."""
+
+    @pytest.fixture
+    def office(self, abc: ConsultancyContext) -> ConsultancyContext:
+        """Sita's two Visas (Bikash's Student) and Gita's (no counsellor)."""
+        bikash = named_staff(abc, "Bikash Thapa")
+        sita = student_named(abc, "Sita Karki", bikash, email="sita@gmail.test", phone="9841234567")
+        gita = student_named(abc, "Gita Rai", email="gita@yahoo.test", phone="9801112222")
+        visa_for(abc, sita, "Deakin University", medical_at=in_kathmandu(3, 9))
+        visa_for(abc, sita, "University of Toronto", "canada", "2027-09", status=VisaStatus.REFUSED)
+        visa_for(abc, gita, "Monash University", "australia", "2027-09")
+        log_in(abc, abc.add_staff(Role.ADMIN))
+        return abc
+
+    @staticmethod
+    def rows(response: _MonkeyPatchedResponse) -> list[str]:
+        """Each listed row as Student/University, in order."""
+        assert response.status_code == status.HTTP_200_OK, response.json()
+        return [
+            f"{row['student']['name']}/{row['university']['name']}"
+            for row in response.json()["results"]
+        ]
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("gita", ["Gita Rai/Monash University"]),
+            ("SITA", ["Sita Karki/Deakin University", "Sita Karki/University of Toronto"]),
+            ("9801-11", ["Gita Rai/Monash University"]),
+            ("yahoo", ["Gita Rai/Monash University"]),
+            ("toronto", ["Sita Karki/University of Toronto"]),
+            ("nobody", []),
+        ],
+    )
+    def test_finds_by_student_name_phone_email_or_university(
+        self, office: ConsultancyContext, query: str, expected: list[str]
+    ) -> None:
+        response = listed(office, {"q": query})
+
+        assert self.rows(response) == expected
+        assert response.json()["count"] == len(expected)
+
+    @pytest.mark.parametrize(
+        ("filters", "expected"),
+        [
+            ({"status": "refused"}, ["Sita Karki/University of Toronto"]),
+            ({"country": "australia"}, ["Sita Karki/Deakin University"]),
+            ({"intake": "2027-09"}, ["Sita Karki/University of Toronto"]),
+            ({"has_appointment": "true"}, ["Sita Karki/Deakin University"]),
+            ({"counsellor": "none"}, []),
+        ],
+    )
+    def test_it_works_together_with_the_other_filters(
+        self, office: ConsultancyContext, filters: dict[str, str], expected: list[str]
+    ) -> None:
+        assert self.rows(listed(office, {"q": "sita", **filters})) == expected
+
+    def test_it_works_together_with_a_counsellor_and_appointment_days(
+        self, office: ConsultancyContext
+    ) -> None:
+        with tenant_context(office.consultancy):
+            bikash = Staff.objects.get(name="Bikash Thapa")
+        day = (timezone.localdate() + timedelta(days=3)).isoformat()
+
+        by_counsellor = listed(office, {"q": "university", "counsellor": str(bikash.public_id)})
+        by_day = listed(office, {"q": "university", "appointment_from": day, "appointment_to": day})
+
+        assert self.rows(by_counsellor) == [
+            "Sita Karki/Deakin University",
+            "Sita Karki/University of Toronto",
+        ]
+        assert self.rows(by_day) == ["Sita Karki/Deakin University"]
+
+    def test_a_blank_search_changes_nothing(self, office: ConsultancyContext) -> None:
+        assert listed(office, {"q": ""}).json() == listed(office).json()
+
+    @pytest.mark.parametrize("query", [*INJECTION_STRINGS, "%", "_", "\\"])
+    def test_injection_shaped_searches_find_nothing_and_break_nothing(
+        self, office: ConsultancyContext, query: str
+    ) -> None:
+        assert self.rows(listed(office, {"q": query})) == []
+        assert listed(office).json()["count"] == 3
+
+    def test_an_over_long_search_is_refused(self, office: ConsultancyContext) -> None:
+        response = listed(office, {"q": "a" * 101})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "q" in response.json()
+
+    @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK])
+    def test_every_role_that_sees_the_list_can_search_it(
+        self, office: ConsultancyContext, role: Role
+    ) -> None:
+        office.log_in_as(role)
+
+        assert self.rows(listed(office, {"q": "gita"})) == ["Gita Rai/Monash University"]
+
+    def test_a_teacher_is_still_refused(self, office: ConsultancyContext) -> None:
+        office.log_in_as(Role.TEACHER)
+
+        response = listed(office, {"q": "sita"})
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json() == NOT_FOR_TEACHERS
+
+    def test_the_query_count_does_not_grow_with_a_search(self, office: ConsultancyContext) -> None:
+        with CaptureQueriesContext(connection) as plain:
+            listed(office)
+        with CaptureQueriesContext(connection) as searched:
+            listed(office, {"q": "university"})
+
+        assert len(searched) == len(plain)
 
 
 class TestWhoMaySee:

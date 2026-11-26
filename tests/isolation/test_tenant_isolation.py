@@ -1833,6 +1833,28 @@ class TestVisaListIsolation:
         assert choices == {"intakes": [], "countries": []}
         assert abc.client.get(VISAS_URL).json()["count"] == 1
 
+    def test_a_search_never_finds_another_offices_visas(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        """UI revamp ticket 24: `q` on the Visas list and its export."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        abc.client.post(_visas_url(sita), {"application": application_id}, format="json")
+        search = {"q": "sita"}
+
+        found = xyz.client.get(VISAS_URL, search).json()
+        exported = xyz.client.post(
+            "/api/exports/", {"list": "visas", "filters": search}, format="json"
+        )
+
+        assert (found["count"], found["results"]) == (0, [])
+        assert exported.status_code == status.HTTP_200_OK
+        assert "Sita" not in exported.content.decode("utf-8")
+        assert abc.client.get(VISAS_URL, search).json()["count"] == 1
+
     def test_another_office_cannot_set_visa_dates(
         self, make_consultancy: ConsultancyFactory
     ) -> None:

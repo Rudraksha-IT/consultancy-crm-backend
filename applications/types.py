@@ -72,8 +72,10 @@ class VisaSort(StrEnum):
 
 @dataclass(frozen=True)
 class VisaFilters:
-    """Filters for the office-wide Visas list (spec 62b). Empty means "any"."""
+    """Search and filters for the office-wide Visas list (spec 62b). Empty means "any"."""
 
+    # The Student's name, email or phone, or the University's name.
+    query: str = ""
     statuses: frozenset[VisaStatus] = frozenset()
     # The country of the Visa's University.
     country: Country | None = None

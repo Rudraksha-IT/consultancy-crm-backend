@@ -263,8 +263,9 @@ class ApplicationListQuerySerializer(StrictSerializer[None]):
 
 
 class VisaListQuerySerializer(StrictSerializer[None]):
-    """The office-wide Visas list's filters, order and page (spec 62b)."""
+    """The office-wide Visas list's search, filters, order and page (spec 62b)."""
 
+    q = serializers.CharField(max_length=SEARCH_MAX_LENGTH, required=False, allow_blank=True)
     status = serializers.ListField(
         child=StrictChoiceField(
             choices=VisaStatus.choices,
@@ -300,11 +301,12 @@ class VisaListQuerySerializer(StrictSerializer[None]):
         return attrs
 
     def to_filters(self) -> VisaFilters:
-        """Return the validated filters and order."""
+        """Return the validated search, filters and order."""
         data = self.validated_data
         country = data.get("country")
         has_appointment = data.get("has_appointment")
         return VisaFilters(
+            query=data.get("q", ""),
             statuses=frozenset(VisaStatus(value) for value in data.get("status", [])),
             country=None if country is None else Country(country),
             intake=data.get("intake", ""),

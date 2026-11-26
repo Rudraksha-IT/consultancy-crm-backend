@@ -301,6 +301,26 @@ class TestVisasExport:
             ]
         ]
 
+    def test_a_search_is_applied_and_named_in_the_export_record(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        visa_for(abc, student_named(abc, "Sita Karki"), "Deakin University")
+        visa_for(abc, student_named(abc, "Ram Shah"), "Toronto College", "canada")
+        visa_for(abc, student_named(abc, "Gita Rai"), "Deakin College", status=VisaStatus.GRANTED)
+
+        by_student = csv_rows(export(abc.client, "visas", {"q": "ram"}))
+        by_university = csv_rows(
+            export(abc.client, "visas", {"q": "deakin", "status": ["applied"]})
+        )
+
+        assert [row[0] for row in by_student[1:]] == ["Ram Shah"]
+        assert [row[0] for row in by_university[1:]] == ["Sita Karki"]
+        assert [(r.filters_text, r.row_count) for r in records(abc)] == [
+            ("Search: deakin, Status: Applied", 1),
+            ("Search: ram", 1),
+        ]
+
     def test_the_appointment_range_is_checked_like_the_list(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
@@ -621,7 +641,10 @@ class TestRefusedInput:
             ("visas", {"appointment_from": "tomorrow"}),
             ("visas", {"has_appointment": True}),
             ("visas", {"interview_from": "2030-02-01"}),
-            ("visas", {"q": "sita"}),
+            ("visas", {"q": ["sita"]}),
+            ("visas", {"q": True}),
+            ("visas", {"q": "x" * 101}),
+            ("visas", {"search": "sita"}),
         ],
     )
     def test_bad_filters_are_refused_without_repeating_them(
