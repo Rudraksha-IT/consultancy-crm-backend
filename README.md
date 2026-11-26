@@ -350,7 +350,9 @@ document_type: {id, name}, reason, is_required, state, document}]}`. `state` is
   `{url, expires_in}` for that one file.
 - `GET /api/documents/students/?scope=mine|everyone&page=` -> the Documents page: Students (not
   Leads or Lost) by attention (rejected x3, waiting x2, missing x1), 25 a page, with `totals` over
-  the whole list. Counsellors and Admins only.
+  the whole list. Each Student also carries `items`: their checklist documents in checklist order,
+  `{name, state}` with `state` `verified`, `waiting`, `rejected` or `missing` (the same words as
+  the counts; "Other documents" are left out). Counsellors and Admins only.
 - `GET|POST /api/configuration/document-types/` `{name, needed_by_everyone, usual_group?}`
   (`usual_group`: `applying` (default), `visa` or `statements`), `PATCH
 /api/configuration/document-types/<id>/` `{needed_by_everyone}` and `DELETE` (only a type not

@@ -2138,6 +2138,31 @@ class TestDocumentIsolation:
         assert page["count"] == 0
         assert page["results"] == []
 
+    def test_the_documents_page_names_only_its_own_offices_documents(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        """UI revamp 12: each row's `items` come from this office's checklist and uploads only."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        abc.client.post(
+            _TYPES_URL, {"name": "ABC only paper", "needed_by_everyone": True}, format="json"
+        )
+        _student_with_passport(abc, "Sita Karki")
+        xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        xyz.client.post(
+            f"{STUDENTS_URL}{xyz_student['id']}/stage/", {"stage": "counselling"}, format="json"
+        )
+
+        abc_items = abc.client.get(_PAPERWORK_URL).json()["results"][0]["items"]
+        xyz_items = xyz.client.get(_PAPERWORK_URL).json()["results"][0]["items"]
+
+        assert {"name": "ABC only paper", "state": "missing"} in abc_items
+        assert {"name": "Passport", "state": "waiting"} in abc_items
+        assert "ABC only paper" not in [item["name"] for item in xyz_items]
+        assert {item["state"] for item in xyz_items} == {"missing"}
+
     def test_another_consultancy_cannot_check_a_document(
         self, make_consultancy: ConsultancyFactory
     ) -> None:
