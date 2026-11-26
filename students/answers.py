@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
@@ -14,7 +15,7 @@ from documents.answers import progress_answer
 from documents.services import checklist_of
 from history.answers import history_entry_answer
 from history.services import stage_changes_of
-from home.services import progress_of_student
+from home.services import progress_by_student, progress_of_student
 from staff.models import Staff
 from students.models import AcademicRecord, Student, TestScore, WorkExperience
 from students.passport import passport_warning
@@ -41,6 +42,28 @@ def student_row(student: Student) -> dict[str, object]:
         "priority": student.priority,
         "assigned_counsellor": _counsellor(student.assigned_counsellor),
     }
+
+
+def student_rows(students: Sequence[Student], *, with_progress: bool) -> list[dict[str, object]]:
+    """The Student list's rows; with `with_progress`, each also has what a board card shows.
+
+    That is the Student's next step and how many of their checklist Documents are in (UI revamp,
+    ticket 08).
+    """
+    if not with_progress:
+        return [student_row(student) for student in students]
+    progress = progress_by_student(students)
+    return [
+        {
+            **student_row(student),
+            "next_step": progress[student.pk].progress.next_step,
+            "documents": {
+                "done": progress[student.pk].checklist.done,
+                "total": progress[student.pk].checklist.total,
+            },
+        }
+        for student in students
+    ]
 
 
 def student_answer(student: Student) -> dict[str, object]:

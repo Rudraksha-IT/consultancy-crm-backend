@@ -176,6 +176,9 @@ class StudentListQuerySerializer(StrictSerializer[None]):
     hide_lost = StrictChoiceField(choices=[("true", "true")], required=False)
     # "name": A to Z by name (the email picker, list tidy-ups 34); otherwise newest first.
     order = StrictChoiceField(choices=[("name", "name")], required=False)
+    # Add each Student's next step and document counts, for the Students board's cards (UI
+    # revamp, ticket 08). Only "true" is taken; without it the rows are as before.
+    progress = StrictChoiceField(choices=[("true", "true")], required=False)
     counsellor = serializers.RegexField(
         COUNSELLOR_FILTER_PATTERN,
         required=False,
@@ -201,6 +204,10 @@ class StudentListQuerySerializer(StrictSerializer[None]):
     def to_filters(self) -> StudentFilters:
         """Return the validated search and filters."""
         return filters_from(self.validated_data)
+
+    def wants_progress(self) -> bool:
+        """Whether each row should carry the Student's next step and document counts."""
+        return bool(self.validated_data.get("progress") == "true")
 
     def page_number(self) -> int:
         """The page asked for; the first if none."""
