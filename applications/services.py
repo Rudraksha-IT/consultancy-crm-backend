@@ -27,6 +27,7 @@ from applications.exceptions import (
     SameStatusError,
     TooManyApplicationsError,
     TooManyVisasError,
+    VisaDecidedError,
     VisaGrantedError,
     VisaNotWaitingError,
     VisaWaitingError,
@@ -299,31 +300,32 @@ def start_visa(student: Student, application_id: int, by: Staff) -> Visa:
 
 
 def change_visa_status(student: Student, visa_id: int, new_status: VisaStatus, by: Staff) -> None:
-    """Set the Visa's Status by hand and move the Student's Stage as the engine says (spec 59-61).
+    """Decide a Visa waiting for an answer by hand; the Stage moves as the engine says (spec 59-61).
 
+    Granted and Refused are final (UI revamp ticket 10): a new try is a new Visa.
     The Status change is recorded in History before any Stage move (issue 83).
 
     Raises:
         Visa.DoesNotExist: The Student has no such Visa.
+        VisaDecidedError: It is Granted or Refused already; nothing is changed.
         SameStatusError: It already has this Status.
-        VisaWaitingError: Back to Applied while another of the Student's Visas is at Applied.
-        NotChosenOfferError: Back to Applied while another offer is the Chosen Offer.
 
     Refused clears the Chosen Offer if it is this Visa's, so the Student may choose again;
-    Applied or Granted makes it the Chosen Offer when there is none (issue 76).
+    Granted makes it the Chosen Offer when there is none (issue 76).
     """
     with transaction.atomic():
         locked = Student.objects.select_for_update().get(pk=student.pk)
         visa = visas_of(locked).select_for_update(of=("self",)).get(pk=visa_id)
         before = VisaStatus(visa.status)
+        if before != VisaStatus.APPLIED:
+            logger.info(
+                "Visa status not changed: visa_id=%s, refused=decided, by_staff_id=%s",
+                visa.pk,
+                by.pk,
+            )
+            raise VisaDecidedError
         if before == new_status:
             raise SameStatusError
-        waiting = Visa.objects.filter(student=locked, status=VisaStatus.APPLIED).exclude(pk=visa.pk)
-        if new_status == VisaStatus.APPLIED and waiting.exists():
-            raise VisaWaitingError
-        chosen = locked.chosen_offer_id
-        if new_status == VisaStatus.APPLIED and chosen not in {None, visa.application_id}:
-            raise NotChosenOfferError
         visa.status = new_status
         changed = ["status"]
         if new_status == VisaStatus.GRANTED:

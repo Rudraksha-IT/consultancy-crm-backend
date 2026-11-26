@@ -1696,6 +1696,76 @@ class TestVisaLetterIsolation:
             assert not Document.objects.exists()
 
 
+class TestDecidedVisaIsolation:
+    """UI revamp ticket 10: a Visa's Status is never reached from another Consultancy."""
+
+    def test_another_office_gets_not_found_for_a_waiting_or_a_decided_visa(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        visa_id = abc.client.post(
+            _visas_url(sita), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        url = f"{_visas_url(sita)}{visa_id}/"
+
+        while_waiting = xyz.client.patch(url, {"status": "granted"}, format="json")
+        abc.client.patch(url, {"status": "refused"}, format="json")
+        once_decided = xyz.client.patch(url, {"status": "granted"}, format="json")
+
+        assert while_waiting.status_code == status.HTTP_404_NOT_FOUND
+        assert once_decided.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Visa.objects.get(public_id=visa_id).status == "refused"
+
+    def test_a_visa_id_of_another_office_is_not_found_on_its_own_student(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        _student_applying(abc, "Hari Shah")  # so ABC's ids below don't exist in XYZ
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        abc_visa = abc.client.post(
+            _visas_url(sita), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        abc.client.patch(f"{_visas_url(sita)}{abc_visa}/", {"status": "granted"}, format="json")
+        ram, _ = _student_with_coe(xyz, "Ram Thapa")
+
+        response = xyz.client.patch(
+            f"{_visas_url(ram)}{abc_visa}/", {"status": "refused"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Visa.objects.get(public_id=abc_visa).status == "granted"
+
+    def test_a_token_from_one_office_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz.log_in_as(Role.ADMIN)
+        ram, application_id = _student_with_coe(xyz, "Ram Thapa")
+        visa_id = xyz.client.post(
+            _visas_url(ram), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        response = intruder.patch(
+            f"{_visas_url(ram)}{visa_id}/", {"status": "granted"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        with tenant_context(xyz.consultancy):
+            assert Visa.objects.get(public_id=visa_id).status == "applied"
+
+
 class TestVisaListIsolation:
     """Issue 48: the Visas list and a Visa's interview stay inside their own Consultancy."""
 

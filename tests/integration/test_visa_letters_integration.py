@@ -299,7 +299,7 @@ class TestALetterLater:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json() == {
-            "result": [f"This visa is already {word}. To change it, set its status by hand."]
+            "result": [f"This visa is already {word}. A new try is a new visa application."]
         }
         assert status_of(abc, visa) == decided
         assert documents_of(abc, student) == []
