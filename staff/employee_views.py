@@ -19,6 +19,7 @@ from staff.employees import (
     cancel_invite,
     change_role,
     deactivate_employee,
+    invite_back,
     invite_employee,
     list_counsellors,
     list_employees,
@@ -31,6 +32,7 @@ from staff.serializers import (
     EMAIL_TAKEN_MESSAGE,
     TEACHER_NEEDS_CLASSES_MESSAGE,
     InviteSerializer,
+    NoBodySerializer,
     RoleChangeSerializer,
 )
 from staff.types import Office
@@ -57,6 +59,7 @@ def employee_answer(staff: Staff, set_up: bool | None = None) -> dict[str, objec
         "role": staff.role,
         "joined_on": staff.joined_on.isoformat(),
         "status": staff.status,
+        "invited_back": staff.invited_back,
         "two_factor_required": staff.two_factor_required,
         "two_factor_set_up": is_set_up(staff) if set_up is None else set_up,
     }
@@ -166,14 +169,40 @@ class EmployeeInviteView(_AdminView):
         return Response(employee_answer(staff), status=status.HTTP_202_ACCEPTED)
 
     def delete(self, request: Request, staff_id: int) -> Response:
-        """Remove them; their Code no longer works."""
+        """End the invite; their Code no longer works.
+
+        A new person is removed (204). Someone invited back goes back to Has left and is
+        returned as stored (200).
+        """
         staff = get_object_or_404(Staff, pk=staff_id)
         try:
-            cancel_invite(staff, by=get_request_staff(request))
+            kept = cancel_invite(staff, by=get_request_staff(request))
         except EmployeeChangeRefusedError as error:
             # expected refusal, answered with its status; the request line logs it
             return _refused(error)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        if kept is None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(employee_answer(kept))
+
+
+class EmployeeInviteBackView(_AdminView):
+    """Invite back someone who has left (UI revamp, ticket 18)."""
+
+    def post(self, request: Request, staff_id: int) -> Response:
+        """Email them a new Code and return them as stored: invited again. Takes no fields."""
+        staff = get_object_or_404(Staff, pk=staff_id)
+        NoBodySerializer(data=request.data).is_valid(raise_exception=True)
+        try:
+            invite_back(staff, office_of(request), by=get_request_staff(request))
+        except EmployeeChangeRefusedError as error:
+            # expected refusal, answered with its status; the request line logs it
+            return _refused(error)
+        except CodeLimitReachedError:
+            # expected refusal, answered with its status; the request line logs it
+            return Response(
+                {"detail": CODE_LIMIT_MESSAGE}, status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+        return Response(employee_answer(staff), status=status.HTTP_202_ACCEPTED)
 
 
 class EmployeeAssignedStudentsView(_AdminView):

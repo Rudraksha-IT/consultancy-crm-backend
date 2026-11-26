@@ -46,7 +46,7 @@ from notifications.models import Notification
 from office_networks.models import OfficeNetwork
 from payments.models import Payment
 from platform_admin.models import PlatformAdmin
-from staff.models import Role, Staff
+from staff.models import Role, Staff, StaffStatus
 from students.models import Student, WorkExperience
 from tasks.models import Task
 from tenancy.context import activate_public_schema
@@ -631,8 +631,9 @@ class TestStaffManagementIsolation:
         deactivated = abc.client.post(f"{STAFF_URL}{target.public_id}/deactivate/")
         resent = abc.client.post(f"{STAFF_URL}{target.public_id}/invite/")
         cancelled = abc.client.delete(f"{STAFF_URL}{target.public_id}/invite/")
+        invited_back = abc.client.post(f"{STAFF_URL}{target.public_id}/invite-back/")
 
-        assert {r.status_code for r in (changed, deactivated, resent, cancelled)} == {
+        assert {r.status_code for r in (changed, deactivated, resent, cancelled, invited_back)} == {
             status.HTTP_404_NOT_FOUND
         }
         with tenant_context(xyz.consultancy):
@@ -640,6 +641,51 @@ class TestStaffManagementIsolation:
         assert kept.role == Role.COUNSELLOR
         assert kept.is_active
         assert mail.outbox == []
+
+    def test_an_admin_cannot_invite_back_another_consultancys_leaver(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc_admin = abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        leaver = xyz.add_staff(Role.COUNSELLOR, email="ram@xyz.test")
+        xyz.client.post(f"{STAFF_URL}{leaver.public_id}/deactivate/")
+        on_xyz = xyz.new_client()
+        use_access_token(on_xyz, abc.tokens_for(abc_admin).access)
+
+        by_id = abc.client.post(f"{STAFF_URL}{leaver.public_id}/invite-back/")
+        by_token = on_xyz.post(f"{STAFF_URL}{leaver.public_id}/invite-back/")
+
+        assert by_id.status_code == status.HTTP_404_NOT_FOUND
+        assert by_token.status_code == status.HTTP_401_UNAUTHORIZED
+        with tenant_context(xyz.consultancy):
+            kept = Staff.objects.get(pk=leaver.pk)
+        assert kept.status == StaffStatus.DEACTIVATED
+        assert kept.invited_back is False
+        assert mail.outbox == []
+
+    def test_inviting_back_in_one_consultancy_leaves_the_same_email_elsewhere_alone(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        email = "ram@shared.test"
+        abc_leaver = abc.add_staff(Role.COUNSELLOR, email=email)
+        xyz_leaver = xyz.add_staff(Role.COUNSELLOR, email=email)
+        with tenant_context(xyz.consultancy):
+            Staff.objects.filter(pk=xyz_leaver.pk).update(status=StaffStatus.DEACTIVATED)
+        abc.client.post(f"{STAFF_URL}{abc_leaver.public_id}/deactivate/")
+
+        invited = abc.client.post(f"{STAFF_URL}{abc_leaver.public_id}/invite-back/")
+
+        assert invited.status_code == status.HTTP_202_ACCEPTED
+        with tenant_context(xyz.consultancy):
+            other = Staff.objects.get(pk=xyz_leaver.pk)
+        assert other.status == StaffStatus.DEACTIVATED
+        assert other.invited_back is False
+        assert len(mail.outbox) == 1
 
     def test_an_admins_token_is_refused_on_another_consultancys_staff_list(
         self, make_consultancy: ConsultancyFactory

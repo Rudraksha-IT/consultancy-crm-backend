@@ -341,6 +341,7 @@ def _changing_addresses(full: Office, key: Callable[[Model], object]) -> list[tu
         ("post", f"/api/staff/{s}/deactivate/"),
         ("get", f"/api/staff/{s}/assigned-students/"),
         ("post", f"/api/staff/{s}/invite/"),
+        ("post", f"/api/staff/{s}/invite-back/"),
         ("patch", f"/api/staff/{s}/two-factor/"),
         ("post", f"/api/staff/{s}/two-factor/reset/"),
         ("get", f"/api/staff/{s}/progress/?from={THIS_MONTH}-01&to={TODAY.isoformat()}"),
