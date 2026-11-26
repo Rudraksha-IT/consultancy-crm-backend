@@ -5218,7 +5218,9 @@ class TestHolidayIsolation:
         abc, xyz = self._offices(make_consultancy)
         today = timezone.localdate()
         abc.client.post(
-            "/api/clock/holidays/", {"date": today.isoformat(), "name": "Dashain"}, format="json"
+            "/api/clock/holidays/",
+            {"name": "Dashain", "dates": [today.isoformat()]},
+            format="json",
         )
 
         listed = xyz.client.get("/api/clock/holidays/").json()
@@ -5248,14 +5250,70 @@ class TestHolidayIsolation:
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
 
+        with tenant_context(xyz.consultancy):
+            theirs = Holiday.objects.create(day=timezone.localdate(), name="Dashain")
+
         added = intruder.post(
-            "/api/clock/holidays/", {"date": "2026-10-21", "name": "Intruder"}, format="json"
+            "/api/clock/holidays/", {"name": "Intruder", "dates": ["2026-10-21"]}, format="json"
         )
         listed = intruder.get("/api/clock/holidays/")
+        removed = intruder.delete(
+            "/api/clock/holidays/", {"ids": [str(theirs.public_id)]}, format="json"
+        )
 
         assert added.status_code == listed.status_code == status.HTTP_401_UNAUTHORIZED
+        assert removed.status_code == status.HTTP_401_UNAUTHORIZED
         with tenant_context(xyz.consultancy):
-            assert not Holiday.objects.exists()
+            assert list(Holiday.objects.values_list("name", flat=True)) == ["Dashain"]
+
+    def test_another_office_cant_remove_a_group(self, make_consultancy: ConsultancyFactory) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        today = timezone.localdate()
+        with tenant_context(abc.consultancy):
+            dashain = Holiday.objects.create(day=today, name="Dashain")
+        with tenant_context(xyz.consultancy):
+            own = Holiday.objects.create(day=today, name="Tihar")
+
+        response = xyz.client.delete(
+            "/api/clock/holidays/",
+            {"ids": [str(own.public_id), str(dashain.public_id)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Holiday.objects.filter(pk=dashain.pk).exists()
+        with tenant_context(xyz.consultancy):
+            assert Holiday.objects.filter(pk=own.pk).exists()
+
+    def test_a_day_taken_in_one_office_is_free_in_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        today = timezone.localdate()
+        with tenant_context(abc.consultancy):
+            Holiday.objects.create(day=today, name="Dashain")
+
+        response = xyz.client.post(
+            "/api/clock/holidays/", {"name": "Tihar", "dates": [today.isoformat()]}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        with tenant_context(abc.consultancy):
+            assert list(Holiday.objects.values_list("name", flat=True)) == ["Dashain"]
+
+    def test_a_counsellor_reads_only_their_own_offices_holidays(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        with tenant_context(abc.consultancy):
+            Holiday.objects.create(day=timezone.localdate(), name="ABC only")
+        xyz.log_in_as(Role.COUNSELLOR)
+
+        listed = xyz.client.get("/api/clock/holidays/")
+
+        assert listed.status_code == status.HTTP_200_OK
+        assert listed.json() == {"holidays": []}
 
 
 class TestWorkFromHomeIsolation:

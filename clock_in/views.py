@@ -10,13 +10,14 @@ Working Day; a Platform Admin never clocks (they are not Staff).
 
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.parsers import JSONParser
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -50,6 +51,7 @@ from clock_in.exceptions import ClockRefusedError
 from clock_in.models import Holiday, WorkFromHome, WorkSession
 from clock_in.serializers import (
     ClockOutCorrectionSerializer,
+    HolidayIdsSerializer,
     HolidaySerializer,
     MissedTimeSerializer,
     MonthQuerySerializer,
@@ -63,7 +65,7 @@ from clock_in.services import (
     HolidayTakenError,
     MissedTime,
     NotOnOfficeNetworkError,
-    add_holiday,
+    add_holidays,
     add_missed_time,
     clock_in,
     clock_out,
@@ -73,6 +75,7 @@ from clock_in.services import (
     month_of,
     office_network_state,
     remove_holiday,
+    remove_holidays,
     set_missing_clock_out,
     set_weekly_off,
     set_working_day,
@@ -137,6 +140,8 @@ class CanManageWorkFromHome(BasePermission):
 
 
 MINE = (IsAuthenticated, ClockInModuleIsOn, CanClock)
+# Anyone signed in to this office, while Clock-in is on: the holidays (ticket 17).
+EVERYONE = (IsAuthenticated, ClockInModuleIsOn)
 TEAM = (IsAuthenticated, ClockInModuleIsOn, CanManageWorkingHours)
 WORK_FROM_HOME_ADMIN = (IsAuthenticated, ClockInModuleIsOn, CanManageWorkFromHome)
 
@@ -338,29 +343,53 @@ class WeeklyOffView(APIView):
         return Response(working_day_answer())
 
 
-HOLIDAY_TAKEN_MESSAGE = "There is already a holiday on that day."
+def _holiday_taken_message(day: date) -> str:
+    return f"There is already a holiday on {day.day} {day:%b %Y}."
 
 
 class HolidaysView(APIView):
-    """The office's holidays (GET), or a new one (POST), for Admins (asked 2026-11-16)."""
+    """The office's holidays: read by everyone (GET), changed by Admins (POST, DELETE).
 
-    permission_classes = TEAM
+    A holiday is added and removed as a group of days, all of them or none (asked 2026-11-16;
+    UI revamp, ticket 17).
+    """
+
     parser_classes = (JSONParser,)
+
+    def get_permissions(self) -> list[BasePermission]:
+        """Reading is for everyone while Clock-in is on; changing stays with Admins."""
+        classes = EVERYONE if self.request.method in SAFE_METHODS else TEAM
+        return [permission() for permission in classes]
 
     def get(self, request: Request) -> Response:
         """Return this year's and later holidays, by day."""
         return Response({"holidays": [holiday_answer(h) for h in listed_holidays()]})
 
     def post(self, request: Request) -> Response:
-        """Check and add one; one holiday a day."""
+        """Check and add one holiday on every day sent, or none of them; one holiday a day."""
         body = HolidaySerializer(data=request.data)
         body.is_valid(raise_exception=True)
         try:
-            holiday = add_holiday(body.day(), body.holiday_name())
-        except HolidayTakenError:
+            added = add_holidays(body.days(), body.holiday_name())
+        except HolidayTakenError as error:
             # expected refusal, answered with its status; the request line logs it
-            return Response({"date": [HOLIDAY_TAKEN_MESSAGE]}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(holiday_answer(holiday), status=status.HTTP_201_CREATED)
+            return Response(
+                {"dates": [_holiday_taken_message(day) for day in error.days]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"holidays": [holiday_answer(h) for h in added]}, status=status.HTTP_201_CREATED
+        )
+
+    def delete(self, request: Request) -> Response:
+        """Remove every holiday named, or answer 404 and remove none if one isn't here."""
+        body = HolidayIdsSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            remove_holidays(body.holiday_ids())
+        except Holiday.DoesNotExist as error:
+            raise NotFound from error
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class HolidayView(APIView):
