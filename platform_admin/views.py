@@ -69,8 +69,7 @@ from staff.reset_views import RULES_NOT_MET_MESSAGE
 from staff.serializers import EMAIL_TAKEN_MESSAGE
 from tenancy.exceptions import InvalidStatusChangeError
 from tenancy.models import Consultancy, Domain
-from tenancy.serializers import ThemeSerializer
-from tenancy.services import NOT_READY_MESSAGE, change_status, is_ready, set_theme
+from tenancy.services import NOT_READY_MESSAGE, change_status, is_ready
 from two_factor.exceptions import TooManyWrongNumbersError, WrongNumberError
 
 INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
@@ -426,26 +425,3 @@ class SupportVisitListView(APIView):
     def get(self, request: Request) -> Response:
         """Return the latest visits, newest first."""
         return Response([visit_answer(visit) for visit in recent_visits()])
-
-
-class ConsultancyThemeView(APIView):
-    """Choose an office's colours (its Theme). Only a Platform Admin, only on the Platform."""
-
-    permission_classes = (IsPlatformAdmin,)
-    parser_classes = (JSONParser,)
-
-    def put(self, request: Request, consultancy_id: int) -> Response:
-        """Validate and store the Theme and return the updated summary."""
-        consultancy = get_object_or_404(Consultancy, pk=consultancy_id)
-        refusal = _not_ready(consultancy)
-        if refusal is not None:
-            return refusal
-        serializer = ThemeSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        set_theme(consultancy, serializer.to_theme())
-        logger.info(
-            "Theme changed: consultancy_id=%s, platform_admin_id=%s",
-            consultancy.pk,
-            get_request_platform_admin(request).pk,
-        )
-        return Response(asdict(get_overview(consultancy)))

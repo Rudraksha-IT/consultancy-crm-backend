@@ -19,7 +19,7 @@ from django.utils import timezone
 from django_tenants.utils import schema_context
 from rest_framework import status
 
-from emails.looks import PLATFORM_ACCENT, PRODUCT_NAME
+from emails.looks import PRODUCT_ACCENT, PRODUCT_NAME
 from platform_admin.email_check import MAX_TESTS_PER_HOUR
 from platform_admin.models import EmailTest
 from staff.models import Role
@@ -124,7 +124,7 @@ class TestSending:
         assert sent.reply_to == []
         assert sent.subject == f"Test email from {PRODUCT_NAME}"
         [(html, _)] = sent.alternatives
-        assert PLATFORM_ACCENT in str(html)
+        assert PRODUCT_ACCENT in str(html)
         assert "Hello Platform Ops," in str(sent.body)
 
     def test_a_sent_test_shows_as_working_with_its_time(

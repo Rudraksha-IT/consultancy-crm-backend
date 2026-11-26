@@ -37,7 +37,6 @@ from platform_admin.setup import start_consultancy_setup
 from platform_admin.types import ConsultancyOnboarding
 from tenancy.models import Consultancy, SetupState
 from tenancy.status import ConsultancyStatus
-from tenancy.theme import DEFAULT_THEME
 
 with schema_context("public"):
     ops = PlatformAdmin.objects.get(email=os.environ["PLATFORM_ADMIN_EMAIL"].strip().lower())
@@ -47,7 +46,6 @@ with schema_context("public"):
             ConsultancyOnboarding(
                 name="Acme Education Consultancy",
                 subdomain="acme",
-                theme=DEFAULT_THEME,
                 contact_email="info@acme.com",
                 status=ConsultancyStatus.ACTIVE,
                 paid_until=date(2027, 6, 30),

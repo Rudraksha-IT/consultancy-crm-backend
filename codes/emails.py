@@ -1,7 +1,7 @@
 """Emails that carry a Code (spec 2026-11-18 stories 23-27, ADR 0023).
 
-A Staff member's Codes come in their office's look (its name as sender, logo, Theme colour and
-Office details); a Platform Admin's in the Platform's look. They never need the office's contact
+A Staff member's Codes come in their office's look (its name as sender, logo and Office
+details); a Platform Admin's in the Platform's look. They never need the office's contact
 email, and the Code is never put in a link or button.
 """
 

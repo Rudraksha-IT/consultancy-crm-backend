@@ -8,13 +8,6 @@ from tests.conftest import ConsultancyFactory, api_client, build_host
 
 CURRENT_CONSULTANCY_URL = "/api/consultancy/"
 
-DEFAULT_THEME = {
-    "page": "stone",
-    "sidebar": "#ffffff",
-    "accent": "#047857",
-    "dark": {"base": "soft", "sidebar": "darker", "accent": "#047857"},
-}
-
 
 class TestCurrentConsultancy:
     def test_returns_name_of_consultancy_owning_the_host(
@@ -27,7 +20,6 @@ class TestCurrentConsultancy:
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {
             "name": "ABC Education",
-            "theme": DEFAULT_THEME,
             "logo": None,
             "status": "evaluation",
             "status_message": None,
@@ -42,14 +34,12 @@ class TestCurrentConsultancy:
 
         assert abc_response.json() == {
             "name": "ABC Education",
-            "theme": DEFAULT_THEME,
             "logo": None,
             "status": "evaluation",
             "status_message": None,
         }
         assert xyz_response.json() == {
             "name": "XYZ Overseas",
-            "theme": DEFAULT_THEME,
             "logo": None,
             "status": "evaluation",
             "status_message": None,

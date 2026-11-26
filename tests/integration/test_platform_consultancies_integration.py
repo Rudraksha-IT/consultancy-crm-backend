@@ -44,12 +44,6 @@ ALWAYS_ON_MODULES = [
     "payments",
     "configuration",
 ]
-DEFAULT_THEME = {
-    "page": "stone",
-    "sidebar": "#ffffff",
-    "accent": "#047857",
-    "dark": {"base": "soft", "sidebar": "darker", "accent": "#047857"},
-}
 
 
 TERMINATE = {"status": "terminated", "reason": "Contract ended"}
@@ -297,7 +291,6 @@ class TestListConsultancies:
                 "evaluation_ends_at": abc_ends_at,
                 "paid_until": None,
                 "modules": ALWAYS_ON_MODULES,
-                "theme": DEFAULT_THEME,
                 "setup_state": "ready",
             },
             {
@@ -310,7 +303,6 @@ class TestListConsultancies:
                 "evaluation_ends_at": xyz_ends_at,
                 "paid_until": None,
                 "modules": ALWAYS_ON_MODULES,
-                "theme": DEFAULT_THEME,
                 "setup_state": "ready",
             },
         ]

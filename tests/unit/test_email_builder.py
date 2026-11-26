@@ -12,7 +12,7 @@ import pytest
 from codes.services import CODE_LIFETIME
 from emails.builder import CODE_MINUTES, build_email
 from emails.drafts import draft_email
-from emails.looks import PLATFORM_ACCENT, readable_accent
+from emails.looks import PRODUCT_ACCENT
 from emails.types import (
     BuiltEmail,
     CentralLogin,
@@ -55,7 +55,7 @@ DETAILS = OfficeDetails(
     address_line2="Bagmati, Nepal",
     website="https://himal.example",
 )
-OFFICE = OfficeLook(name="Himal Education", accent="#7c3aed", logo=None, details=DETAILS)
+OFFICE = OfficeLook(name="Himal Education", logo=None, details=DETAILS)
 PLATFORM = PlatformLook(name="Rudraksha CRM", logo=None)
 CONTEXT = DraftContext(first_name="Anjali", sender_name="Sita Karki", office_name="Himal Education")
 BULK = DraftContext(first_name=None, sender_name="Sita Karki", office_name="Himal Education")
@@ -65,7 +65,6 @@ def office(**changes: object) -> OfficeLook:
     """The test office with some values changed."""
     values: dict[str, object] = {
         "name": OFFICE.name,
-        "accent": OFFICE.accent,
         "logo": OFFICE.logo,
         "details": OFFICE.details,
     }
@@ -82,7 +81,7 @@ class TestFrame:
     def test_office_email_shows_name_colour_and_footer(self) -> None:
         email = message()
         assert "Himal Education" in email.html
-        assert readable_accent("#7c3aed") in email.html
+        assert PRODUCT_ACCENT in email.html
         for value in ["hello@himal.example", "+977 1 4412345", "Putalisadak, Kathmandu"]:
             assert value in email.html
             assert value in email.text
@@ -100,12 +99,11 @@ class TestFrame:
         assert email.from_name == "Himal Education"
         assert email.reply_to == "hello@himal.example"
 
-    def test_platform_email_uses_product_name_emerald_and_no_reply_to(self) -> None:
+    def test_platform_email_uses_product_name_colour_and_no_reply_to(self) -> None:
         email = build_email(PLATFORM, TestEmail(name="Asha Rai"))
         assert email.from_name == "Rudraksha CRM"
         assert email.reply_to is None
-        assert PLATFORM_ACCENT in email.html
-        assert readable_accent("#7c3aed") not in email.html
+        assert PRODUCT_ACCENT in email.html
 
     def test_empty_office_details_are_left_out(self) -> None:
         bare = office(details=OfficeDetails(contact_email="hello@himal.example"))
@@ -180,10 +178,9 @@ class TestEscaping:
         assert "<script>" not in email.html
         assert INJECTION in email.text
 
-    def test_office_colour_must_be_a_hex_colour(self) -> None:
-        email = build_email(office(accent="red;background:url(x)"), Message("Hi", "Hi"))
-        assert "url(x)" not in email.html
-        assert readable_accent(PLATFORM_ACCENT) in email.html
+    def test_an_office_look_takes_no_colour(self) -> None:
+        with pytest.raises(TypeError):
+            office(accent="red;background:url(x)")
 
     def test_subject_line_is_kept_on_one_line(self) -> None:
         assert message(subject="Hi\r\nBcc: x@y.z").subject == "Hi Bcc: x@y.z"
@@ -470,16 +467,13 @@ class TestDrafts:
         assert "hello@himal.example" in email.html
 
 
-class TestReadableAccent:
-    @pytest.mark.parametrize("colour", ["#047857", "#7c3aed", "#ffffff", "#fde047", "#000000"])
-    def test_white_text_on_it_reaches_4_5_to_1(self, colour: str) -> None:
-        assert _contrast_with_white(readable_accent(colour)) >= 4.5
+class TestProductColour:
+    def test_is_the_ivory_burgundy_as_a_strict_hex_colour(self) -> None:
+        assert PRODUCT_ACCENT == "#6e1a26"
+        assert re.fullmatch(r"#[0-9a-f]{6}", PRODUCT_ACCENT)
 
-    def test_a_dark_enough_colour_is_kept(self) -> None:
-        assert readable_accent("#047857") == "#047857"
-
-    def test_invalid_colour_falls_back_to_emerald(self) -> None:
-        assert readable_accent("nope") == PLATFORM_ACCENT
+    def test_white_text_on_it_reaches_4_5_to_1(self) -> None:
+        assert _contrast_with_white(PRODUCT_ACCENT) >= 4.5
 
 
 def _contrast_with_white(colour: str) -> float:

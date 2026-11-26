@@ -20,11 +20,9 @@ from tenancy.services import (
     get_date_display,
     get_logo,
     get_office_details,
-    get_theme,
 )
 from tenancy.status import ConsultancyStatus
 from tenancy.subdomains import get_platform_host
-from tenancy.theme import ThemeConfig
 from tenancy.types import DateDisplay, OfficeLogo
 
 
@@ -76,7 +74,6 @@ class StaffContext:
     date_display: DateDisplay
     # Swipe between pages: the logged-in person's own choice in Settings (asked 2026-11-17).
     page_swipe: bool
-    theme: ThemeConfig
     # None for Staff; set for a Platform Admin on a Support Access visit, who sees the banner.
     support_access: SupportAccessSummary | None
 
@@ -117,7 +114,6 @@ def build_staff_context(staff: Staff, consultancy: Consultancy) -> StaffContext:
         modules=get_enabled_modules(consultancy),
         date_display=get_date_display(consultancy),
         page_swipe=staff.page_swipe,
-        theme=get_theme(consultancy),
         support_access=(
             SupportAccessSummary(platform_admin_name=staff.name, platform_host=get_platform_host())
             if is_platform_visitor(staff)

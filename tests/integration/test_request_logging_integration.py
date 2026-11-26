@@ -33,12 +33,6 @@ CONSULTANCIES_URL = "/api/platform/consultancies/"
 CORRELATION_HEADER = "X-Correlation-ID"
 WRONG_PASSWORD = "Wrong-Pa55word!"  # noqa: S105  # test-only credential
 WRONG_TOKEN = "wrong"  # noqa: S105  # test-only value
-THEME = {
-    "page": "ice",
-    "sidebar": "#0f3440",
-    "accent": "#0b6e8e",
-    "dark": {"base": "teal", "sidebar": "brand", "accent": "auto"},
-}
 
 
 def _is_uuid(value: object) -> bool:
@@ -206,24 +200,6 @@ class TestStaffEvents:
         json_logs.only(f"Staff logged out: staff_id={counsellor.pk}")
         assert counsellor.email not in json_logs.text()
         assert TEST_PASSWORD not in json_logs.text()
-
-    def test_a_theme_change_is_logged_under_the_platform_admin(
-        self,
-        make_consultancy: ConsultancyFactory,
-        platform_site: PlatformContext,
-        json_logs: JsonLogs,
-    ) -> None:
-        acme = make_consultancy("Acme Education", "acme")
-        ops = platform_site.log_in()
-
-        platform_site.client.put(
-            f"{CONSULTANCIES_URL}{acme.consultancy.public_id}/theme/", THEME, format="json"
-        )
-
-        consultancy_id = acme.consultancy.pk
-        json_logs.only(
-            f"Theme changed: consultancy_id={consultancy_id}, platform_admin_id={ops.pk}"
-        )
 
 
 class TestPlatformEvents:

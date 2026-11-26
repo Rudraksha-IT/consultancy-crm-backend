@@ -71,7 +71,7 @@ Next.js server holds the tokens and checks `Origin`).
   from then on (rotation).
 - `POST /api/auth/logout/` `{refresh}` -> 204; that refresh token is refused from then on.
 - `GET /api/context/` with `Authorization: Bearer <access>` returns
-  `{staff, consultancy, modules, date_display, theme}`; 401 without a valid token.
+  `{staff, consultancy, modules, date_display}`; 401 without a valid token.
 
 Every token carries `tenant_schema`, `kind` (`staff` | `platform_admin`), `auth_version`,
 `user_id` and `jti`. `auth_tokens.middleware.TokenConsultancyMiddleware` answers 401 for a token
@@ -119,7 +119,7 @@ answers as a "renew" (AUTH_ROUTES): it sends the access token and seals the new 
 
 ## Office logo (issue 39)
 
-Stored on the Consultancy (public schema, beside the Theme): `logo_key`, `logo_content_type`,
+Stored on the Consultancy (public schema): `logo_key`, `logo_content_type`,
 `logo_version` and `show_name_beside_logo`. The file lives in the private Documents bucket under
 `<schema>/office-logo/`. It is never linked to: Django reads it back and serves it.
 
@@ -412,7 +412,7 @@ schema, keeps the host off and marks it `failed`; `POST .../<id>/retry-setup/` (
 a new Job. Once ready, a Platform Admin adds Admins with `POST .../<id>/admins/` `{name, email}`
 (issue 64): each is added as invited and emailed a Code, as Employees does. A Job running longer than `JOB_TIMEOUT_SECONDS` is queued again (3 attempts in all).
 Until an office is ready its host answers 404, and deploy migrations, `rebuild_staff_directory`,
-the Central login, Status, Features, Colours and Support Access all leave it out or refuse it.
+the Central login, Status, Features and Support Access all leave it out or refuse it.
 `python manage.py run_jobs --until-empty` runs what is queued, then stops.
 
 ### Central login (issue 44)
@@ -456,9 +456,10 @@ the Platform host; their refresh tokens are recorded in the public schema.
   `POST /api/platform/auth/refresh/` and `POST /api/platform/auth/logout/` as on Consultancy hosts;
   `GET /api/platform/me/` -> `{platform_admin: {id, name, email}}`.
 - `GET /api/platform/consultancies/` -> `[{id, name, subdomain, host, status, status_reason,
-evaluation_ends_at, paid_until, modules, theme}]`.
+evaluation_ends_at, paid_until, modules}]`. No answer carries a `theme`: office colours are
+  gone (UI revamp, ticket 04), and a request that sends one is refused as an unknown field.
 - `POST /api/platform/consultancies/` `{name, subdomain, admin_name, admin_email, admin_password,
-theme?, status?: "evaluation"|"active", paid_until?}` creates the schema, the domain and the first
+status?: "evaluation"|"active", paid_until?}` creates the schema, the domain and the first
   Admin Staff member (201) in Evaluation for 14 days, or Active when `paid_until` is given; 400
   with field errors otherwise. Unknown fields are refused.
 - `POST /api/platform/consultancies/<id>/status/` `{status, reason?, paid_until?,

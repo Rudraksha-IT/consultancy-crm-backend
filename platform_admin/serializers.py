@@ -15,11 +15,10 @@ from platform_admin.types import ConsultancyOnboarding
 from staff.models import STAFF_NAME_MAX_LENGTH
 from staff.serializers import EMAIL_MAX_LENGTH, PASSWORD_MAX_LENGTH, ResetCodeSerializer
 from tenancy.models import CONSULTANCY_NAME_MAX_LENGTH, STATUS_REASON_MAX_LENGTH
-from tenancy.serializers import ContactEmailField, ThemeSerializer
+from tenancy.serializers import ContactEmailField
 from tenancy.services import DATE_NOT_IN_FUTURE_MESSAGE, is_subdomain_taken
 from tenancy.status import ConsultancyStatus
 from tenancy.subdomains import find_subdomain_problem
-from tenancy.theme import DEFAULT_THEME, theme_from_stored
 from tenancy.types import StatusChange
 from two_factor.serializers import NumberField
 
@@ -76,7 +75,6 @@ class ConsultancyOnboardingSerializer(StrictSerializer[None]):
     name = StrictCharField(max_length=CONSULTANCY_NAME_MAX_LENGTH)
     subdomain = StrictCharField(max_length=SUBDOMAIN_MAX_INPUT_LENGTH)
     contact_email = ContactEmailField()
-    theme = ThemeSerializer(required=False)
     status = serializers.ChoiceField(choices=STARTING_STATUSES, required=False)
     paid_until = FutureDateField(required=False)
 
@@ -99,12 +97,11 @@ class ConsultancyOnboardingSerializer(StrictSerializer[None]):
         return value
 
     def to_onboarding(self) -> ConsultancyOnboarding:
-        """Return the validated details; no Theme means the default."""
+        """Return the validated details."""
         data = self.validated_data
         return ConsultancyOnboarding(
             name=data["name"],
             subdomain=data["subdomain"],
-            theme=theme_from_stored(data["theme"]) if "theme" in data else DEFAULT_THEME,
             contact_email=data["contact_email"],
             status=ConsultancyStatus(data.get("status", ConsultancyStatus.EVALUATION.value)),
             paid_until=data.get("paid_until"),

@@ -30,7 +30,7 @@ from staff.exceptions import PasswordRulesNotMetError
 from staff.passwords import unmet_password_rules
 from staff.services import normalize_email
 from tenancy.models import Consultancy, Domain, SetupState
-from tenancy.services import get_status, get_theme
+from tenancy.services import get_status
 from tenancy.subdomains import subdomain_from_host
 from two_factor.exceptions import WrongNumberError
 from two_factor.services import check_number_of, is_set_up
@@ -349,7 +349,6 @@ def _build_overview(consultancy: Consultancy, host: str) -> ConsultancyOverview:
         evaluation_ends_at=consultancy.evaluation_ends_at,
         paid_until=consultancy.paid_until,
         modules=get_enabled_modules(consultancy),
-        theme=get_theme(consultancy),
         setup_state=SetupState(consultancy.setup_state),
     )
 

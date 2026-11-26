@@ -11,7 +11,7 @@ from documents.exceptions import DocumentStorageError
 from documents.storage import document_storage
 from emails.types import Logo, OfficeLook
 from tenancy.models import Consultancy
-from tenancy.services import get_office_details, get_theme
+from tenancy.services import get_office_details
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,9 @@ def _logo(consultancy: Consultancy) -> Logo | None:
 
 
 def office_look(consultancy: Consultancy) -> OfficeLook:
-    """The office's name, Theme main colour, logo (PNG or JPEG) and Office details."""
+    """The office's name, logo (PNG or JPEG) and Office details."""
     return OfficeLook(
         name=consultancy.name,
-        accent=get_theme(consultancy).accent,
         logo=_logo(consultancy),
         details=get_office_details(consultancy),
     )

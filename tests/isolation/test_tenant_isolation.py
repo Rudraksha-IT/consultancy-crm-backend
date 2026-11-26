@@ -370,45 +370,6 @@ class TestPlatformTeamAndBrandIsolation:
         assert PlatformAdmin.objects.get(pk=admin.pk).is_active
 
 
-NEW_THEME = {"page": "ice", "sidebar": "#0f3440", "accent": "#0b6e8e"}
-
-
-class TestThemeIsolation:
-    def test_choosing_one_consultancys_theme_leaves_another_alone(
-        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
-        platform_site.log_in()
-
-        platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.public_id}/theme/",
-            NEW_THEME,
-            format="json",
-        )
-
-        assert abc.new_client().get("/api/consultancy/").json()["theme"]["page"] == "ice"
-        assert xyz.new_client().get("/api/consultancy/").json()["theme"]["page"] == "stone"
-
-    def test_an_offices_admin_token_cannot_choose_any_theme(
-        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
-        access = abc.tokens_for(abc.add_staff(Role.ADMIN)).access
-        client = platform_site.new_client()
-        use_access_token(client, access)
-
-        response = client.put(
-            f"/api/platform/consultancies/{xyz.consultancy.public_id}/theme/",
-            NEW_THEME,
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert xyz.new_client().get("/api/consultancy/").json()["theme"]["page"] == "stone"
-
-
 LOGO_URL = "/api/configuration/logo/"
 LOGO_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 LOGO_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 32

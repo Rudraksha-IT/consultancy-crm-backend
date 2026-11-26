@@ -1,15 +1,14 @@
 """Code and Central login emails in the new design (spec 2026-11-18 stories 23-27; issue 05).
 
 Staff Invite and password reset Codes come in the office's look (its name as sender, logo,
-Theme colour and Office details); the Central login list and the Platform Admin Invite and
-reset Codes come in the Platform's look (the product's name and logo, emerald). Every one is
+the product's colour and Office details); the Central login list and the Platform Admin Invite and
+reset Codes come in the Platform's look (the product's name and logo). Every one is
 HTML with a plain-text copy, never needs the contact email, and never puts the Code in a link.
 Sent email is read from Django's test mailbox.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from email.utils import parseaddr
 from typing import TYPE_CHECKING
@@ -20,14 +19,13 @@ from django.core.mail import EmailMultiAlternatives
 from django_tenants.utils import schema_context
 from rest_framework import status
 
-from emails.looks import PLATFORM_ACCENT, PRODUCT_NAME
+from emails.looks import PRODUCT_ACCENT, PRODUCT_NAME
 from emails.types import OfficeDetails
 from platform_admin.brand import set_product_logo
 from staff.models import Role
 from tenancy.logo import PNG, SVG, CheckedLogo
-from tenancy.services import set_logo, set_office_details, set_theme
+from tenancy.services import set_logo, set_office_details
 from tenancy.subdomains import get_central_login_host, get_platform_host
-from tenancy.theme import DEFAULT_THEME
 from tests.conftest import (
     PUBLIC_SCHEMA,
     ConsultancyContext,
@@ -49,7 +47,6 @@ RESET_URL = "/api/auth/password-reset/"
 CENTRAL_URL = "/api/central-login/"
 PLATFORM_ADMINS_URL = "/api/platform/admins/"
 PLATFORM_RESET_URL = "/api/platform/auth/password-reset/"
-OFFICE_BLUE = "#1d4ed8"
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 SVG_BYTES = b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'
 CONTACT_EMAIL = "info@abcedu.example"
@@ -114,10 +111,8 @@ def inline_logo(message: EmailMultiAlternatives) -> list[bytes]:
 
 @pytest.fixture
 def abc(make_consultancy: ConsultancyFactory) -> ConsultancyContext:
-    """An office in blue, with no Office details yet."""
-    office = make_consultancy("ABC Education", "abcedu")
-    set_theme(office.consultancy, dataclasses.replace(DEFAULT_THEME, accent=OFFICE_BLUE))
-    return office
+    """An office with no Office details yet."""
+    return make_consultancy("ABC Education", "abcedu")
 
 
 @pytest.fixture
@@ -159,8 +154,7 @@ class TestStaffCodeEmailsInTheOfficesLook:
         sent = send(abc)
 
         assert parseaddr(sent.from_email) == ("ABC Education", settings.DEFAULT_FROM_EMAIL)
-        assert OFFICE_BLUE in html_of(sent)
-        assert PLATFORM_ACCENT not in html_of(sent)
+        assert PRODUCT_ACCENT in html_of(sent)
         assert "ABC Education" in html_of(sent)
         assert str(sent.body).startswith("ABC Education\n")
         assert_code_outside_links(sent)
@@ -252,7 +246,7 @@ class TestStaffCodeEmailsInTheOfficesLook:
         assert response.status_code == status.HTTP_200_OK, response.content
         sent = last()
         assert parseaddr(sent.from_email)[0] == "ABC Education"
-        assert OFFICE_BLUE in html_of(sent)
+        assert PRODUCT_ACCENT in html_of(sent)
         assert_code_outside_links(sent)
 
 
@@ -269,7 +263,7 @@ class TestPlatformCodeEmailsInThePlatformsLook:
         assert parseaddr(sent.from_email) == (PRODUCT_NAME, settings.DEFAULT_FROM_EMAIL)
         assert sent.reply_to == []
         assert sent.subject == "Your code to join the Platform"
-        assert PLATFORM_ACCENT in html_of(sent)
+        assert PRODUCT_ACCENT in html_of(sent)
         assert PRODUCT_NAME in html_of(sent)
         assert any("/join" in link for link in HREF.findall(html_of(sent)))
         assert_code_outside_links(sent)
@@ -290,7 +284,7 @@ class TestPlatformCodeEmailsInThePlatformsLook:
         assert sent.subject == "Your code to reset your Platform password"
         assert get_platform_host() in html_of(sent)
         assert get_platform_host() in str(sent.body)
-        assert PLATFORM_ACCENT in html_of(sent)
+        assert PRODUCT_ACCENT in html_of(sent)
         assert_code_outside_links(sent)
 
     def test_the_product_logo_is_carried_inside_when_it_is_a_png(
@@ -341,8 +335,7 @@ class TestCentralLoginEmail:
         [sent] = outbox()
         assert parseaddr(sent.from_email) == (PRODUCT_NAME, settings.DEFAULT_FROM_EMAIL)
         assert sent.reply_to == []
-        assert PLATFORM_ACCENT in html_of(sent)
-        assert OFFICE_BLUE not in html_of(sent)
+        assert PRODUCT_ACCENT in html_of(sent)
         links = HREF.findall(html_of(sent))
         for office in (abc, xyz):
             assert any(link.startswith(f"https://{office.host}") for link in links)

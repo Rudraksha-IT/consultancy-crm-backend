@@ -2,7 +2,15 @@
 
 from django.db import migrations, models
 
-import tenancy.models
+
+def _default_theme() -> dict[str, object]:
+    """The Theme new Consultancies started with, kept here since `tenancy.theme` is gone (0013)."""
+    return {
+        "page": "stone",
+        "sidebar": "#ffffff",
+        "accent": "#047857",
+        "dark": {"base": "soft", "sidebar": "darker", "accent": "#047857"},
+    }
 
 
 class Migration(migrations.Migration):
@@ -14,6 +22,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="consultancy",
             name="theme",
-            field=models.JSONField(default=tenancy.models.default_theme),
+            field=models.JSONField(default=_default_theme),
         ),
     ]

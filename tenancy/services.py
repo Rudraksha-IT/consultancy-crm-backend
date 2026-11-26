@@ -32,7 +32,6 @@ from tenancy.status import (
     restriction_message,
 )
 from tenancy.subdomains import build_host, schema_name_for
-from tenancy.theme import ThemeConfig, theme_from_stored, theme_to_stored
 from tenancy.types import ConsultancyAccess, DateDisplay, OfficeLogo, StatusChange, StoredLogo
 
 if TYPE_CHECKING:
@@ -453,17 +452,6 @@ def set_office_details(consultancy: Consultancy, details: OfficeDetails) -> Offi
     consultancy.website = details.website
     consultancy.save(update_fields=list(OFFICE_DETAILS_FIELDS))
     return get_office_details(consultancy)
-
-
-def get_theme(consultancy: Consultancy) -> ThemeConfig:
-    """Return the Consultancy's Theme; a damaged stored value falls back on the defaults."""
-    return theme_from_stored(consultancy.theme)
-
-
-def set_theme(consultancy: Consultancy, theme: ThemeConfig) -> None:
-    """Store a new Theme for the Consultancy; every screen derives its colours from it."""
-    consultancy.theme = theme_to_stored(theme)
-    consultancy.save(update_fields=["theme"])
 
 
 def get_logo(consultancy: Consultancy) -> OfficeLogo | None:

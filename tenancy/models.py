@@ -9,7 +9,6 @@ from django_tenants.models import DomainMixin, TenantMixin
 from config.public_ids import public_id_field
 from tenancy.exceptions import StatusRecordIsAppendOnlyError
 from tenancy.status import ConsultancyStatus
-from tenancy.theme import DEFAULT_THEME, theme_to_stored
 from tenancy.types import DateDisplay
 
 CONSULTANCY_NAME_MAX_LENGTH = 200
@@ -37,11 +36,6 @@ class SetupState(models.TextChoices):
     FAILED = "failed", "Setup failed"
 
 
-def default_theme() -> dict[str, object]:
-    """Return the stored form of the Theme new Consultancies start with."""
-    return theme_to_stored(DEFAULT_THEME)
-
-
 class Consultancy(TenantMixin):  # type: ignore[misc]  # django-tenants is untyped
     """A Consultancy using the product; its data lives in its own schema."""
 
@@ -64,8 +58,6 @@ class Consultancy(TenantMixin):  # type: ignore[misc]  # django-tenants is untyp
     suspended_at = models.DateTimeField(null=True, blank=True)
     terminated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    # The Theme's stored form; read it through tenancy.services.get_theme.
-    theme = models.JSONField(default=default_theme)
     # The switchable Modules that are on, as a list of their values; read it through
     # modules.services. Switching one off never touches its data.
     switched_on_modules = models.JSONField(default=list)

@@ -1,4 +1,4 @@
-"""The Platform's look for its emails (ADR 0023): the product's saved name and logo, in emerald.
+"""The Platform's look for its emails (ADR 0023): the product's saved name and logo.
 
 Not part of the pure builder: it reads the product's logo from private storage.
 """

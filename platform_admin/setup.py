@@ -33,7 +33,6 @@ from tenancy.services import (
     check_paid_until,
     is_ready,
     reserve_consultancy,
-    set_theme,
     start_active,
     start_evaluation,
 )
@@ -65,7 +64,7 @@ def start_consultancy_setup(onboarding: ConsultancyOnboarding, *, by: PlatformAd
 
     Args:
         onboarding: The Consultancy's name, subdomain (the front part of its address), contact
-            email, Theme and starting Status.
+            email and starting Status.
         by: The Platform Admin creating it, recorded with its starting Status.
 
     Returns:
@@ -89,7 +88,6 @@ def start_consultancy_setup(onboarding: ConsultancyOnboarding, *, by: PlatformAd
                 schema_name=schema_name_for(subdomain),
                 host=build_host(subdomain),
             )
-            set_theme(consultancy, onboarding.theme)
             consultancy.contact_email = onboarding.contact_email
             consultancy.save(update_fields=["contact_email"])
             job = queue_job(
