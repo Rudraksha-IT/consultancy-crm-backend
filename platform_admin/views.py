@@ -18,8 +18,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from auth_tokens.password_tries import PasswordTriesUsedUpError, check_password_try
 from auth_tokens.services import issue_tokens
 from auth_tokens.types import TokenClaims
+from auth_tokens.views import password_tries_used_up
 from modules.serializers import ModuleSwitchesSerializer
 from modules.services import switch_modules
 from platform_admin.auth import get_request_platform_admin
@@ -67,8 +69,7 @@ from staff.reset_views import RULES_NOT_MET_MESSAGE
 from staff.serializers import EMAIL_TAKEN_MESSAGE
 from tenancy.exceptions import InvalidStatusChangeError
 from tenancy.models import Consultancy, Domain
-from tenancy.serializers import ThemeSerializer
-from tenancy.services import NOT_READY_MESSAGE, change_status, is_ready, set_theme
+from tenancy.services import NOT_READY_MESSAGE, change_status, is_ready
 from two_factor.exceptions import TooManyWrongNumbersError, WrongNumberError
 
 INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
@@ -97,9 +98,12 @@ class PlatformLoginView(APIView):
         """
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        admin = authenticate_platform_admin(
-            serializer.validated_data["email"], serializer.validated_data["password"]
-        )
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
+        try:
+            admin = check_password_try(email, lambda: authenticate_platform_admin(email, password))
+        except PasswordTriesUsedUpError as error:
+            return password_tries_used_up(error)
         if admin is None:
             logger.info("Platform Admin login failed")
             return Response(
@@ -421,26 +425,3 @@ class SupportVisitListView(APIView):
     def get(self, request: Request) -> Response:
         """Return the latest visits, newest first."""
         return Response([visit_answer(visit) for visit in recent_visits()])
-
-
-class ConsultancyThemeView(APIView):
-    """Choose an office's colours (its Theme). Only a Platform Admin, only on the Platform."""
-
-    permission_classes = (IsPlatformAdmin,)
-    parser_classes = (JSONParser,)
-
-    def put(self, request: Request, consultancy_id: int) -> Response:
-        """Validate and store the Theme and return the updated summary."""
-        consultancy = get_object_or_404(Consultancy, pk=consultancy_id)
-        refusal = _not_ready(consultancy)
-        if refusal is not None:
-            return refusal
-        serializer = ThemeSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        set_theme(consultancy, serializer.to_theme())
-        logger.info(
-            "Theme changed: consultancy_id=%s, platform_admin_id=%s",
-            consultancy.pk,
-            get_request_platform_admin(request).pk,
-        )
-        return Response(asdict(get_overview(consultancy)))

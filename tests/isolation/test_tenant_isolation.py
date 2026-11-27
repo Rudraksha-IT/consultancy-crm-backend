@@ -17,6 +17,8 @@ from django_tenants.utils import tenant_context
 from rest_framework import status
 
 from applications.models import Application, Visa
+from auth_tokens.models import WrongPasswordCount
+from auth_tokens.password_tries import WRONG_PASSWORDS_ALLOWED
 from auth_tokens.services import sign_out_everywhere
 from batches.models import Attendance, Batch, BatchMembership, Mark
 from catalogue.models import Course, Intake, University
@@ -44,7 +46,7 @@ from notifications.models import Notification
 from office_networks.models import OfficeNetwork
 from payments.models import Payment
 from platform_admin.models import PlatformAdmin
-from staff.models import Role, Staff
+from staff.models import Role, Staff, StaffStatus
 from students.models import Student, WorkExperience
 from tasks.models import Task
 from tenancy.context import activate_public_schema
@@ -171,6 +173,26 @@ class TestLoginIsolation:
             sign_out_everywhere(abc_admin)
 
         assert xyz.client.get(CONTEXT_URL).status_code == status.HTTP_200_OK
+
+    def test_wrong_passwords_on_one_consultancy_never_count_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        email = "sita@shared.test"
+        abc.add_staff(Role.COUNSELLOR, email=email)
+        xyz.add_staff(Role.COUNSELLOR, email=email)
+        wrong = {"email": email, "password": "not-the-password"}
+        for _ in range(WRONG_PASSWORDS_ALLOWED):
+            abc.client.post(LOGIN_URL, wrong, format="json")
+        refused = abc.client.post(LOGIN_URL, {**wrong, "password": TEST_PASSWORD}, format="json")
+        assert refused.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+        right = xyz.client.post(LOGIN_URL, {**wrong, "password": TEST_PASSWORD}, format="json")
+
+        assert right.status_code == status.HTTP_200_OK
+        with tenant_context(xyz.consultancy):
+            assert not WrongPasswordCount.objects.exists()
 
 
 RESET_URL = "/api/auth/password-reset/"
@@ -346,45 +368,6 @@ class TestPlatformTeamAndBrandIsolation:
         activate_public_schema()
         assert PlatformAdmin.objects.count() == 1
         assert PlatformAdmin.objects.get(pk=admin.pk).is_active
-
-
-NEW_THEME = {"page": "ice", "sidebar": "#0f3440", "accent": "#0b6e8e"}
-
-
-class TestThemeIsolation:
-    def test_choosing_one_consultancys_theme_leaves_another_alone(
-        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
-        platform_site.log_in()
-
-        platform_site.client.put(
-            f"/api/platform/consultancies/{abc.consultancy.public_id}/theme/",
-            NEW_THEME,
-            format="json",
-        )
-
-        assert abc.new_client().get("/api/consultancy/").json()["theme"]["page"] == "ice"
-        assert xyz.new_client().get("/api/consultancy/").json()["theme"]["page"] == "stone"
-
-    def test_an_offices_admin_token_cannot_choose_any_theme(
-        self, make_consultancy: ConsultancyFactory, platform_site: PlatformContext
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
-        access = abc.tokens_for(abc.add_staff(Role.ADMIN)).access
-        client = platform_site.new_client()
-        use_access_token(client, access)
-
-        response = client.put(
-            f"/api/platform/consultancies/{xyz.consultancy.public_id}/theme/",
-            NEW_THEME,
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert xyz.new_client().get("/api/consultancy/").json()["theme"]["page"] == "stone"
 
 
 LOGO_URL = "/api/configuration/logo/"
@@ -648,8 +631,9 @@ class TestStaffManagementIsolation:
         deactivated = abc.client.post(f"{STAFF_URL}{target.public_id}/deactivate/")
         resent = abc.client.post(f"{STAFF_URL}{target.public_id}/invite/")
         cancelled = abc.client.delete(f"{STAFF_URL}{target.public_id}/invite/")
+        invited_back = abc.client.post(f"{STAFF_URL}{target.public_id}/invite-back/")
 
-        assert {r.status_code for r in (changed, deactivated, resent, cancelled)} == {
+        assert {r.status_code for r in (changed, deactivated, resent, cancelled, invited_back)} == {
             status.HTTP_404_NOT_FOUND
         }
         with tenant_context(xyz.consultancy):
@@ -657,6 +641,51 @@ class TestStaffManagementIsolation:
         assert kept.role == Role.COUNSELLOR
         assert kept.is_active
         assert mail.outbox == []
+
+    def test_an_admin_cannot_invite_back_another_consultancys_leaver(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc_admin = abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        leaver = xyz.add_staff(Role.COUNSELLOR, email="ram@xyz.test")
+        xyz.client.post(f"{STAFF_URL}{leaver.public_id}/deactivate/")
+        on_xyz = xyz.new_client()
+        use_access_token(on_xyz, abc.tokens_for(abc_admin).access)
+
+        by_id = abc.client.post(f"{STAFF_URL}{leaver.public_id}/invite-back/")
+        by_token = on_xyz.post(f"{STAFF_URL}{leaver.public_id}/invite-back/")
+
+        assert by_id.status_code == status.HTTP_404_NOT_FOUND
+        assert by_token.status_code == status.HTTP_401_UNAUTHORIZED
+        with tenant_context(xyz.consultancy):
+            kept = Staff.objects.get(pk=leaver.pk)
+        assert kept.status == StaffStatus.DEACTIVATED
+        assert kept.invited_back is False
+        assert mail.outbox == []
+
+    def test_inviting_back_in_one_consultancy_leaves_the_same_email_elsewhere_alone(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        email = "ram@shared.test"
+        abc_leaver = abc.add_staff(Role.COUNSELLOR, email=email)
+        xyz_leaver = xyz.add_staff(Role.COUNSELLOR, email=email)
+        with tenant_context(xyz.consultancy):
+            Staff.objects.filter(pk=xyz_leaver.pk).update(status=StaffStatus.DEACTIVATED)
+        abc.client.post(f"{STAFF_URL}{abc_leaver.public_id}/deactivate/")
+
+        invited = abc.client.post(f"{STAFF_URL}{abc_leaver.public_id}/invite-back/")
+
+        assert invited.status_code == status.HTTP_202_ACCEPTED
+        with tenant_context(xyz.consultancy):
+            other = Staff.objects.get(pk=xyz_leaver.pk)
+        assert other.status == StaffStatus.DEACTIVATED
+        assert other.invited_back is False
+        assert len(mail.outbox) == 1
 
     def test_an_admins_token_is_refused_on_another_consultancys_staff_list(
         self, make_consultancy: ConsultancyFactory
@@ -1713,6 +1742,76 @@ class TestVisaLetterIsolation:
             assert not Document.objects.exists()
 
 
+class TestDecidedVisaIsolation:
+    """UI revamp ticket 10: a Visa's Status is never reached from another Consultancy."""
+
+    def test_another_office_gets_not_found_for_a_waiting_or_a_decided_visa(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        visa_id = abc.client.post(
+            _visas_url(sita), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        url = f"{_visas_url(sita)}{visa_id}/"
+
+        while_waiting = xyz.client.patch(url, {"status": "granted"}, format="json")
+        abc.client.patch(url, {"status": "refused"}, format="json")
+        once_decided = xyz.client.patch(url, {"status": "granted"}, format="json")
+
+        assert while_waiting.status_code == status.HTTP_404_NOT_FOUND
+        assert once_decided.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Visa.objects.get(public_id=visa_id).status == "refused"
+
+    def test_a_visa_id_of_another_office_is_not_found_on_its_own_student(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        _student_applying(abc, "Hari Shah")  # so ABC's ids below don't exist in XYZ
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        abc_visa = abc.client.post(
+            _visas_url(sita), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        abc.client.patch(f"{_visas_url(sita)}{abc_visa}/", {"status": "granted"}, format="json")
+        ram, _ = _student_with_coe(xyz, "Ram Thapa")
+
+        response = xyz.client.patch(
+            f"{_visas_url(ram)}{abc_visa}/", {"status": "refused"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Visa.objects.get(public_id=abc_visa).status == "granted"
+
+    def test_a_token_from_one_office_is_refused_on_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        xyz.log_in_as(Role.ADMIN)
+        ram, application_id = _student_with_coe(xyz, "Ram Thapa")
+        visa_id = xyz.client.post(
+            _visas_url(ram), {"application": application_id}, format="json"
+        ).json()["visas"][0]["id"]
+        intruder = api_client(xyz.host)
+        use_access_token(intruder, abc.tokens_for(abc.add_staff(Role.ADMIN)).access)
+
+        response = intruder.patch(
+            f"{_visas_url(ram)}{visa_id}/", {"status": "granted"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        with tenant_context(xyz.consultancy):
+            assert Visa.objects.get(public_id=visa_id).status == "applied"
+
+
 class TestVisaListIsolation:
     """Issue 48: the Visas list and a Visa's interview stay inside their own Consultancy."""
 
@@ -1733,6 +1832,28 @@ class TestVisaListIsolation:
         assert (everyone["count"], everyone["results"]) == (0, [])
         assert choices == {"intakes": [], "countries": []}
         assert abc.client.get(VISAS_URL).json()["count"] == 1
+
+    def test_a_search_never_finds_another_offices_visas(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        """UI revamp ticket 24: `q` on the Visas list and its export."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        sita, application_id = _student_with_coe(abc, "Sita Karki")
+        abc.client.post(_visas_url(sita), {"application": application_id}, format="json")
+        search = {"q": "sita"}
+
+        found = xyz.client.get(VISAS_URL, search).json()
+        exported = xyz.client.post(
+            "/api/exports/", {"list": "visas", "filters": search}, format="json"
+        )
+
+        assert (found["count"], found["results"]) == (0, [])
+        assert exported.status_code == status.HTTP_200_OK
+        assert "Sita" not in exported.content.decode("utf-8")
+        assert abc.client.get(VISAS_URL, search).json()["count"] == 1
 
     def test_another_office_cannot_set_visa_dates(
         self, make_consultancy: ConsultancyFactory
@@ -2084,6 +2205,31 @@ class TestDocumentIsolation:
 
         assert page["count"] == 0
         assert page["results"] == []
+
+    def test_the_documents_page_names_only_its_own_offices_documents(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        """UI revamp 12: each row's `items` come from this office's checklist and uploads only."""
+        abc = make_consultancy("ABC Education", "abcedu")
+        xyz = make_consultancy("XYZ Overseas", "xyzoverseas")
+        abc.log_in_as(Role.ADMIN)
+        xyz.log_in_as(Role.ADMIN)
+        abc.client.post(
+            _TYPES_URL, {"name": "ABC only paper", "needed_by_everyone": True}, format="json"
+        )
+        _student_with_passport(abc, "Sita Karki")
+        xyz_student = xyz.client.post(STUDENTS_URL, _lead_body("Ram Thapa"), format="json").json()
+        xyz.client.post(
+            f"{STUDENTS_URL}{xyz_student['id']}/stage/", {"stage": "counselling"}, format="json"
+        )
+
+        abc_items = abc.client.get(_PAPERWORK_URL).json()["results"][0]["items"]
+        xyz_items = xyz.client.get(_PAPERWORK_URL).json()["results"][0]["items"]
+
+        assert {"name": "ABC only paper", "state": "missing"} in abc_items
+        assert {"name": "Passport", "state": "waiting"} in abc_items
+        assert "ABC only paper" not in [item["name"] for item in xyz_items]
+        assert {item["state"] for item in xyz_items} == {"missing"}
 
     def test_another_consultancy_cannot_check_a_document(
         self, make_consultancy: ConsultancyFactory
@@ -5140,7 +5286,9 @@ class TestHolidayIsolation:
         abc, xyz = self._offices(make_consultancy)
         today = timezone.localdate()
         abc.client.post(
-            "/api/clock/holidays/", {"date": today.isoformat(), "name": "Dashain"}, format="json"
+            "/api/clock/holidays/",
+            {"name": "Dashain", "dates": [today.isoformat()]},
+            format="json",
         )
 
         listed = xyz.client.get("/api/clock/holidays/").json()
@@ -5170,14 +5318,70 @@ class TestHolidayIsolation:
         abc_admin = abc.add_staff(Role.ADMIN, email="second-admin@abc.test")
         use_access_token(intruder, abc.tokens_for(abc_admin).access)
 
+        with tenant_context(xyz.consultancy):
+            theirs = Holiday.objects.create(day=timezone.localdate(), name="Dashain")
+
         added = intruder.post(
-            "/api/clock/holidays/", {"date": "2026-10-21", "name": "Intruder"}, format="json"
+            "/api/clock/holidays/", {"name": "Intruder", "dates": ["2026-10-21"]}, format="json"
         )
         listed = intruder.get("/api/clock/holidays/")
+        removed = intruder.delete(
+            "/api/clock/holidays/", {"ids": [str(theirs.public_id)]}, format="json"
+        )
 
         assert added.status_code == listed.status_code == status.HTTP_401_UNAUTHORIZED
+        assert removed.status_code == status.HTTP_401_UNAUTHORIZED
         with tenant_context(xyz.consultancy):
-            assert not Holiday.objects.exists()
+            assert list(Holiday.objects.values_list("name", flat=True)) == ["Dashain"]
+
+    def test_another_office_cant_remove_a_group(self, make_consultancy: ConsultancyFactory) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        today = timezone.localdate()
+        with tenant_context(abc.consultancy):
+            dashain = Holiday.objects.create(day=today, name="Dashain")
+        with tenant_context(xyz.consultancy):
+            own = Holiday.objects.create(day=today, name="Tihar")
+
+        response = xyz.client.delete(
+            "/api/clock/holidays/",
+            {"ids": [str(own.public_id), str(dashain.public_id)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        with tenant_context(abc.consultancy):
+            assert Holiday.objects.filter(pk=dashain.pk).exists()
+        with tenant_context(xyz.consultancy):
+            assert Holiday.objects.filter(pk=own.pk).exists()
+
+    def test_a_day_taken_in_one_office_is_free_in_another(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        today = timezone.localdate()
+        with tenant_context(abc.consultancy):
+            Holiday.objects.create(day=today, name="Dashain")
+
+        response = xyz.client.post(
+            "/api/clock/holidays/", {"name": "Tihar", "dates": [today.isoformat()]}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        with tenant_context(abc.consultancy):
+            assert list(Holiday.objects.values_list("name", flat=True)) == ["Dashain"]
+
+    def test_a_counsellor_reads_only_their_own_offices_holidays(
+        self, make_consultancy: ConsultancyFactory
+    ) -> None:
+        abc, xyz = self._offices(make_consultancy)
+        with tenant_context(abc.consultancy):
+            Holiday.objects.create(day=timezone.localdate(), name="ABC only")
+        xyz.log_in_as(Role.COUNSELLOR)
+
+        listed = xyz.client.get("/api/clock/holidays/")
+
+        assert listed.status_code == status.HTTP_200_OK
+        assert listed.json() == {"holidays": []}
 
 
 class TestWorkFromHomeIsolation:

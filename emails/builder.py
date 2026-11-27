@@ -15,7 +15,8 @@ from typing import Any
 
 from django.template import Context, Engine
 
-from emails.looks import PLATFORM_ACCENT, readable_accent
+from config.copyright import copyright_line, this_year
+from emails.looks import PRODUCT_ACCENT
 from emails.types import (
     BuiltEmail,
     CentralLogin,
@@ -183,13 +184,10 @@ def _inline_logo(logo: Logo | None) -> InlineImage | None:
 
 def _frame(look: SenderLook) -> dict[str, Any]:
     """The values the frame needs: name, colour, logo and footer."""
-    if isinstance(look, OfficeLook):
-        accent, details = readable_accent(look.accent), look.details
-    else:
-        accent, details = PLATFORM_ACCENT, OfficeDetails()
+    details = look.details if isinstance(look, OfficeLook) else OfficeDetails()
     return {
         "brand": look.name,
-        "accent": accent,
+        "accent": PRODUCT_ACCENT,
         "footer_lines": _footer_lines(details),
         "contact_email": details.contact_email,
         "minutes": CODE_MINUTES,
@@ -200,15 +198,16 @@ def _footer_text(values: dict[str, Any]) -> str:
     reply = "This email comes from an address that can't receive replies."
     if values["contact_email"]:
         reply += f" To answer, write to {values['contact_email']}."
-    return "\n".join([values["brand"], *values["footer_lines"], "", reply])
+    return "\n".join([values["brand"], *values["footer_lines"], "", reply, "", values["copyright"]])
 
 
-def build_email(look: SenderLook, content: EmailContent) -> BuiltEmail:
+def build_email(look: SenderLook, content: EmailContent, *, year: int | None = None) -> BuiltEmail:
     """Return `content` as a finished email in `look`: one-line subject, HTML and plain text.
 
-    Office emails carry the office's name, readable Theme colour, logo (PNG or JPEG only, inside
+    Office emails carry the office's name, logo (PNG or JPEG only, inside
     the email) and Office details, with Reply-To set to the contact email. Platform emails use
-    the product's name and emerald, with no Reply-To.
+    the product's name, with no Reply-To. Every email is in the product's colour, and ends with
+    the copyright line for `year` (this year in Nepal when not given).
     """
     brand = _one_line(look.name)
     body = _KINDS[type(content)](brand, content)
@@ -220,6 +219,7 @@ def build_email(look: SenderLook, content: EmailContent) -> BuiltEmail:
         "subject": _one_line(body.subject),
         "logo_cid": logo.content_id if logo else "",
         "body_template": f"emails/{body.template}.html",
+        "copyright": copyright_line(this_year() if year is None else year),
     }
     text_body = (
         _TEXT.get_template(f"emails/{body.template}.txt")

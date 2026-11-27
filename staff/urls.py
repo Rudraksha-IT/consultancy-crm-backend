@@ -8,6 +8,7 @@ from staff.employee_views import (
     CounsellorChoicesView,
     EmployeeAssignedStudentsView,
     EmployeeDeactivateView,
+    EmployeeInviteBackView,
     EmployeeInviteView,
     EmployeeListView,
     EmployeeView,
@@ -76,6 +77,11 @@ urlpatterns: list[URLPattern] = [
         name="employee-assigned-students",
     ),
     path("staff/<staff:staff_id>/invite/", EmployeeInviteView.as_view(), name="employee-invite"),
+    path(
+        "staff/<staff:staff_id>/invite-back/",
+        EmployeeInviteBackView.as_view(),
+        name="employee-invite-back",
+    ),
     path(
         "staff/<staff:staff_id>/two-factor/",
         EmployeeTwoFactorView.as_view(),

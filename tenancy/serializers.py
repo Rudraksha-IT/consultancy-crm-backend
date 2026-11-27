@@ -25,16 +25,6 @@ from tenancy.models import (
     OFFICE_PHONE_MAX_LENGTH,
     OFFICE_WEBSITE_MAX_LENGTH,
 )
-from tenancy.theme import (
-    AUTO_ACCENT,
-    DARK_BASE_NAMES,
-    DARK_SIDEBAR_MODES,
-    PAGE_NAMES,
-    ThemeConfig,
-    is_dark_accent,
-    is_hex_colour,
-    theme_from_stored,
-)
 from tenancy.types import DateDisplay
 
 if TYPE_CHECKING:
@@ -42,9 +32,6 @@ if TYPE_CHECKING:
 else:  # Not subscriptable at run time.
     Upload = UploadedFile
 
-HEX_COLOUR_MESSAGE = "Enter a colour as # followed by six hex digits, for example #047857."
-DARK_ACCENT_MESSAGE = "Enter auto, or a colour as # followed by six hex digits."
-COLOUR_MAX_INPUT_LENGTH = 20
 DATE_DISPLAY_MESSAGE = "Choose AD or BS."
 CONTACT_EMAIL_MESSAGE = "Enter a real email address, like info@youroffice.com."
 PHONE_MESSAGE = "A phone number can have digits, spaces, + ( ) and -."
@@ -65,47 +52,6 @@ _WEBSITE = re.compile(
     rf"https?://{_LABEL}(?:\.{_LABEL})*\.[a-z]{{2,63}}(?::[0-9]{{1,5}})?(?:[/?#][^\s<>\"'`\\]*)?",
     re.IGNORECASE,
 )
-
-
-class DarkThemeSerializer(serializers.Serializer[None]):
-    """Dark-mode choices: a named near-black background, a sidebar mode, and an accent or auto."""
-
-    base = serializers.ChoiceField(choices=DARK_BASE_NAMES)
-    sidebar = serializers.ChoiceField(choices=DARK_SIDEBAR_MODES)
-    accent = serializers.CharField(max_length=COLOUR_MAX_INPUT_LENGTH, trim_whitespace=False)
-
-    def validate_accent(self, value: str) -> str:
-        """Accept `auto` or a hex colour, stored in lowercase."""
-        if not is_dark_accent(value.lower()):
-            raise serializers.ValidationError(DARK_ACCENT_MESSAGE)
-        return AUTO_ACCENT if value.lower() == AUTO_ACCENT else value.lower()
-
-
-class ThemeSerializer(serializers.Serializer[None]):
-    """A Consultancy's Theme: a named page, hex sidebar and accent, and optional dark settings."""
-
-    page = serializers.ChoiceField(choices=PAGE_NAMES)
-    sidebar = serializers.CharField(max_length=COLOUR_MAX_INPUT_LENGTH, trim_whitespace=False)
-    accent = serializers.CharField(max_length=COLOUR_MAX_INPUT_LENGTH, trim_whitespace=False)
-    dark = DarkThemeSerializer(required=False)
-
-    def validate_sidebar(self, value: str) -> str:
-        """Accept a hex colour, stored in lowercase."""
-        return _hex_colour(value)
-
-    def validate_accent(self, value: str) -> str:
-        """Accept a hex colour, stored in lowercase."""
-        return _hex_colour(value)
-
-    def to_theme(self) -> ThemeConfig:
-        """Return the validated Theme; without dark settings it gets the documented fallback."""
-        return theme_from_stored(self.validated_data)
-
-
-def _hex_colour(value: str) -> str:
-    if not is_hex_colour(value):
-        raise serializers.ValidationError(HEX_COLOUR_MESSAGE)
-    return value.lower()
 
 
 class DateDisplaySerializer(StrictSerializer[None]):

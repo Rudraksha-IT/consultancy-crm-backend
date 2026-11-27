@@ -13,8 +13,7 @@ from rest_framework.views import APIView
 
 from documents.exceptions import DocumentStorageError
 from tenancy.context import get_request_consultancy
-from tenancy.services import get_access, get_logo, get_theme, read_logo
-from tenancy.theme import theme_to_stored
+from tenancy.services import get_access, get_logo, read_logo
 
 NOT_FOUND_MESSAGE = "Not found."
 # The logo can be opened on its own: nothing in it may run, load anything or be framed.
@@ -22,23 +21,22 @@ LOGO_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 
 
 class CurrentConsultancyView(APIView):
-    """Return the name, Theme, logo and Status of the Consultancy that owns the request's host.
+    """Return the name, logo and Status of the Consultancy that owns the request's host.
 
-    Public, so the login screen can show which Consultancy it belongs to, in its colours, and
+    Public, so the login screen can show which Consultancy it belongs to and
     why it can't be used when its Status blocks it.
     """
 
     permission_classes = (AllowAny,)
 
     def get(self, request: Request) -> Response:
-        """Return the current Consultancy's name, Theme, logo (or null) and Status."""
+        """Return the current Consultancy's name, logo (or null) and Status."""
         consultancy = get_request_consultancy(request)
         logo = get_logo(consultancy)
         access = get_access(consultancy)
         return Response(
             {
                 "name": consultancy.name,
-                "theme": theme_to_stored(get_theme(consultancy)),
                 "logo": None if logo is None else asdict(logo),
                 "status": access.status.value,
                 "status_message": access.message,

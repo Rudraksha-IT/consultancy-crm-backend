@@ -129,6 +129,7 @@ class TestList:
             "role": "counsellor",
             "joined_on": "2026-11-01",
             "status": "invited",
+            "invited_back": False,
             "two_factor_required": False,
             "two_factor_set_up": False,
         }

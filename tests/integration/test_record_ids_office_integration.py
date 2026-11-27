@@ -315,11 +315,21 @@ class TestAnswers:
 
     def test_a_new_record_is_answered_by_uuid(self, full: Office) -> None:
         added = full.office.client.post(
-            "/api/clock/holidays/", {"date": "2030-01-01", "name": "New Year"}, format="json"
+            "/api/clock/holidays/", {"name": "New Year", "dates": ["2030-01-01"]}, format="json"
         )
 
         assert added.status_code == status.HTTP_201_CREATED, added.content
-        assert is_uuid(added.json()["id"])
+        assert_no_record_numbers(added.json())
+        assert [is_uuid(holiday["id"]) for holiday in added.json()["holidays"]] == [True]
+
+    def test_a_group_of_holidays_is_never_removed_by_number(self, full: Office) -> None:
+        removed = full.office.client.delete(
+            "/api/clock/holidays/", {"ids": [full.holiday.pk]}, format="json"
+        )
+
+        assert removed.status_code == status.HTTP_400_BAD_REQUEST
+        with tenant_context(full.office.consultancy):
+            assert Holiday.objects.filter(pk=full.holiday.pk).exists()
 
 
 def _changing_addresses(full: Office, key: Callable[[Model], object]) -> list[tuple[str, str]]:
@@ -331,6 +341,7 @@ def _changing_addresses(full: Office, key: Callable[[Model], object]) -> list[tu
         ("post", f"/api/staff/{s}/deactivate/"),
         ("get", f"/api/staff/{s}/assigned-students/"),
         ("post", f"/api/staff/{s}/invite/"),
+        ("post", f"/api/staff/{s}/invite-back/"),
         ("patch", f"/api/staff/{s}/two-factor/"),
         ("post", f"/api/staff/{s}/two-factor/reset/"),
         ("get", f"/api/staff/{s}/progress/?from={THIS_MONTH}-01&to={TODAY.isoformat()}"),

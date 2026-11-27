@@ -352,6 +352,7 @@ LIST_EXPORTS: dict[ExportList, ListExport] = {
         find=lambda query, viewer: find_visas(query.to_filters(), viewer),
         rows=lambda found, _query: _visa_rows(found),
         described=(
+            ("Search", "q", _as_is),
             ("Status", "status", _labels_joined(VisaStatus)),
             ("Country", "country", _labelled(Country)),
             ("Intake", "intake", _intake),

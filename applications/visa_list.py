@@ -1,4 +1,4 @@
-"""The office-wide Visas list (spec 62b): every Visa, filtered and ordered by its appointments.
+"""The office-wide Visas list (spec 62b): every Visa, searched, filtered and ordered by appointment.
 
 Call inside the Consultancy's schema. Who may read it is the views' job, through `access.policy`.
 """
@@ -17,7 +17,7 @@ from applications.models import Visa
 from applications.types import VisaFilterChoices, VisaFilters, VisaSort
 from catalogue.models import University
 from documents.services import checklists_of
-from students.services import assigned_to
+from students.services import assigned_to, student_search
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -36,7 +36,7 @@ _DATE_FIELDS = ("biometrics_at", "medical_at", "interview_at")
 
 
 def find_visas(filters: VisaFilters, viewer: Staff) -> QuerySet[Visa]:
-    """Every Visa matching the filters, in the order asked for.
+    """Every Visa matching the search and filters, in the order asked for.
 
     Each comes with its Student, their counsellor, and its Application's Course and University, so
     a page costs the same few queries however many rows it has. `viewer` is who "my Students" is.
@@ -91,6 +91,7 @@ def _start_of(day: date) -> datetime:
 def _matching(filters: VisaFilters, viewer: Staff) -> Q:
     """Every filter that is set, joined; an empty `Q` matches every Visa."""
     wanted: list[tuple[object, Callable[[], Q]]] = [
+        (filters.query, lambda: _search(filters.query)),
         (filters.statuses, lambda: Q(status__in=filters.statuses)),
         (filters.country, lambda: Q(application__course__university__country=filters.country)),
         (filters.intake, lambda: Q(application__intake=filters.intake)),
@@ -109,6 +110,13 @@ def _matching(filters: VisaFilters, viewer: Staff) -> Q:
         if value:
             match &= condition()
     return match
+
+
+def _search(query: str) -> Q:
+    """The Student's name, email or phone, or the University's name, as on Applications."""
+    return student_search(query, _STUDENT) | Q(
+        application__course__university__name__icontains=query
+    )
 
 
 def _any_booked() -> Q:

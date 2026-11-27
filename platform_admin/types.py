@@ -7,7 +7,6 @@ from uuid import UUID
 from modules.types import Module
 from tenancy.models import SetupState
 from tenancy.status import ConsultancyStatus
-from tenancy.theme import ThemeConfig
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,6 @@ class ConsultancyOnboarding:
 
     name: str
     subdomain: str
-    theme: ThemeConfig
     # Where replies to the office's emails go (ticket 20); checked, never empty.
     contact_email: str
     # The starting Status: Evaluation (14 days), or Active paid up to `paid_until` (spec 13a).
@@ -45,6 +43,5 @@ class ConsultancyOverview:
     evaluation_ends_at: datetime | None
     paid_until: date | None
     modules: list[Module]
-    theme: ThemeConfig
     # Setting up, ready or failed (issue 60); only a ready one can be opened or changed.
     setup_state: SetupState

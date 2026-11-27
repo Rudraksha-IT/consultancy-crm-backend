@@ -123,9 +123,11 @@ def test_existing_office_records_each_get_their_own_uuid(
         for name in model_names:
             model: Any = now.get_model(app, name)
             rows = list(model.objects.order_by("pk").values())
-            assert [{k: v for k, v in row.items() if k != "public_id"} for row in rows] == old_rows[
-                name
-            ]
+            # What each row held before is unchanged. A column added by a later migration (the
+            # Staff member's `invited_back`) is not part of that.
+            old = old_rows[name]
+            assert len(rows) == len(old)
+            assert [{k: row[k] for k in was} for row, was in zip(rows, old, strict=True)] == old
             ids = [row["public_id"] for row in rows]
             assert rows
             assert all(ids)
@@ -169,8 +171,11 @@ def test_existing_platform_records_each_get_their_own_uuid(abc: ConsultancyConte
         executor = MigrationExecutor(connection)
         executor.loader.build_graph()
         executor.migrate(PLATFORM_AFTER)
+        # Read through the models as they were right after the change: later migrations change
+        # these tables again (0013 drops the Consultancy's theme).
+        after_apps = executor.loader.project_state(PLATFORM_AFTER).apps
         for label, old_rows in before.items():
-            model: Any = now.get_model(label)
+            model: Any = after_apps.get_model(label)
             rows = list(model.objects.order_by("pk").values())
             assert [{k: v for k, v in row.items() if k != "public_id"} for row in rows] == old_rows
             ids = [row["public_id"] for row in rows]

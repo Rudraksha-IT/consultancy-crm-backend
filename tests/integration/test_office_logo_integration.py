@@ -462,7 +462,7 @@ class TestLogging:
         assert "secret-plan" not in json_logs.text()
 
 
-def test_the_version_is_stored_beside_the_theme(make_consultancy: ConsultancyFactory) -> None:
+def test_the_version_is_stored_on_the_consultancy(make_consultancy: ConsultancyFactory) -> None:
     """The logo's details live on the Consultancy, in the public schema."""
     abc = make_consultancy("ABC Education", "abcedu")
     abc.log_in_as(Role.ADMIN)

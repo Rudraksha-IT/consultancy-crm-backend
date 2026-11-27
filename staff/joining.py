@@ -61,7 +61,8 @@ def join(email: str, code: str, password: str) -> Staff:
     with transaction.atomic():
         staff.set_password(password)
         staff.status = StaffStatus.ACTIVE
-        staff.save(update_fields=["password", "status"])
+        staff.invited_back = False
+        staff.save(update_fields=["password", "status", "invited_back"])
     logger.info("Employee joined: staff_id=%s", staff.pk)
     return Staff.objects.get(pk=staff.pk)
 

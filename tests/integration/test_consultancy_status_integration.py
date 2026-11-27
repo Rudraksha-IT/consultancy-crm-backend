@@ -20,7 +20,6 @@ from tenancy.exceptions import InvalidStatusChangeError, StatusRecordIsAppendOnl
 from tenancy.models import Consultancy, ConsultancyStatusChange, Domain
 from tenancy.services import change_status, start_active, start_evaluation, terminate
 from tenancy.status import ConsultancyStatus
-from tenancy.theme import DEFAULT_THEME
 from tenancy.types import StatusChange
 from tests.conftest import (
     TEST_PASSWORD,
@@ -773,7 +772,6 @@ class TestServicesGuardThemselves:
         onboarding = ConsultancyOnboarding(
             name="Everest Education",
             subdomain="everest",
-            theme=DEFAULT_THEME,
             contact_email="info@everest.test",
             status=ConsultancyStatus.ACTIVE,
         )

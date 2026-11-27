@@ -74,7 +74,7 @@ class VisaResultNeededError(Exception):
 
 
 class VisaAnsweredError(Exception):
-    """The letter says another result than the Visa already has; that is changed by hand."""
+    """The letter says another result than the Visa already has, which is final."""
 
     def __init__(self, current: str) -> None:
         super().__init__(current)

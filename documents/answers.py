@@ -7,7 +7,7 @@ from uuid import UUID
 from document_examples.answers import examples_answer
 from documents.bin import BinItem
 from documents.bin_answers import bin_answer
-from documents.checklist import Checklist, ChecklistItem
+from documents.checklist import Checklist, ChecklistItem, DocumentState
 from documents.models import Document, DocumentFile, DocumentType
 from documents.requirements import CountryDocuments, uses_of
 from documents.services import Paperwork, StudentChecklist
@@ -177,8 +177,29 @@ def checklist_answer(
     }
 
 
+# Each state as the Documents page names it: the same words as its counts (UI revamp 12).
+_PAPERWORK_STATE: dict[DocumentState, str] = {
+    DocumentState.VERIFIED: "verified",
+    DocumentState.WAITING: "waiting",
+    DocumentState.REJECTED: "rejected",
+    DocumentState.NOT_RECEIVED: "missing",
+}
+
+
+def _paperwork_items(checklist: Checklist) -> list[dict[str, str]]:
+    """Each checklist document by name and state, in checklist order: the ones the counts count.
+
+    "Other documents" (uploads no longer on the checklist) are left out, as in the counts.
+    """
+    return [
+        {"name": item.name, "state": _PAPERWORK_STATE[item.state]}
+        for item in checklist.items
+        if item.is_required
+    ]
+
+
 def paperwork_answer(one: Paperwork) -> dict[str, object]:
-    """One Student on the Documents page, with their counts by state."""
+    """One Student on the Documents page: their counts by state and each checklist document."""
     student = one.student
     counts = one.checklist.counts
     return {
@@ -194,6 +215,7 @@ def paperwork_answer(one: Paperwork) -> dict[str, object]:
         "waiting": counts.waiting,
         "missing": counts.missing,
         "verified": counts.verified,
+        "items": _paperwork_items(one.checklist),
     }
 
 

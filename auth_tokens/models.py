@@ -10,6 +10,8 @@ KIND_MAX_LENGTH = 20
 UNKNOWN_DEVICE_NAME = "Unknown browser on Unknown system"
 # The longest name that can be made ("Samsung Internet on Unknown system"), with room to spare.
 MAX_DEVICE_NAME_LENGTH = 60
+# HMAC-SHA256 of the normalised email, as hex (central_login.directory.email_hash).
+EMAIL_HASH_LENGTH = 64
 
 
 class TokenKind(models.TextChoices):
@@ -49,3 +51,18 @@ class IssuedRefreshToken(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind} {self.person_id}"
+
+
+class WrongPasswordCount(models.Model):
+    """Wrong passwords for one email in the current window (security ticket 01).
+
+    Kept in the schema the login is on (a Consultancy's for Staff, public for Platform Admins),
+    so one office's count never touches another's. Holds the email's keyed hash, never the email.
+    """
+
+    email_hash = models.CharField(max_length=EMAIL_HASH_LENGTH, unique=True)
+    wrong_count = models.PositiveSmallIntegerField(default=0)
+    window_started_at = models.DateTimeField(db_index=True)
+
+    def __str__(self) -> str:
+        return f"Wrong passwords {self.pk}"

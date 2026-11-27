@@ -573,6 +573,46 @@ class TestStudentList:
 
         assert names_in(abc.client.get(STUDENTS_URL)) == ["Third", "Second", "First"]
 
+    def test_lost_students_come_last_whenever_they_were_added(
+        self, abc: ConsultancyContext
+    ) -> None:
+        """Lost Students close the list, newest first among themselves (owner, 2026-11-27)."""
+        abc.log_in_as(Role.ADMIN)
+        make_student(abc, "Old and Lost", stage=Stage.LOST)
+        make_student(abc, "First")
+        make_student(abc, "New and Lost", stage=Stage.LOST)
+        make_student(abc, "Second")
+
+        assert names_in(abc.client.get(STUDENTS_URL)) == [
+            "Second",
+            "First",
+            "New and Lost",
+            "Old and Lost",
+        ]
+
+    def test_lost_students_come_last_across_pages(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        make_student(abc, "Lost one", stage=Stage.LOST)
+        for number in range(STUDENTS_PER_PAGE):
+            make_student(abc, f"Student {number:02d}")
+        make_student(abc, "Lost two", stage=Stage.LOST)
+
+        first = names_in(abc.client.get(STUDENTS_URL))
+        second = names_in(abc.client.get(STUDENTS_URL, {"page": 2}))
+
+        assert not [name for name in first if name.startswith("Lost")]
+        assert second == ["Lost two", "Lost one"]
+
+    def test_the_lost_filter_still_lists_them_newest_first(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        make_student(abc, "Old and Lost", stage=Stage.LOST)
+        make_student(abc, "New and Lost", stage=Stage.LOST)
+        make_student(abc, "Still here")
+
+        response = abc.client.get(STUDENTS_URL, {"stage": "lost"})
+
+        assert names_in(response) == ["New and Lost", "Old and Lost"]
+
     def test_a_row_has_what_the_list_shows(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         counsellor = add_counsellor(abc, "bikash@abc.test")

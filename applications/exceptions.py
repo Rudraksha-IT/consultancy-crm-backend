@@ -37,6 +37,10 @@ class VisaGrantedError(Exception):
     """The Application already has a granted Visa, so no new attempt is needed."""
 
 
+class VisaDecidedError(Exception):
+    """The Visa is Granted or Refused, which is final; a new try is a new Visa."""
+
+
 class VisaNotWaitingError(Exception):
     """The Visa is Granted or Refused, so its appointment dates no longer change."""
 
@@ -54,4 +58,4 @@ class ChoiceLockedError(Exception):
 
 
 class NotChosenOfferError(Exception):
-    """A Visa is applied for, or set back to Applied, only on the Chosen Offer (issue 76)."""
+    """A Visa is applied for only on the Chosen Offer (issue 76)."""

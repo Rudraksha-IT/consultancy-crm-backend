@@ -112,7 +112,7 @@ def demo_logo() -> bytes:
 
 
 def _office(logo: Logo | None) -> OfficeLook:
-    return OfficeLook(name=DEMO_OFFICE, accent="#1d4ed8", logo=logo, details=DETAILS)
+    return OfficeLook(name=DEMO_OFFICE, logo=logo, details=DETAILS)
 
 
 _ONE = DraftContext(first_name="Anjali", sender_name=_COUNSELLOR, office_name=DEMO_OFFICE)

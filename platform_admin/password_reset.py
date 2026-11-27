@@ -13,6 +13,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from auth_tokens.password_tries import clear_wrong_passwords
 from central_login.directory import email_hash
 from codes.emails import send_platform_code_email
 from codes.exceptions import CodeLimitReachedError, InvalidCodeError
@@ -84,6 +85,7 @@ def reset_platform_password(email: str, code: str, new_password: str) -> Platfor
     admin = _use(email, code, consume=True)
     details = PlatformAdminDetails(name=admin.name, email=admin.email)
     saved = save_platform_admin(details, password=new_password, admin=admin, by=admin)
+    clear_wrong_passwords(saved.email)
     logger.info("Platform password reset: platform_admin_id=%s", saved.pk)
     return saved
 

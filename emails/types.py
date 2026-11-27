@@ -28,17 +28,16 @@ class OfficeDetails:
 
 @dataclass(frozen=True)
 class OfficeLook:
-    """An office's email: its name, logo, Theme main colour and Office details."""
+    """An office's email: its name, logo and Office details, in the product's colour."""
 
     name: str
-    accent: str
     logo: Logo | None
     details: OfficeDetails
 
 
 @dataclass(frozen=True)
 class PlatformLook:
-    """A Platform email: the product's name and logo, in emerald."""
+    """A Platform email: the product's name and logo, in the product's colour."""
 
     name: str
     logo: Logo | None
