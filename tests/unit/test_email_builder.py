@@ -468,7 +468,7 @@ class TestDrafts:
 
 
 class TestProductColour:
-    def test_is_the_ivory_burgundy_as_a_strict_hex_colour(self) -> None:
+    def test_is_the_brand_burgundy_as_a_strict_hex_colour(self) -> None:
         assert PRODUCT_ACCENT == "#6e1a26"
         assert re.fullmatch(r"#[0-9a-f]{6}", PRODUCT_ACCENT)
 

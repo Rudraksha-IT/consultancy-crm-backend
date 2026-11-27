@@ -1,4 +1,4 @@
-"""The one colour of every email: the product's burgundy (the Ivory theme's main colour)."""
+"""The one colour of every email: the product's burgundy (the main colour of the app's theme)."""
 
 from __future__ import annotations
 
