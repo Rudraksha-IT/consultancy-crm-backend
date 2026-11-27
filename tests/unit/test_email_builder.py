@@ -489,3 +489,15 @@ def _contrast_with_white(colour: str) -> float:
 def test_code_lifetime_matches_the_codes() -> None:
     """The emails say how long a Code works; the same number the Codes use."""
     assert CODE_LIFETIME.total_seconds() == CODE_MINUTES * 60
+
+
+class TestCopyrightLine:
+    """Every email ends with the copyright line, under the sender's own details."""
+
+    @pytest.mark.parametrize("look", [OFFICE, PLATFORM])
+    def test_ends_every_email_with_it(self, look: OfficeLook | PlatformLook) -> None:
+        email = build_email(look, TestEmail(name="Asha Rai"), year=2028)
+
+        line = "© 2026-2028 Rudraksha Labs. All rights reserved."
+        assert email.text.rstrip().endswith(line)
+        assert line in email.html
