@@ -123,9 +123,11 @@ def test_existing_office_records_each_get_their_own_uuid(
         for name in model_names:
             model: Any = now.get_model(app, name)
             rows = list(model.objects.order_by("pk").values())
-            assert [{k: v for k, v in row.items() if k != "public_id"} for row in rows] == old_rows[
-                name
-            ]
+            # What each row held before is unchanged. A column added by a later migration (the
+            # Staff member's `invited_back`) is not part of that.
+            old = old_rows[name]
+            assert len(rows) == len(old)
+            assert [{k: row[k] for k in was} for row, was in zip(rows, old, strict=True)] == old
             ids = [row["public_id"] for row in rows]
             assert rows
             assert all(ids)
