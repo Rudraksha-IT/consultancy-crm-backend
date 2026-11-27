@@ -226,7 +226,11 @@ class TestSetup:
         assert admin.email in unquote(uri.path)
         assert parse_qs(uri.query)["issuer"] == [DEFAULT_PRODUCT_NAME]
         assert again.status_code == status.HTTP_400_BAD_REQUEST
-        assert again.json()["start_again"] is True
+        assert again.json() == {
+            # "login", the word the rest of the app uses, never "sign-in".
+            "detail": "This login has timed out or was already used. Log in again.",
+            "start_again": True,
+        }
 
     def test_confirm_gives_tokens_and_ten_recovery_codes(
         self, platform_site: PlatformContext
