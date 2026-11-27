@@ -74,7 +74,6 @@ class Consultancy(TenantMixin):  # type: ignore[misc]  # django-tenants is untyp
         max_length=LOGO_CONTENT_TYPE_MAX_LENGTH, blank=True, default=""
     )
     logo_version = models.PositiveIntegerField(default=0)
-    show_name_beside_logo = models.BooleanField(default=True)
     # Office details, printed at the bottom of every email from the office; all optional, but
     # emails to Students need the contact email, where their replies go (ADR 0023). Checked by
     # tenancy.serializers; read them through tenancy.services.get_office_details.

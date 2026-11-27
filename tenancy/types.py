@@ -16,10 +16,9 @@ class DateDisplay(StrEnum):
 
 @dataclass(frozen=True)
 class OfficeLogo:
-    """The office logo as the frontend gets it: where to load it, and whether the name shows."""
+    """The office logo as the frontend gets it; the name always shows beside it."""
 
     url: str
-    show_name: bool
 
 
 @dataclass(frozen=True)
