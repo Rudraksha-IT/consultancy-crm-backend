@@ -102,7 +102,7 @@ class TestAdminUploadsALogo:
         response = upload(abc, file=a_file(content, kind="text/html"))
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"logo": {"url": "/api/consultancy/logo/1/", "show_name": True}}
+        assert response.json() == {"logo": {"url": "/api/consultancy/logo/1/"}}
         served = abc.new_client().get("/api/consultancy/logo/1/")
         assert served.status_code == status.HTTP_200_OK
         assert served["Content-Type"] == content_type
@@ -116,7 +116,7 @@ class TestAdminUploadsALogo:
         abc.log_in_as(Role.ADMIN)
         upload(abc)
 
-        logo = {"url": "/api/consultancy/logo/1/", "show_name": True}
+        logo = {"url": "/api/consultancy/logo/1/"}
         consultancy = abc.client.get(CONTEXT_URL).json()["consultancy"]
         assert (consultancy["name"], consultancy["logo"]) == ("ABC Education", logo)
         assert logo_of(abc) == logo
@@ -289,54 +289,25 @@ class TestRefusedUploads:
         assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
-class TestShowTheNameBesideIt:
-    def test_the_admin_hides_and_shows_the_name(self, make_consultancy: ConsultancyFactory) -> None:
+class TestTheNameAlwaysShows:
+    """The office name always shows beside the logo, with no setting (owner, 2026-11-27)."""
+
+    def test_the_logo_has_no_name_choice(self, make_consultancy: ConsultancyFactory) -> None:
+        abc = make_consultancy("ABC Education", "abcedu")
+        abc.log_in_as(Role.ADMIN)
+
+        assert upload(abc).json() == {"logo": {"url": "/api/consultancy/logo/1/"}}
+        assert logo_of(abc) == {"url": "/api/consultancy/logo/1/"}
+
+    def test_hiding_the_name_is_refused(self, make_consultancy: ConsultancyFactory) -> None:
         abc = make_consultancy("ABC Education", "abcedu")
         abc.log_in_as(Role.ADMIN)
         upload(abc)
-
-        hidden = abc.client.patch(LOGO_URL, {"show_name": False}, format="json")
-
-        assert hidden.status_code == status.HTTP_200_OK
-        assert hidden.json() == {"logo": {"url": "/api/consultancy/logo/1/", "show_name": False}}
-        assert logo_of(abc)["show_name"] is False
-        shown = abc.client.patch(LOGO_URL, {"show_name": True}, format="json")
-        assert shown.json()["logo"]["show_name"] is True
-
-    def test_without_a_logo_there_is_nothing_to_change(
-        self, make_consultancy: ConsultancyFactory
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        abc.log_in_as(Role.ADMIN)
 
         response = abc.client.patch(LOGO_URL, {"show_name": False}, format="json")
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {"detail": "Upload a logo first."}
-
-    @pytest.mark.parametrize(
-        "body",
-        [
-            {},
-            {"show_name": "false"},
-            {"show_name": 0},
-            {"show_name": None},
-            {"show_name": ["x"]},
-            {"show_name": True, "url": "https://evil.test/x.png"},
-        ],
-    )
-    def test_refuses_anything_but_true_or_false(
-        self, make_consultancy: ConsultancyFactory, body: dict[str, object]
-    ) -> None:
-        abc = make_consultancy("ABC Education", "abcedu")
-        abc.log_in_as(Role.ADMIN)
-        upload(abc)
-
-        response = abc.client.patch(LOGO_URL, body, format="json")
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "evil" not in response.content.decode()
-        assert logo_of(abc) == {"url": "/api/consultancy/logo/1/", "show_name": True}
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        assert logo_of(abc) == {"url": "/api/consultancy/logo/1/"}
 
 
 class TestRemoveTheLogo:
@@ -374,7 +345,7 @@ class TestRemoveTheLogo:
 
 class TestWhoMayChangeIt:
     @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])
-    @pytest.mark.parametrize("method", ["post", "patch", "delete"])
+    @pytest.mark.parametrize("method", ["post", "delete"])
     def test_only_an_admin(
         self, make_consultancy: ConsultancyFactory, role: Role, method: str
     ) -> None:
@@ -387,16 +358,14 @@ class TestWhoMayChangeIt:
 
         if method == "post":
             response = upload(abc, file=a_file(JPEG_BYTES))
-        elif method == "patch":
-            response = abc.client.patch(LOGO_URL, {"show_name": False}, format="json")
         else:
             response = abc.client.delete(LOGO_URL)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == ONLY_ADMIN
-        assert logo_of(abc) == {"url": "/api/consultancy/logo/1/", "show_name": True}
+        assert logo_of(abc) == {"url": "/api/consultancy/logo/1/"}
 
-    @pytest.mark.parametrize("method", ["post", "patch", "delete"])
+    @pytest.mark.parametrize("method", ["post", "delete"])
     def test_logged_out_is_refused(self, make_consultancy: ConsultancyFactory, method: str) -> None:
         abc = make_consultancy("ABC Education", "abcedu")
 
@@ -467,10 +436,8 @@ def test_the_version_is_stored_on_the_consultancy(make_consultancy: ConsultancyF
     abc = make_consultancy("ABC Education", "abcedu")
     abc.log_in_as(Role.ADMIN)
     upload(abc)
-    abc.client.patch(LOGO_URL, {"show_name": False}, format="json")
-
     consultancy = refreshed(abc)
 
     assert consultancy.logo_version == 1
     assert consultancy.logo_content_type == "image/png"
-    assert consultancy.show_name_beside_logo is False
+    assert not hasattr(consultancy, "show_name_beside_logo")

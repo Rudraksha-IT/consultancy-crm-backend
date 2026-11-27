@@ -458,10 +458,7 @@ def get_logo(consultancy: Consultancy) -> OfficeLogo | None:
     """Return the office logo the screens and receipts show, or None (the initials show)."""
     if not consultancy.logo_key:
         return None
-    return OfficeLogo(
-        url=LOGO_URL.format(version=consultancy.logo_version),
-        show_name=consultancy.show_name_beside_logo,
-    )
+    return OfficeLogo(url=LOGO_URL.format(version=consultancy.logo_version))
 
 
 def set_logo(consultancy: Consultancy, logo: CheckedLogo) -> OfficeLogo:
@@ -494,22 +491,6 @@ def remove_logo(consultancy: Consultancy) -> None:
     consultancy.logo_content_type = ""
     consultancy.save(update_fields=_LOGO_FIELDS)
     _remove_file(consultancy, old_key)
-
-
-def set_show_name_beside_logo(consultancy: Consultancy, *, show_name: bool) -> OfficeLogo:
-    """Choose whether the office name shows beside its logo.
-
-    Raises:
-        NoLogoError: There is no logo yet.
-    """
-    if not consultancy.logo_key:
-        raise NoLogoError
-    consultancy.show_name_beside_logo = show_name
-    consultancy.save(update_fields=["show_name_beside_logo"])
-    shown = get_logo(consultancy)
-    if shown is None:  # pragma: no cover  # checked above
-        raise NoLogoError
-    return shown
 
 
 def read_logo(consultancy: Consultancy, version: int) -> StoredLogo | None:

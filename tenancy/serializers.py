@@ -10,7 +10,6 @@ from rest_framework import serializers
 
 from config.serializers import StrictSerializer
 from emails.types import OfficeDetails
-from modules.serializers import StrictBooleanField
 from tenancy.logo import (
     CHOOSE_LOGO_MESSAGE,
     LOGO_TOO_BIG_MESSAGE,
@@ -101,16 +100,6 @@ class LogoUploadSerializer(StrictSerializer[None]):
         """Return the checked logo."""
         logo: CheckedLogo = self.validated_data["file"]
         return logo
-
-
-class ShowNameSerializer(StrictSerializer[None]):
-    """Whether the office name shows beside its logo: exactly true or false."""
-
-    show_name = StrictBooleanField()
-
-    def to_show_name(self) -> bool:
-        """Return the choice."""
-        return bool(self.validated_data["show_name"])
 
 
 class OfficeTextField(serializers.Field[str, str, str, Any]):

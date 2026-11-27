@@ -15,24 +15,20 @@ from rest_framework.views import APIView
 from documents.exceptions import DocumentStorageError
 from staff.permissions import IsAdmin
 from tenancy.context import get_request_consultancy
-from tenancy.exceptions import NoLogoError
 from tenancy.serializers import (
     DateDisplaySerializer,
     LogoUploadSerializer,
     OfficeDetailsSerializer,
-    ShowNameSerializer,
 )
 from tenancy.services import (
     remove_logo,
     set_date_display,
     set_logo,
     set_office_details,
-    set_show_name_beside_logo,
 )
 from tenancy.types import OfficeLogo
 
 LOGO_NOT_SAVED_MESSAGE = "The logo couldn't be saved. Try again."
-UPLOAD_A_LOGO_FIRST_MESSAGE = "Upload a logo first."
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +86,12 @@ class OfficeDetailsView(APIView):
 
 
 class OfficeLogoView(APIView):
-    """Configuration → Office logo (spec 99c): upload or change it, show the name, remove it."""
+    """Configuration → Office logo (spec 99c): upload or change it, or remove it."""
 
     permission_classes = (IsAuthenticated, IsAdmin)
 
     def get_parsers(self) -> list[BaseParser]:
-        """A logo is uploaded as a form; the name switch is JSON."""
+        """A logo is uploaded as a form."""
         if self.request.method == "POST":
             return [MultiPartParser()]
         return [JSONParser()]
@@ -115,20 +111,6 @@ class OfficeLogoView(APIView):
         logger.info(
             "Office logo changed: consultancy_id=%s, staff_id=%s", consultancy.pk, request.user.pk
         )
-        return _logo_answer(logo)
-
-    def patch(self, request: Request) -> Response:
-        """Choose whether the office name shows beside the logo."""
-        serializer = ShowNameSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        consultancy = get_request_consultancy(request)
-        try:
-            logo = set_show_name_beside_logo(consultancy, show_name=serializer.to_show_name())
-        except NoLogoError:
-            # expected refusal, answered with its status; the request line logs it
-            return Response(
-                {"detail": UPLOAD_A_LOGO_FIRST_MESSAGE}, status=status.HTTP_400_BAD_REQUEST
-            )
         return _logo_answer(logo)
 
     def delete(self, request: Request) -> Response:
