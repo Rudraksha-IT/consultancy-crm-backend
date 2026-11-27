@@ -84,6 +84,9 @@ class Staff(AbstractBaseUser):
     # Whether the person switched it on themselves in My settings, so may also switch it off; an
     # Admin's or the default's requirement is theirs to keep.
     two_factor_chosen_by_self = models.BooleanField(default=False)
+    # Someone who left and was invited back (UI revamp, ticket 18): cancelling their invite
+    # returns them to Has left instead of removing them. Only ever true while they are invited.
+    invited_back = models.BooleanField(default=False)
     # Raised by every sign-out everywhere; tokens carrying an older value are refused.
     auth_version = models.PositiveIntegerField(default=0)
 

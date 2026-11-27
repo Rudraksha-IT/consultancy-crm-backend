@@ -915,6 +915,8 @@ class TestWeeklyDaysOff:
 
 HOLIDAY_DAY_MESSAGE = "Choose a day such as 2026-11-04."
 HOLIDAY_NAME_MESSAGE = "Give the holiday a name."
+HOLIDAY_DAYS_MESSAGE = "Choose between 1 and 31 days."
+HOLIDAY_IDS_MESSAGE = "Choose between 1 and 31 holidays."
 
 
 class TestHolidays:
@@ -933,16 +935,73 @@ class TestHolidays:
         add_holiday(abc, date(2026, 12, 25), "Christmas")
 
         response = abc.client.post(
-            HOLIDAYS_URL, {"date": "2026-10-21", "name": "  Dashain  "}, format="json"
+            HOLIDAYS_URL, {"name": "  Dashain  ", "dates": ["2026-10-21"]}, format="json"
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        added = response.json()
+        [added] = response.json()["holidays"]
         assert added == {"id": added["id"], "date": "2026-10-21", "name": "Dashain"}
         listed = abc.client.get(HOLIDAYS_URL).json()["holidays"]
         assert [(h["date"], h["name"]) for h in listed] == [
             ("2026-10-21", "Dashain"),
             ("2026-12-25", "Christmas"),
+        ]
+
+    def test_an_admin_adds_a_group_of_days_at_once(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+
+        response = abc.client.post(
+            HOLIDAYS_URL,
+            {"name": "Tihar", "dates": ["2026-11-10", "2026-11-08", "2026-11-12"]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        added = response.json()["holidays"]
+        assert [(h["date"], h["name"]) for h in added] == [
+            ("2026-11-08", "Tihar"),
+            ("2026-11-10", "Tihar"),
+            ("2026-11-12", "Tihar"),
+        ]
+        assert len({h["id"] for h in added}) == len(added)
+        assert holidays(abc) == [
+            (date(2026, 11, 8), "Tihar"),
+            (date(2026, 11, 10), "Tihar"),
+            (date(2026, 11, 12), "Tihar"),
+        ]
+
+    def test_as_many_as_31_days_are_added_at_once(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        days = [f"2026-12-{day:02d}" for day in range(1, 32)]
+
+        response = abc.client.post(HOLIDAYS_URL, {"name": "Winter", "dates": days}, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert len(holidays(abc)) == len(days)
+
+    def test_a_taken_day_refuses_the_whole_group_and_names_each(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        add_holiday(abc, date(2026, 11, 9), "Laxmi Puja")
+        add_holiday(abc, date(2026, 11, 11), "Bhai Tika")
+
+        response = abc.client.post(
+            HOLIDAYS_URL,
+            {"name": "Tihar", "dates": ["2026-11-11", "2026-11-08", "2026-11-09", "2026-11-10"]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == {
+            "dates": [
+                "There is already a holiday on 9 Nov 2026.",
+                "There is already a holiday on 11 Nov 2026.",
+            ]
+        }
+        assert holidays(abc) == [
+            (date(2026, 11, 9), "Laxmi Puja"),
+            (date(2026, 11, 11), "Bhai Tika"),
         ]
 
     def test_last_years_holidays_are_not_listed_but_still_count(
@@ -1025,37 +1084,129 @@ class TestHolidays:
 
         assert abc.client.delete(holiday_url(999)).status_code == status.HTTP_404_NOT_FOUND
 
+    def test_an_admin_removes_a_group_at_once(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        first = add_holiday(abc, date(2026, 11, 8), "Tihar")
+        second = add_holiday(abc, date(2026, 11, 9), "Tihar")
+        add_holiday(abc, date(2026, 10, 21), "Dashain")
+
+        response = abc.client.delete(
+            HOLIDAYS_URL, {"ids": [str(first.public_id), str(second.public_id)]}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert holidays(abc) == [(date(2026, 10, 21), "Dashain")]
+
+    def test_removing_a_group_with_one_that_isnt_there_removes_none(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        tihar = add_holiday(abc, date(2026, 11, 8), "Tihar")
+
+        response = abc.client.delete(
+            HOLIDAYS_URL, {"ids": [str(tihar.public_id), SOME_UUID]}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert holidays(abc) == [(date(2026, 11, 8), "Tihar")]
+
+    @pytest.mark.parametrize(
+        ("body", "errors"),
+        [
+            ({}, {"ids": [HOLIDAY_IDS_MESSAGE]}),
+            ({"ids": []}, {"ids": [HOLIDAY_IDS_MESSAGE]}),
+            ({"ids": None}, {"ids": [HOLIDAY_IDS_MESSAGE]}),
+            ({"ids": SOME_UUID}, {"ids": [HOLIDAY_IDS_MESSAGE]}),
+            ({"ids": {"0": SOME_UUID}}, {"ids": [HOLIDAY_IDS_MESSAGE]}),
+            (
+                {"ids": [f"00000000-0000-4000-8000-{n:012d}" for n in range(32)]},
+                {"ids": [HOLIDAY_IDS_MESSAGE]},
+            ),
+            ({"ids": [SOME_UUID, SOME_UUID]}, {"ids": ["Choose each holiday once."]}),
+            ({"ids": [7]}, {"ids": ["Not a valid id."]}),
+            ({"ids": ["1 OR 1=1"]}, {"ids": ["Not a valid id."]}),
+            ({"ids": [[SOME_UUID]]}, {"ids": ["Not a valid id."]}),
+            ({"ids": [SOME_UUID.upper().replace("-", "")]}, {"ids": ["Not a valid id."]}),
+        ],
+    )
+    def test_removing_a_group_refuses_bad_input_and_removes_nothing(
+        self, abc: ConsultancyContext, body: dict[str, object], errors: dict[str, list[str]]
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        add_holiday(abc, date(2026, 11, 8), "Tihar")
+
+        response = abc.client.delete(HOLIDAYS_URL, body, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == errors
+        assert holidays(abc) == [(date(2026, 11, 8), "Tihar")]
+
+    def test_removing_a_group_refuses_unknown_fields(self, abc: ConsultancyContext) -> None:
+        abc.log_in_as(Role.ADMIN)
+        tihar = add_holiday(abc, date(2026, 11, 8), "Tihar")
+
+        response = abc.client.delete(
+            HOLIDAYS_URL, {"ids": [str(tihar.public_id)], "name": "Tihar"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert holidays(abc) == [(date(2026, 11, 8), "Tihar")]
+
     def test_one_holiday_a_day(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
         add_holiday(abc, date(2026, 10, 21), "Dashain")
 
         response = abc.client.post(
-            HOLIDAYS_URL, {"date": "2026-10-21", "name": "Ghatasthapana"}, format="json"
+            HOLIDAYS_URL, {"name": "Ghatasthapana", "dates": ["2026-10-21"]}, format="json"
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {"date": ["There is already a holiday on that day."]}
+        assert response.json() == {"dates": ["There is already a holiday on 21 Oct 2026."]}
         assert holidays(abc) == [(date(2026, 10, 21), "Dashain")]
 
     @pytest.mark.parametrize(
         ("body", "errors"),
         [
-            ({"date": "21/10/2026", "name": "Dashain"}, {"date": [HOLIDAY_DAY_MESSAGE]}),
-            ({"date": "2026-02-30", "name": "Dashain"}, {"date": [HOLIDAY_DAY_MESSAGE]}),
-            ({"date": 20261021, "name": "Dashain"}, {"date": [HOLIDAY_DAY_MESSAGE]}),
-            ({"date": "1999-10-21", "name": "Dashain"}, {"date": [HOLIDAY_DAY_MESSAGE]}),
-            ({"name": "Dashain"}, {"date": [HOLIDAY_DAY_MESSAGE]}),
-            ({"date": "2026-10-21"}, {"name": [HOLIDAY_NAME_MESSAGE]}),
-            ({"date": "2026-10-21", "name": "   "}, {"name": [HOLIDAY_NAME_MESSAGE]}),
-            ({"date": "2026-10-21", "name": None}, {"name": [HOLIDAY_NAME_MESSAGE]}),
-            ({"date": "2026-10-21", "name": 7}, {"name": [HOLIDAY_NAME_MESSAGE]}),
-            ({"date": "2026-10-21", "name": "D" * 61}, {"name": ["Use at most 60 characters."]}),
+            ({"dates": ["21/10/2026"], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
+            ({"dates": ["2026-02-30"], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
+            ({"dates": [20261021], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
+            ({"dates": ["1999-10-21"], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
+            ({"dates": [None], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
+            ({"dates": [["2026-10-21"]], "name": "Dashain"}, {"dates": [HOLIDAY_DAY_MESSAGE]}),
             (
-                {"date": "2026-10-21", "name": "Dashain\nTika"},
+                {"dates": ["2026-10-21", "<script>alert(1)</script>"], "name": "Dashain"},
+                {"dates": [HOLIDAY_DAY_MESSAGE]},
+            ),
+            ({"name": "Dashain"}, {"dates": [HOLIDAY_DAYS_MESSAGE]}),
+            ({"dates": [], "name": "Dashain"}, {"dates": [HOLIDAY_DAYS_MESSAGE]}),
+            ({"dates": None, "name": "Dashain"}, {"dates": [HOLIDAY_DAYS_MESSAGE]}),
+            ({"dates": "2026-10-21", "name": "Dashain"}, {"dates": [HOLIDAY_DAYS_MESSAGE]}),
+            ({"dates": {"0": "2026-10-21"}, "name": "Dashain"}, {"dates": [HOLIDAY_DAYS_MESSAGE]}),
+            (
+                {
+                    "dates": [f"2026-10-{day:02d}" for day in range(1, 32)] + ["2026-11-01"],
+                    "name": "Dashain",
+                },
+                {"dates": [HOLIDAY_DAYS_MESSAGE]},
+            ),
+            (
+                {"dates": ["2026-10-21", "2026-10-22", "2026-10-21"], "name": "Dashain"},
+                {"dates": ["Choose each day once."]},
+            ),
+            ({"dates": ["2026-10-21"]}, {"name": [HOLIDAY_NAME_MESSAGE]}),
+            ({"dates": ["2026-10-21"], "name": "   "}, {"name": [HOLIDAY_NAME_MESSAGE]}),
+            ({"dates": ["2026-10-21"], "name": None}, {"name": [HOLIDAY_NAME_MESSAGE]}),
+            ({"dates": ["2026-10-21"], "name": 7}, {"name": [HOLIDAY_NAME_MESSAGE]}),
+            (
+                {"dates": ["2026-10-21"], "name": "D" * 61},
+                {"name": ["Use at most 60 characters."]},
+            ),
+            (
+                {"dates": ["2026-10-21"], "name": "Dashain\nTika"},
                 {"name": ["Use letters, numbers and punctuation only."]},
             ),
             (
-                {"date": "2026-10-21", "name": "Dashain\x00"},
+                {"dates": ["2026-10-21"], "name": "Dashain\x00"},
                 {"name": ["Use letters, numbers and punctuation only."]},
             ),
         ],
@@ -1071,12 +1222,19 @@ class TestHolidays:
         assert response.json() == errors
         assert holidays(abc) == []
 
-    def test_unknown_fields_are_refused_and_never_stored(self, abc: ConsultancyContext) -> None:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"dates": ["2026-10-21"], "name": "Dashain", "paid": True},
+            {"date": "2026-10-21", "name": "Dashain"},
+        ],
+    )
+    def test_unknown_fields_are_refused_and_never_stored(
+        self, abc: ConsultancyContext, body: dict[str, object]
+    ) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(
-            HOLIDAYS_URL, {"date": "2026-10-21", "name": "Dashain", "paid": True}, format="json"
-        )
+        response = abc.client.post(HOLIDAYS_URL, body, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert holidays(abc) == []
@@ -1088,7 +1246,7 @@ class TestHolidays:
         abc.log_in_as(Role.ADMIN)
 
         response = abc.client.post(
-            HOLIDAYS_URL, {"date": "2026-10-21", "name": name[:60]}, format="json"
+            HOLIDAYS_URL, {"dates": ["2026-10-21"], "name": name[:60]}, format="json"
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -1097,9 +1255,11 @@ class TestHolidays:
     def test_a_form_body_is_refused(self, abc: ConsultancyContext) -> None:
         abc.log_in_as(Role.ADMIN)
 
-        response = abc.client.post(HOLIDAYS_URL, {"date": "2026-10-21", "name": "Dashain"})
+        added = abc.client.post(HOLIDAYS_URL, {"dates": "2026-10-21", "name": "Dashain"})
+        removed = abc.client.delete(HOLIDAYS_URL, {"ids": SOME_UUID})
 
-        assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert added.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+        assert removed.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
     def test_adding_and_removing_are_logged_without_the_name(
         self, abc: ConsultancyContext, json_logs: JsonLogs
@@ -1107,15 +1267,21 @@ class TestHolidays:
         abc.log_in_as(Role.ADMIN)
 
         added = abc.client.post(
-            HOLIDAYS_URL, {"date": "2026-10-21", "name": "Dashain"}, format="json"
-        ).json()
+            HOLIDAYS_URL,
+            {"dates": ["2026-10-21", "2026-10-22", "2026-10-23"], "name": "Dashain"},
+            format="json",
+        ).json()["holidays"]
         with tenant_context(abc.consultancy):
-            number = Holiday.objects.get(public_id=added["id"]).pk  # logs keep the number
-        abc.client.delete(holiday_url(added["id"]))
+            # logs keep the numbers
+            numbers = [Holiday.objects.get(public_id=h["id"]).pk for h in added]
+        abc.client.delete(holiday_url(added[0]["id"]))
+        abc.client.delete(HOLIDAYS_URL, {"ids": [h["id"] for h in added[1:]]}, format="json")
 
         messages = [entry["message"] for entry in json_logs.entries()]
-        assert f"Holiday added: holiday_id={number}" in messages
-        assert f"Holiday removed: holiday_id={number}" in messages
+        ids = ",".join(str(number) for number in numbers)
+        assert f"Holidays added: holiday_ids={ids}" in messages
+        assert f"Holiday removed: holiday_id={numbers[0]}" in messages
+        assert f"Holidays removed: holiday_ids={numbers[1]},{numbers[2]}" in messages
         assert not any("Dashain" in message for message in messages)
 
 
@@ -1539,6 +1705,7 @@ class TestPlatformAdmin:
         assert visitor.get(TEAM_NOW_URL).status_code == status.HTTP_200_OK
         assert visitor.get(TEAM_URL).status_code == status.HTTP_200_OK
         assert visitor.get(WORKING_DAY_URL).status_code == status.HTTP_200_OK
+        assert visitor.get(HOLIDAYS_URL).status_code == status.HTTP_200_OK
 
     def test_working_day_change_is_under_their_own_name(
         self, abc: ConsultancyContext, platform_site: PlatformContext
@@ -1604,24 +1771,29 @@ class TestExport:
 
 
 MY_ENDPOINTS = [("get", CLOCK_URL), ("post", IN_URL), ("post", OUT_URL), ("get", MONTH_URL)]
+# Read by every Staff member while Clock-in is on (UI revamp, ticket 17).
+EVERYONES_ENDPOINTS = [("get", HOLIDAYS_URL)]
 ADMIN_ENDPOINTS = [
     ("get", TEAM_NOW_URL),
     ("get", TEAM_URL),
     ("get", WORKING_DAY_URL),
     ("put", WORKING_DAY_URL),
-    ("get", HOLIDAYS_URL),
     ("post", HOLIDAYS_URL),
+    ("delete", HOLIDAYS_URL),
     ("delete", holiday_url(SOME_UUID)),
     ("post", clock_out_url(SOME_UUID)),
     ("post", missed_time_url(SOME_UUID)),
 ]
 
 
+ALL_ENDPOINTS = MY_ENDPOINTS + EVERYONES_ENDPOINTS + ADMIN_ENDPOINTS
+
+
 def call(client: APIClient, method: str, url: str) -> _MonkeyPatchedResponse:
     """Call one endpoint with a good body where it takes one."""
     bodies: dict[str, dict[str, object]] = {
         WORKING_DAY_URL: {"minutes": 450},
-        HOLIDAYS_URL: {"date": "2026-10-21", "name": "Dashain"},
+        HOLIDAYS_URL: {"name": "Dashain", "dates": ["2026-10-21"]},
         clock_out_url(SOME_UUID): {"clocked_out_at": "17:00", "reason": "x"},
         missed_time_url(SOME_UUID): {
             "day": "2026-11-04",
@@ -1630,6 +1802,9 @@ def call(client: APIClient, method: str, url: str) -> _MonkeyPatchedResponse:
             "reason": "x",
         },
     }
+    if method == "delete" and url == HOLIDAYS_URL:
+        removed: _MonkeyPatchedResponse = client.delete(url, {"ids": [SOME_UUID]}, format="json")
+        return removed
     if method in {"post", "put"}:
         response: _MonkeyPatchedResponse = getattr(client, method)(
             url, bodies.get(url, {}), format="json"
@@ -1664,14 +1839,39 @@ class TestWhoMay:
         assert response.json() == ONLY_ADMIN
         assert sessions(abc) == []
 
-    @pytest.mark.parametrize(("method", "url"), MY_ENDPOINTS + ADMIN_ENDPOINTS)
+    @pytest.mark.parametrize("role", [Role.COUNSELLOR, Role.FRONT_DESK, Role.TEACHER])
+    def test_a_refused_add_or_remove_changes_no_holiday(
+        self, abc: ConsultancyContext, role: Role
+    ) -> None:
+        tihar = add_holiday(abc, date(2026, 11, 8), "Tihar")
+        abc.log_in_as(role)
+
+        abc.client.post(HOLIDAYS_URL, {"name": "Dashain", "dates": ["2026-10-21"]}, format="json")
+        abc.client.delete(HOLIDAYS_URL, {"ids": [str(tihar.public_id)]}, format="json")
+        abc.client.delete(holiday_url(tihar.public_id))
+
+        assert holidays(abc) == [(date(2026, 11, 8), "Tihar")]
+
+    @pytest.mark.parametrize("role", list(Role))
+    def test_every_role_reads_the_holidays(self, abc: ConsultancyContext, role: Role) -> None:
+        tihar = add_holiday(abc, date(2026, 11, 8), "Tihar")
+        abc.log_in_as(role)
+
+        response = abc.client.get(HOLIDAYS_URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == {
+            "holidays": [{"id": str(tihar.public_id), "date": "2026-11-08", "name": "Tihar"}]
+        }
+
+    @pytest.mark.parametrize(("method", "url"), ALL_ENDPOINTS)
     def test_logged_out_is_refused(self, abc: ConsultancyContext, method: str, url: str) -> None:
         response = call(abc.new_client(), method, url)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     @pytest.mark.parametrize("role", list(Role))
-    @pytest.mark.parametrize(("method", "url"), MY_ENDPOINTS + ADMIN_ENDPOINTS)
+    @pytest.mark.parametrize(("method", "url"), ALL_ENDPOINTS)
     def test_with_clock_in_off_nothing_is_there_for_anyone(
         self, abc: ConsultancyContext, role: Role, method: str, url: str
     ) -> None:
@@ -1708,7 +1908,7 @@ class TestWhoMay:
             ("get", clock_out_url(SOME_UUID)),
             ("delete", missed_time_url(SOME_UUID)),
             ("put", HOLIDAYS_URL),
-            ("delete", HOLIDAYS_URL),
+            ("patch", HOLIDAYS_URL),
             ("get", holiday_url(SOME_UUID)),
             ("put", holiday_url(SOME_UUID)),
         ],

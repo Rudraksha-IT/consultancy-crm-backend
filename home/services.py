@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from django.db.models import Count, F, Q, QuerySet
@@ -63,6 +64,31 @@ def progress_of_students(students: QuerySet[Student]) -> list[StudentProgress]:
     logger.debug("progress built: students=%s", len(rows))
     # sorted() keeps the name order among Students equally far along.
     return sorted(rows, key=lambda row: -row.progress.percent)
+
+
+def progress_by_student(students: Sequence[Student]) -> dict[int, StudentProgress]:
+    """Each of these Students' progress and checklist, by their id, Lost and finished included.
+
+    For the Students board's cards (UI revamp, ticket 08). A fixed number of queries however
+    many Students there are.
+    """
+    ids = [student.pk for student in students]
+    applications = _applications_by_student(ids)
+    visas = _visas_by_student(ids)
+    checklists = checklists_of(ids)
+    return {
+        student.pk: StudentProgress(
+            student,
+            progress_of(
+                Stage(student.stage),
+                applications.get(student.pk, []),
+                visas.get(student.pk, []),
+                student.lost_reason,
+            ),
+            checklists[student.pk],
+        )
+        for student in students
+    }
 
 
 def progress_of_student(student: Student) -> Progress:

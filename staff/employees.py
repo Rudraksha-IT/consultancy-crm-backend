@@ -25,11 +25,14 @@ from staff.services import build_staff, normalize_email
 from staff.types import NewStaff, Office
 from tenancy.models import Consultancy
 from transfer_requests.closing import close_waiting_asked_by
+from two_factor.models import EventKind
+from two_factor.services import forget, record
 
 NOT_YOURSELF_MESSAGE = "You can't change your own Role or account."
 HAS_LEFT_MESSAGE = "This person has left the office."
 NO_INVITE_MESSAGE = "Only someone who hasn't joined yet has an invite."
 CANCEL_INSTEAD_MESSAGE = "Cancel the invite instead."
+ONLY_LEFT_MESSAGE = "Only someone who has left can be invited back."
 
 # Roles that can be an Assigned Counsellor (Admins counsel too, spec 22b).
 COUNSELLING_ROLES = (Role.ADMIN, Role.COUNSELLOR)
@@ -107,8 +110,11 @@ def resend_invite(staff: Staff, office: Office, by: Staff) -> None:
     logger.info("Invite sent again: staff_id=%s, by_staff_id=%s", staff.pk, by.pk)
 
 
-def cancel_invite(staff: Staff, by: Staff) -> None:
-    """Remove someone who hasn't joined yet, with their Codes, so no Code of theirs works.
+def cancel_invite(staff: Staff, by: Staff) -> Staff | None:
+    """End the invite of someone who hasn't joined yet, with their Codes, so none works.
+
+    A new person is removed (None is returned). Someone invited back is never removed: they go
+    back to Has left with their record kept, and are returned.
 
     Raises:
         EmployeeChangeRefusedError: They have no invite (they joined or have left).
@@ -118,8 +124,44 @@ def cancel_invite(staff: Staff, by: Staff) -> None:
     with transaction.atomic():
         OneTimeCode.objects.filter(staff=staff).delete()
         remove_from_directory(staff.email)
-        staff.delete()
-    logger.info("Invite cancelled: staff_id=%s, by_staff_id=%s", staff_id, by.pk)
+        if staff.invited_back:
+            staff.status = StaffStatus.DEACTIVATED
+            staff.invited_back = False
+            staff.save(update_fields=["status", "invited_back"])
+        else:
+            staff.delete()
+    if staff.pk is None:
+        logger.info("Invite cancelled: staff_id=%s, by_staff_id=%s", staff_id, by.pk)
+        return None
+    logger.info("Invite cancelled, back to has left: staff_id=%s, by_staff_id=%s", staff_id, by.pk)
+    return staff
+
+
+def invite_back(staff: Staff, office: Office, by: Staff) -> Staff:
+    """Invite someone who has left to join again: a new Code is emailed and they are invited.
+
+    Their id, Role and every record they are on stay. Their old password stops working (they
+    choose a new one when they join), their two-step login is reset and no login of theirs is
+    left. All or nothing: with no Code sent, they stay as having left.
+
+    Raises:
+        EmployeeChangeRefusedError: They haven't left (they work here or are already invited).
+        CodeLimitReachedError: Too many Codes were sent to them in the last hour.
+    """
+    if staff.status != StaffStatus.DEACTIVATED:
+        raise EmployeeChangeRefusedError(ONLY_LEFT_MESSAGE)
+    with transaction.atomic():
+        staff.status = StaffStatus.INVITED
+        staff.invited_back = True
+        staff.set_unusable_password()
+        staff.save(update_fields=["status", "invited_back", "password"])
+        add_to_directory(staff.email)
+        forget(staff)
+        record(staff, EventKind.RESET, by)
+        sign_out_everywhere(staff)
+        _send_join_code(staff, office)
+    logger.info("Invited back: staff_id=%s, by_staff_id=%s", staff.pk, by.pk)
+    return staff
 
 
 def change_role(staff: Staff, role: Role, consultancy: Consultancy, by: Staff) -> Staff:

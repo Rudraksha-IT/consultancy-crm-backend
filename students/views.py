@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from staff.context import get_request_staff
-from students.answers import student_answer, student_row
+from students.answers import student_answer, student_rows
 from students.permissions import CanUseStudentList
 from students.serializers import NewStudentSerializer, StudentListQuerySerializer
 from students.services import STUDENTS_PER_PAGE, add_student, find_students, page_of
@@ -36,7 +36,7 @@ class StudentListView(APIView):
                 "count": page.paginator.count,
                 "page": page.number,
                 "page_size": STUDENTS_PER_PAGE,
-                "results": [student_row(student) for student in page],
+                "results": student_rows(list(page), with_progress=query.wants_progress()),
             }
         )
 

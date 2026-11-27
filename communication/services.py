@@ -1,6 +1,6 @@
 """Communication's rules: emailing Students through the product's own account (ADR 0023).
 
-Every email is built by the email builder in the office's look (name, logo, Theme colour, Office
+Every email is built by the email builder in the office's look (name, logo, Office
 details) and sent from the no-reply address with Reply-To set to the office's contact email.
 """
 

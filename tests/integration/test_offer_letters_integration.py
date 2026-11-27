@@ -752,51 +752,6 @@ class TestAVisaFollowsTheChosenOffer:
 
         assert response.json() == NOT_CHOSEN
 
-    def test_a_refused_visa_set_back_to_applied_chooses_its_offer_again(
-        self, abc: ConsultancyContext
-    ) -> None:
-        _, student = counselled_student(abc, Stage.OFFER)
-        deakin = with_offer(abc, student)
-        with tenant_context(abc.consultancy):
-            visa = Visa.objects.create(
-                student=student, application=deakin, status=VisaStatus.REFUSED
-            )
-
-        response = abc.client.patch(
-            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
-            {"status": "applied"},
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["chosen_offer_id"] == str(deakin.public_id)
-        [entry] = entries(abc, student, HistoryKind.CHOSEN_OFFER_CHANGED)
-        assert (entry.before, entry.after) == ("", "Deakin University")
-
-    def test_a_visa_set_back_to_applied_for_another_offer_is_refused(
-        self, abc: ConsultancyContext
-    ) -> None:
-        _, student = counselled_student(abc, Stage.OFFER)
-        deakin = with_offer(abc, student, "Deakin University")
-        rmit = with_offer(abc, student, "RMIT University")
-        set_chosen(abc, student, rmit)
-        with tenant_context(abc.consultancy):
-            visa = Visa.objects.create(
-                student=student, application=deakin, status=VisaStatus.REFUSED
-            )
-
-        response = abc.client.patch(
-            f"/api/students/{student.public_id}/visas/{visa.public_id}/",
-            {"status": "applied"},
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == VISA_NOT_CHOSEN
-        assert chosen_of(abc, student) == rmit.pk
-        with tenant_context(abc.consultancy):
-            assert Visa.objects.get().status == VisaStatus.REFUSED
-
     def test_a_granted_visa_keeps_the_chosen_offer(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.VISA)
         deakin = with_offer(abc, student)

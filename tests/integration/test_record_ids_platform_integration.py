@@ -23,7 +23,6 @@ ADMINS_URL = "/api/platform/admins/"
 OFFICE_ADDRESSES = [
     ("status/", "post", {"status": "terminated", "reason": "Contract ended"}),
     ("modules/", "put", {"modules": []}),
-    ("theme/", "put", {"preset": "glacier"}),
     ("support-visits/", "post", {"reason": "Admin asked for help"}),
     ("admins/", "post", {"name": "Sita Sharma", "email": "sita@office.com"}),
     ("retry-setup/", "post", {}),

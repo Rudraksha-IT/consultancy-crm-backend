@@ -10,7 +10,7 @@ import re
 
 from django.core.paginator import Page, Paginator
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Case, Q, QuerySet, Value, When
 from django.db.models.functions import Lower
 
 from staff.actors import stored_staff
@@ -22,6 +22,8 @@ from visits.services import log_first_visit
 STUDENTS_PER_PAGE = 25
 # Phone numbers are stored as digits (and "+"), so a typed "98410-22 33" is searched without them.
 PHONE_SEPARATORS = re.compile(r"[ -]")
+# Sorts Lost Students after everyone else in the list.
+_LOST_LAST = Case(When(stage=Stage.LOST, then=Value(1)), default=Value(0))
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,8 @@ def add_student(details: NewStudent, by: Staff) -> Student:
 def find_students(filters: StudentFilters, viewer: Staff) -> QuerySet[Student]:
     """Every Student matching the search and filters, newest first (or A to Z by name).
 
+    Newest first keeps Lost Students at the end of the list, newest first among themselves, so
+    the people still in progress are never pushed down by them (owner, 2026-11-27).
     `viewer` is who "assigned to me" means.
     """
     students = Student.objects.select_related("assigned_counsellor").filter(
@@ -59,7 +63,7 @@ def find_students(filters: StudentFilters, viewer: Staff) -> QuerySet[Student]:
     )
     if filters.by_name:
         return students.order_by(Lower("name"), "pk")
-    return students.order_by("-created_at", "-pk")
+    return students.order_by(_LOST_LAST, "-created_at", "-pk")
 
 
 def _matching(filters: StudentFilters, viewer: Staff) -> Q:

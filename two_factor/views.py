@@ -34,7 +34,7 @@ from two_factor.services import (
     verify_with_recovery_code,
 )
 
-START_AGAIN_MESSAGE = "This sign-in has timed out or was already used. Log in again."
+START_AGAIN_MESSAGE = "This login has timed out or was already used. Log in again."
 WRONG_NUMBER_MESSAGE = "That number isn't right. Enter the newest number from your app."
 WRONG_RECOVERY_CODE_MESSAGE = "That recovery code isn't right, or it was already used."
 TOO_MANY_NUMBERS_MESSAGE = "Too many wrong numbers. Wait 15 minutes, then try again."

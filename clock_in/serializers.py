@@ -21,7 +21,13 @@ from clock_in.models import (
     WeeklyOff,
 )
 from clock_in.work_from_home import NewDates
-from config.serializers import RecordIdField, StrictCharField, StrictSerializer
+from config.serializers import (
+    NOT_A_RECORD_ID_MESSAGE,
+    RecordIdField,
+    StrictCharField,
+    StrictSerializer,
+    parse_record_id,
+)
 from students.serializers import NOTE_CHARACTERS_MESSAGE, NOTE_CONTROL_CHARACTERS
 
 MONTH_MESSAGE = "Choose a month such as 2026-10."
@@ -35,6 +41,12 @@ START_BEFORE_TODAY_MESSAGE = "The start can't be before today."
 START_TOO_LATE_MESSAGE = "Choose a start within a year."
 END_BEFORE_START_MESSAGE = "The end date must be on or after the start date."
 HOLIDAY_NAME_MESSAGE = "Give the holiday a name."
+# A holiday is added and removed as a group of days: at most a month of them (ticket 17).
+HOLIDAY_GROUP_MAX = 31
+HOLIDAY_DAYS_MESSAGE = f"Choose between 1 and {HOLIDAY_GROUP_MAX} days."
+HOLIDAY_DAYS_ONCE_MESSAGE = "Choose each day once."
+HOLIDAY_IDS_MESSAGE = f"Choose between 1 and {HOLIDAY_GROUP_MAX} holidays."
+HOLIDAY_IDS_ONCE_MESSAGE = "Choose each holiday once."
 ONE_LINE_MESSAGE = "Use letters, numbers and punctuation only."
 # A holiday's name is one line: no control characters at all, line breaks included.
 _ANY_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -339,22 +351,90 @@ class HolidayNameField(StrictCharField):
         return super().to_internal_value(data)
 
 
-# The field below is called `date`, which hides the type inside the class.
-_Day = date
+class HolidayDaysField(serializers.Field[list[date], list[str], list[str], object]):
+    """The days of one holiday: 1 to 31 different days, each YYYY-MM-DD, returned in order.
+
+    One plain message per mistake, never a message per item, so nothing sent is repeated back.
+    """
+
+    default_error_messages = {  # noqa: RUF012  # DRF's own
+        "required": HOLIDAY_DAYS_MESSAGE,
+        "null": HOLIDAY_DAYS_MESSAGE,
+        "count": HOLIDAY_DAYS_MESSAGE,
+        "day": DAY_MESSAGE,
+        "repeated": HOLIDAY_DAYS_ONCE_MESSAGE,
+    }
+
+    def to_internal_value(self, data: object) -> list[date]:
+        """Return the days, or refuse the whole list."""
+        if not isinstance(data, list) or not 1 <= len(data) <= HOLIDAY_GROUP_MAX:
+            self.fail("count")
+        day_field = DayField()
+        try:
+            days = [day_field.to_internal_value(item) for item in data]
+        except serializers.ValidationError:
+            # self.fail raises the field's validation error
+            self.fail("day")
+        if len(set(days)) != len(days):
+            self.fail("repeated")
+        return sorted(days)
+
+    def to_representation(self, value: list[date]) -> list[str]:
+        """The days as text."""
+        return [day.isoformat() for day in value]
+
+
+class HolidayIdsField(serializers.Field[list[UUID], list[str], list[str], object]):
+    """The holidays to remove together: 1 to 31 different record ids (ADR 0027)."""
+
+    default_error_messages = {  # noqa: RUF012  # DRF's own
+        "required": HOLIDAY_IDS_MESSAGE,
+        "null": HOLIDAY_IDS_MESSAGE,
+        "count": HOLIDAY_IDS_MESSAGE,
+        "id": NOT_A_RECORD_ID_MESSAGE,
+        "repeated": HOLIDAY_IDS_ONCE_MESSAGE,
+    }
+
+    def to_internal_value(self, data: object) -> list[UUID]:
+        """Return the ids, or refuse the whole list."""
+        if not isinstance(data, list) or not 1 <= len(data) <= HOLIDAY_GROUP_MAX:
+            self.fail("count")
+        ids = [parse_record_id(item) for item in data]
+        found = [one for one in ids if one is not None]
+        if len(found) != len(ids):
+            self.fail("id")
+        if len(set(found)) != len(found):
+            self.fail("repeated")
+        return found
+
+    def to_representation(self, value: list[UUID]) -> list[str]:
+        """The ids as text."""
+        return [str(one) for one in value]
 
 
 class HolidaySerializer(StrictSerializer[None]):
-    """A new holiday: the day and its name."""
+    """A new holiday: its name and every day of it (UI revamp, ticket 17)."""
 
-    date = DayField()
     name = HolidayNameField()
+    dates = HolidayDaysField()
 
-    def day(self) -> _Day:
-        """The checked day."""
-        day: _Day = self.validated_data["date"]
-        return day
+    def days(self) -> list[date]:
+        """The checked days, in order."""
+        days: list[date] = self.validated_data["dates"]
+        return days
 
     def holiday_name(self) -> str:
         """The checked, trimmed name."""
         name: str = self.validated_data["name"]
         return name
+
+
+class HolidayIdsSerializer(StrictSerializer[None]):
+    """The holidays to remove together."""
+
+    ids = HolidayIdsField()
+
+    def holiday_ids(self) -> list[UUID]:
+        """The checked ids."""
+        ids: list[UUID] = self.validated_data["ids"]
+        return ids

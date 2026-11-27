@@ -13,7 +13,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from auth_tokens.browsers import login_browser
+from auth_tokens.password_tries import PasswordTriesUsedUpError, check_password_try
 from auth_tokens.services import issue_tokens
+from auth_tokens.views import password_tries_used_up
 from staff.context import build_staff_context, get_request_staff
 from staff.models import Staff
 from staff.serializers import LoginSerializer
@@ -40,12 +42,18 @@ class LoginView(APIView):
         """Return `{access, refresh, context}` for valid, active credentials."""
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        staff = authenticate(
-            request._request,
-            email=normalize_email(serializer.validated_data["email"]),
-            password=serializer.validated_data["password"],
-        )
-        if not isinstance(staff, Staff):
+        email = normalize_email(serializer.validated_data["email"])
+        password = serializer.validated_data["password"]
+
+        def check() -> Staff | None:
+            found = authenticate(request._request, email=email, password=password)
+            return found if isinstance(found, Staff) else None
+
+        try:
+            staff = check_password_try(email, check)
+        except PasswordTriesUsedUpError as error:
+            return password_tries_used_up(error)
+        if staff is None:
             logger.info("Staff login failed")
             return Response(
                 {"detail": INVALID_CREDENTIALS_MESSAGE}, status=status.HTTP_400_BAD_REQUEST

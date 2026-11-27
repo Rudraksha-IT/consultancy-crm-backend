@@ -22,12 +22,6 @@ ALWAYS_ON_MODULES = [
     "payments",
     "configuration",
 ]
-DEFAULT_THEME = {
-    "page": "stone",
-    "sidebar": "#ffffff",
-    "accent": "#047857",
-    "dark": {"base": "soft", "sidebar": "darker", "accent": "#047857"},
-}
 
 
 class TestStaffContext:
@@ -76,7 +70,6 @@ class TestStaffContext:
             "modules": ALWAYS_ON_MODULES,
             "date_display": "AD",
             "page_swipe": False,
-            "theme": DEFAULT_THEME,
             "support_access": None,
         }
 

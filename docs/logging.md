@@ -136,6 +136,9 @@ logs with the traceback) and `TRY400` (`logger.exception`, not `logger.error`, i
   replayed", "two-step recovery code refused", "recovery code used", "two-step wrong numbers
   limit reached", "two-step challenge used on the wrong host" and "two-step login switch-on
   refused: no secrets key set".
+- Wrong passwords at login (`auth_tokens/password_tries.py`, security ticket 01): INFO
+  "Password tries used up: scope=staff" or "scope=platform" for each refused try; never the
+  email or the address.
 - Staff two-step login (issue 62; ids only): INFO "Staff password passed; two-step next",
   "two-step login switched on/off by an Admin", "two-step login reset", "two-step login switched
   on/off by themselves", "two-step login switch-off refused, wrong password"; the second step logs

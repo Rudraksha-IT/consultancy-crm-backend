@@ -30,7 +30,6 @@ from platform_admin.setup import CREATE_CONSULTANCY, SubdomainTakenError, start_
 from platform_admin.types import ConsultancyOnboarding
 from staff.models import Role, Staff
 from tenancy.models import Consultancy, ConsultancyStatusChange, Domain, SetupState
-from tenancy.theme import DEFAULT_THEME
 from tests.conftest import (
     PUBLIC_SCHEMA,
     TEST_PASSWORD,
@@ -380,7 +379,6 @@ class TestRefusedInput:
         onboarding = ConsultancyOnboarding(
             name="Everest Education",
             subdomain="everest",
-            theme=DEFAULT_THEME,
             contact_email="info@everest.test",
         )
         with schema_context(PUBLIC_SCHEMA):
@@ -506,14 +504,13 @@ class TestRefusedInput:
 
 
 class TestNothingWorksOnAnOfficeNotReady:
-    """Status, Features, Colours and Open as Platform Admin wait until the office is ready."""
+    """Status, Features and Open as Platform Admin wait until the office is ready."""
 
     @pytest.mark.parametrize(
         ("path", "method", "body"),
         [
             ("status/", "post", {"status": "terminated", "reason": "Left"}),
             ("modules/", "put", {"batches": True}),
-            ("theme/", "put", {"page": "stone", "sidebar": "#ffffff", "accent": "#047857"}),
             ("support-visits/", "post", {"reason": "Help"}),
         ],
     )

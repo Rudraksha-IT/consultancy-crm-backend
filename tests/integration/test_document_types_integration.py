@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from django.utils import timezone
 from django_tenants.utils import tenant_context
 from rest_framework import status
 
@@ -358,10 +359,75 @@ class TestDocumentsPage:
             "waiting": 0,
             "missing": 0,
             "verified": 7,
+            "items": [
+                {"name": "Passport", "state": "rejected"},
+                *({"name": name, "state": "verified"} for name in DEFAULT_TYPES[1:]),
+            ],
         }
         assert body["totals"] == {"rejected": 1, "waiting": 0, "missing": 8, "verified": 15}
         assert (body["count"], body["page"], body["page_size"]) == (3, 1, 25)
         assert str(missing_all.public_id) == body["results"][0]["student"]["id"]
+
+    def test_each_student_lists_their_checklist_documents_by_name_and_state(
+        self, abc: ConsultancyContext
+    ) -> None:
+        """UI revamp 12: a pill per document; Other documents and the Bin never count."""
+        abc.log_in_as(Role.ADMIN)
+        student = make_student(abc, stage=Stage.APPLYING, name="Asha Mixed")
+        make_document(abc, student, "Passport", Verification.REJECTED)
+        make_document(abc, student, "Citizenship", Verification.PENDING)
+        make_document(abc, student, "SEE Marksheet", Verification.VERIFIED)
+        binned = make_document(abc, student, "+2 Transcript", Verification.VERIFIED)
+        with tenant_context(abc.consultancy):
+            binned.binned_at = timezone.now()
+            binned.save(update_fields=["binned_at"])
+            DocumentType.objects.create(name="Gap year letter", needed_by_everyone=False)
+        make_document(abc, student, "Gap year letter", Verification.PENDING)
+
+        row = abc.client.get(PAPERWORK_URL).json()["results"][0]
+
+        assert row["items"] == [
+            {"name": "Passport", "state": "rejected"},
+            {"name": "Citizenship", "state": "waiting"},
+            {"name": "SEE Marksheet", "state": "verified"},
+            *({"name": name, "state": "missing"} for name in DEFAULT_TYPES[3:]),
+        ]
+        states = [item["state"] for item in row["items"]]
+        assert len(states) == row["total"]
+        for state in ("rejected", "waiting", "verified", "missing"):
+            assert states.count(state) == row[state]
+
+    def test_items_follow_the_counsellors_scope_and_the_waiting_filter(
+        self, abc: ConsultancyContext
+    ) -> None:
+        me = named_staff(abc, "Bikash Thapa")
+        log_in(abc, me)
+        mine = make_student(abc, me, Stage.COUNSELLING, name="Asha Mine")
+        make_student(abc, me, Stage.COUNSELLING, name="Bina Nothing")
+        theirs = make_student(abc, named_staff(abc, "Gita Rai"), Stage.VISA, name="Dipa Theirs")
+        make_document(abc, mine, "Passport")
+        make_document(abc, theirs, "Citizenship")
+
+        body = abc.client.get(PAPERWORK_URL, {"scope": "mine", "waiting": "true"}).json()
+
+        assert names_in_order(body) == ["Asha Mine"]
+        assert body["results"][0]["items"] == [
+            {"name": "Passport", "state": "waiting"},
+            *({"name": name, "state": "missing"} for name in DEFAULT_TYPES[1:]),
+        ]
+
+    def test_a_document_name_shaped_like_an_attack_is_sent_as_plain_text(
+        self, abc: ConsultancyContext
+    ) -> None:
+        abc.log_in_as(Role.ADMIN)
+        make_student(abc, stage=Stage.COUNSELLING, name="Asha Plain")
+        with tenant_context(abc.consultancy):
+            DocumentType.objects.create(name=INJECTION_STRINGS[0], needed_by_everyone=True)
+
+        row = abc.client.get(PAPERWORK_URL).json()["results"][0]
+
+        assert row["items"][-1] == {"name": INJECTION_STRINGS[0], "state": "missing"}
+        assert set(row["items"][0]) == {"name", "state"}
 
     def test_home_counts_waiting_as_the_page_does_checklist_documents_only(
         self, abc: ConsultancyContext

@@ -45,6 +45,7 @@ CHOOSE_APPLICATION = {"application": ["Choose an application that has an offer."
 NOT_CHOSEN = {"application": ["A visa can only be applied for on the chosen offer."]}
 VISA_WAITING = {"application": ["This Student already has a visa waiting for an answer."]}
 ALREADY_GRANTED = {"application": ["This application already has a granted visa."]}
+DECIDED = {"detail": "This visa is decided. A new try is a new visa application."}
 ALREADY_AT_STATUS = {"status": ["The visa already has this status."]}
 TOO_MANY = {"detail": f"A Student can have at most {MAX_VISAS_PER_STUDENT} visas."}
 
@@ -396,40 +397,13 @@ class TestChangingTheStatus:
 
         assert stored_visas(abc, student)[0].granted_on is None
 
-    @pytest.mark.parametrize(
-        ("before", "after"),
-        [
-            ("applied", "granted"),
-            ("applied", "refused"),
-            ("granted", "refused"),
-            ("granted", "applied"),
-            ("refused", "applied"),
-            ("refused", "granted"),
-        ],
-    )
-    def test_every_status_can_be_set_by_hand(
-        self, abc: ConsultancyContext, before: str, after: str
-    ) -> None:
+    @pytest.mark.parametrize("after", ["granted", "refused"])
+    def test_a_waiting_visa_is_decided_by_hand(self, abc: ConsultancyContext, after: str) -> None:
         _, student = counselled_student(abc, Stage.VISA)
-        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus(before))
+        visa = make_visa(abc, student, offer_application(abc, student))
 
         assert change(abc, student, visa, status=after).status_code == status.HTTP_200_OK
         assert stored_visas(abc, student)[0].status == after
-
-    def test_back_to_applied_is_refused_while_another_visa_waits(
-        self, abc: ConsultancyContext
-    ) -> None:
-        _, student = counselled_student(abc, Stage.VISA)
-        refused = make_visa(abc, student, offer_application(abc, student), VisaStatus.REFUSED)
-        make_visa(abc, student, offer_application(abc, student, "RMIT"), VisaStatus.APPLIED)
-
-        response = change(abc, student, refused, status="applied")
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.json() == {
-            "status": ["This Student already has a visa waiting for an answer."]
-        }
-        assert stored_visas(abc, student)[0].status == VisaStatus.REFUSED
 
     def test_setting_the_status_it_already_has_is_refused(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.VISA)
@@ -577,6 +551,119 @@ class TestChangingTheStatus:
         assert stored(abc, student).stage == Stage.VISA
 
 
+class TestADecidedVisaIsFinal:
+    """UI revamp ticket 10: Granted and Refused never change; a new try is a new Visa."""
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            ("granted", "refused"),
+            ("granted", "applied"),
+            ("refused", "granted"),
+            ("refused", "applied"),
+            ("granted", "granted"),
+            ("refused", "refused"),
+        ],
+    )
+    def test_every_change_is_refused_and_nothing_changes(
+        self, abc: ConsultancyContext, before: str, after: str
+    ) -> None:
+        _, student = counselled_student(abc, Stage.OFFER)
+        application = offer_application(abc, student)
+        visa = make_visa(abc, student, application, VisaStatus(before))
+
+        response = change(abc, student, visa, status=after)
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.json() == DECIDED
+        [kept] = stored_visas(abc, student)
+        assert kept.status == before
+        assert kept.granted_on is None
+        after_student = stored(abc, student)
+        assert after_student.stage == Stage.OFFER
+        assert after_student.chosen_offer_id == application.pk
+        with tenant_context(abc.consultancy):
+            assert not HistoryEntry.objects.filter(student=student).exists()
+
+    def test_a_visa_decided_through_the_api_is_final_too(self, abc: ConsultancyContext) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        visa = make_visa(abc, student, offer_application(abc, student))
+        change(abc, student, visa, status="refused")
+        with tenant_context(abc.consultancy):
+            entries = HistoryEntry.objects.filter(student=student).count()
+
+        response = change(abc, student, visa, status="granted")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.json() == DECIDED
+        assert stored_visas(abc, student)[0].status == VisaStatus.REFUSED
+        assert stored(abc, student).stage == Stage.OFFER
+        with tenant_context(abc.consultancy):
+            assert HistoryEntry.objects.filter(student=student).count() == entries
+
+    def test_an_admin_is_refused_too(self, abc: ConsultancyContext) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.GRANTED)
+        abc.log_in_as(Role.ADMIN)
+
+        response = change(abc, student, visa, status="applied")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert stored_visas(abc, student)[0].status == VisaStatus.GRANTED
+
+    def test_a_bad_status_is_still_refused_as_bad_input(self, abc: ConsultancyContext) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.GRANTED)
+
+        response = change(abc, student, visa, status="<script>alert(1)</script>")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert stored_visas(abc, student)[0].status == VisaStatus.GRANTED
+
+    def test_someone_who_may_not_change_the_student_is_refused_first(
+        self, abc: ConsultancyContext
+    ) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.GRANTED)
+        log_in(abc, abc.add_staff(Role.COUNSELLOR, email="other@abc.test"))
+
+        response = change(abc, student, visa, status="applied")
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json() == NOT_YOUR_STUDENT
+
+    def test_the_refusal_is_logged_with_ids_only(
+        self, abc: ConsultancyContext, json_logs: JsonLogs
+    ) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.REFUSED)
+
+        change(abc, student, visa, status="granted")
+
+        [line] = json_logs.with_message("Visa status not changed")
+        assert "refused=decided" in line["message"]
+        assert f"visa_id={visa.pk}" in line["message"]
+        assert not json_logs.with_message("Visa status changed")
+        assert "Deakin" not in json_logs.text()
+        assert "Sita" not in json_logs.text()
+
+    def test_a_new_try_after_a_refusal_is_a_new_visa(self, abc: ConsultancyContext) -> None:
+        _, student = counselled_student(abc, Stage.VISA)
+        application = offer_application(abc, student)
+        first = make_visa(abc, student, application)
+        change(abc, student, first, status="refused")
+        abc.client.put(
+            f"/api/students/{student.public_id}/chosen-offer/",
+            {"application": str(application.public_id)},
+            format="json",
+        )
+
+        response = start(abc, student, application=str(application.public_id))
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert [v["status"] for v in response.json()["visas"]] == ["applied", "refused"]
+
+
 class TestTheStageFollows:
     def test_a_visa_applied_for_moves_them_to_visa(self, abc: ConsultancyContext) -> None:
         me = named_staff(abc, "Bikash Thapa")
@@ -590,18 +677,6 @@ class TestTheStageFollows:
         [entry] = stage_entries(abc, student)
         assert (entry.before, entry.after) == ("offer", "visa")
         assert entry.by_name == "Bikash Thapa"
-
-    def test_a_refused_visa_set_back_to_applied_moves_them_to_visa_again(
-        self, abc: ConsultancyContext
-    ) -> None:
-        _, student = counselled_student(abc, Stage.OFFER)
-        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.REFUSED)
-
-        response = change(abc, student, visa, status="applied")
-
-        assert response.json()["stage"] == "visa"
-        [entry] = stage_entries(abc, student)
-        assert entry.detail == "Automatic: Deakin University visa is Applied."
 
     def test_a_granted_visa_keeps_the_student_at_visa(self, abc: ConsultancyContext) -> None:
         _, student = counselled_student(abc, Stage.VISA)
@@ -676,17 +751,6 @@ class TestTheStageFollows:
             ("visa", "offer"),
             ("offer", "visa"),
         ]
-
-    def test_granted_set_back_to_applied_moves_a_student_at_visa_nowhere(
-        self, abc: ConsultancyContext
-    ) -> None:
-        _, student = counselled_student(abc, Stage.VISA)
-        visa = make_visa(abc, student, offer_application(abc, student), VisaStatus.GRANTED)
-
-        response = change(abc, student, visa, status="applied")
-
-        assert response.json()["stage"] == "visa"
-        assert stage_entries(abc, student) == []
 
     @pytest.mark.parametrize("value", ["granted", "refused"])
     def test_a_lost_student_is_never_moved(self, abc: ConsultancyContext, value: str) -> None:

@@ -39,7 +39,6 @@ from platform_admin.views import (
     ConsultancyModulesView,
     ConsultancyRetrySetupView,
     ConsultancyStatusView,
-    ConsultancyThemeView,
     PlatformLoginView,
     PlatformMeView,
     PlatformPasswordView,
@@ -128,11 +127,6 @@ urlpatterns: list[URLPattern | URLResolver] = [
         "consultancies/<consultancy:consultancy_id>/support-visits/",
         SupportVisitStartView.as_view(),
         name="platform-support-visit-start",
-    ),
-    path(
-        "consultancies/<consultancy:consultancy_id>/theme/",
-        ConsultancyThemeView.as_view(),
-        name="platform-consultancy-theme",
     ),
     path("support-visits/", SupportVisitListView.as_view(), name="platform-support-visits"),
 ]

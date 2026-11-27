@@ -25,6 +25,7 @@ from applications.exceptions import (
     SameStatusError,
     TooManyApplicationsError,
     TooManyVisasError,
+    VisaDecidedError,
     VisaGrantedError,
     VisaNotWaitingError,
     VisaWaitingError,
@@ -75,6 +76,7 @@ TOO_MANY_VISAS_MESSAGE = f"A Student can have at most {MAX_VISAS_PER_STUDENT} vi
 VISA_WAITING_MESSAGE = "This Student already has a visa waiting for an answer."
 VISA_GRANTED_MESSAGE = "This application already has a granted visa."
 SAME_VISA_STATUS_MESSAGE = "The visa already has this status."
+VISA_DECIDED_MESSAGE = "This visa is decided. A new try is a new visa application."
 VISA_NOT_WAITING_MESSAGE = "Only a visa waiting for an answer has dates to change."
 WAITING_FOR_OFFER_MESSAGE = "Choose an application waiting for an offer."
 TOO_MANY_DOCUMENTS_MESSAGE = f"A Student can have at most {MAX_DOCUMENTS_PER_STUDENT} documents."
@@ -84,8 +86,7 @@ CHOICE_LOCKED_MESSAGE = (
     "The visa for the chosen offer is waiting for an answer, so the choice can't change now."
 )
 NOT_CHOSEN_MESSAGE = "A visa can only be applied for on the chosen offer."
-VISA_NOT_CHOSEN_MESSAGE = "This visa isn't for the chosen offer."
-VISA_ANSWERED_MESSAGE = "This visa is already {status}. To change it, set its status by hand."
+VISA_ANSWERED_MESSAGE = "This visa is already {status}. A new try is a new visa application."
 
 
 def _workable_student(request: Request, student_id: UUID) -> Student:
@@ -282,15 +283,12 @@ class VisaView(_ApplicationView):
             )
         except Visa.DoesNotExist as error:
             raise NotFound from error
+        except VisaDecidedError:
+            # expected refusal, answered with its status; the service logs it
+            return Response({"detail": VISA_DECIDED_MESSAGE}, status=status.HTTP_409_CONFLICT)
         except SameStatusError:
             # expected refusal, answered with its status; the request line logs it
             return _refused("status", SAME_VISA_STATUS_MESSAGE)
-        except VisaWaitingError:
-            # expected refusal, answered with its status; the request line logs it
-            return _refused("status", VISA_WAITING_MESSAGE)
-        except NotChosenOfferError:
-            # expected refusal, answered with its status; the request line logs it
-            return _refused("status", VISA_NOT_CHOSEN_MESSAGE)
         return _profile(request, student_id)
 
 

@@ -15,6 +15,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
+from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
@@ -220,7 +221,11 @@ def set_working_day(minutes: int, by: Staff) -> None:
 
 
 class HolidayTakenError(Exception):
-    """There is already a holiday on that day."""
+    """There is already a holiday on one or more of the days; `days` says which, in order."""
+
+    def __init__(self, days: list[date]) -> None:
+        super().__init__("There is already a holiday on a chosen day.")
+        self.days = days
 
 
 def holidays_between(first: date, last: date) -> dict[date, str]:
@@ -230,24 +235,32 @@ def holidays_between(first: date, last: date) -> dict[date, str]:
 
 
 def listed_holidays() -> QuerySet[Holiday]:
-    """The holidays shown in Configuration: this year's and later ones, by day."""
+    """The holidays shown to Staff: this year's and later ones, by day."""
     first = date(timezone.localdate().year, 1, 1)
     return Holiday.objects.filter(day__gte=first).order_by("day")
 
 
-def add_holiday(day: date, name: str) -> Holiday:
-    """Add a holiday (already checked).
+def _taken(days: list[date]) -> list[date]:
+    return list(Holiday.objects.filter(day__in=days).order_by("day").values_list("day", flat=True))
+
+
+def add_holidays(days: list[date], name: str) -> list[Holiday]:
+    """Add one holiday on every one of `days` (already checked), all of them or none.
 
     Raises:
-        HolidayTakenError: There is already one on that day.
+        HolidayTakenError: There is already a holiday on one or more of the days.
     """
+    taken = _taken(days)
+    if taken:
+        raise HolidayTakenError(taken)
     try:
         with transaction.atomic():
-            holiday = Holiday.objects.create(day=day, name=name)
+            added = Holiday.objects.bulk_create(Holiday(day=day, name=name) for day in days)
     except IntegrityError as error:
-        raise HolidayTakenError from error
-    logger.info("Holiday added: holiday_id=%s", holiday.pk)
-    return holiday
+        # someone else took a day in between; none of ours was kept
+        raise HolidayTakenError(_taken(days)) from error
+    logger.info("Holidays added: holiday_ids=%s", ",".join(str(h.pk) for h in added))
+    return added
 
 
 def remove_holiday(holiday_id: int) -> None:
@@ -260,6 +273,25 @@ def remove_holiday(holiday_id: int) -> None:
     if not deleted:
         raise Holiday.DoesNotExist
     logger.info("Holiday removed: holiday_id=%s", holiday_id)
+
+
+def remove_holidays(public_ids: list[UUID]) -> None:
+    """Remove a group of holidays together, all of them or none.
+
+    Raises:
+        Holiday.DoesNotExist: One or more of them isn't here.
+    """
+    with transaction.atomic():
+        found = list(
+            Holiday.objects.select_for_update()
+            .filter(public_id__in=public_ids)
+            .order_by("day")
+            .values_list("pk", flat=True)
+        )
+        if len(found) != len(public_ids):
+            raise Holiday.DoesNotExist
+        Holiday.objects.filter(pk__in=found).delete()
+    logger.info("Holidays removed: holiday_ids=%s", ",".join(str(pk) for pk in found))
 
 
 # --- Clocking in and out -----------------------------------------------------------------------
