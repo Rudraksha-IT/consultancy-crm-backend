@@ -414,7 +414,7 @@ class TestOfficeLogoIsolation:
         assert key.startswith("abcedu/office-logo/")
         assert abc.new_client().get("/api/consultancy/").json()["logo"] is not None
 
-    @pytest.mark.parametrize("method", ["post", "patch", "delete"])
+    @pytest.mark.parametrize("method", ["post", "delete"])
     def test_an_admins_token_cannot_change_another_offices_logo(
         self, make_consultancy: ConsultancyFactory, method: str
     ) -> None:
@@ -427,15 +427,12 @@ class TestOfficeLogoIsolation:
 
         if method == "post":
             response = intruder.post(LOGO_URL, _logo_upload(LOGO_JPEG), format="multipart")
-        elif method == "patch":
-            response = intruder.patch(LOGO_URL, {"show_name": False}, format="json")
         else:
             response = intruder.delete(LOGO_URL)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert xyz.new_client().get("/api/consultancy/").json()["logo"] == {
             "url": "/api/consultancy/logo/1/",
-            "show_name": True,
         }
         assert xyz.new_client().get("/api/consultancy/logo/1/").content == LOGO_PNG
 
